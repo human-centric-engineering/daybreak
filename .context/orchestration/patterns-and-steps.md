@@ -1,6 +1,6 @@
 # Patterns and steps
 
-This document is the cohesive reference for how Sunrise relates the **21 Agentic Design Patterns** to its **15 workflow step types**. Read it once before authoring a new template or extending the step registry — it makes a small but important distinction explicit so the codebase stays internally consistent.
+This document is the cohesive reference for how Sunrise relates the **21 Agentic Design Patterns** to its **17 workflow step types**. Read it once before authoring a new template or extending the step registry — it makes a small but important distinction explicit so the codebase stays internally consistent.
 
 ## The layered model
 
@@ -88,7 +88,7 @@ Both belong to pattern 19. They differ on **scope** and **lineage**:
 
 Rule of thumb: use `evaluate` to gate a step's output (e.g. "is this draft good enough to proceed"); use `supervisor` for an honest cross-step audit at the end of a workflow that needs to defend its own quality.
 
-**Coverage assessment.** All 21 patterns are implementable with the current 16 step primitives (15 + `supervisor`). Patterns 1–7, 13–14, 18–19 have multiple worked-example templates. Patterns 8, 10, 11, 15, 16 are supported but have only one (or zero) dedicated templates. Patterns 9, 12, 17, 20, 21 are implementable but live more at the workflow-design / prompting layer than the step layer — they don't need a dedicated step type, and templates can demonstrate them by composing existing primitives.
+**Coverage assessment.** All 21 patterns are implementable with the current 17 step primitives (15 + `supervisor` + `report`). Patterns 1–7, 13–14, 18–19 have multiple worked-example templates. Patterns 8, 10, 11, 15, 16 are supported but have only one (or zero) dedicated templates. Patterns 9, 12, 17, 20, 21 are implementable but live more at the workflow-design / prompting layer than the step layer — they don't need a dedicated step type, and templates can demonstrate them by composing existing primitives.
 
 If a future requirement reveals a pattern that genuinely cannot be expressed with current steps, that's a signal to add a new step type — not to twist the existing ones. Document the gap here first; ship the new step second.
 
@@ -126,7 +126,7 @@ The 21 are fixed (sourced from the book). Don't extend the canonical list.
 
 - `types/orchestration.ts` — `KNOWN_PATTERNS`, `KnownPattern`, `WorkflowTemplatePattern`, `isValidPatternReference()`
 - `prisma/seeds/data/chunks/chunks.json` — canonical pattern seed data
-- `lib/orchestration/engine/step-registry.ts` — the 16 step types
+- `lib/orchestration/engine/step-registry.ts` — the 17 step types
 - `lib/orchestration/engine/executors/supervisor.ts` — the supervisor step executor (thin wrapper around the shared core)
 - `lib/orchestration/supervisor/index.ts` — shared anti-optimism core: prompt scaffolding, citation validator, verdict downgrade
 - `app/api/v1/admin/orchestration/executions/[id]/review/route.ts` — retroactive supervisor review endpoint

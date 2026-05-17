@@ -102,9 +102,9 @@ interface StepRegistryEntry {
 
 Each entry carries an `estimatedDuration` hint displayed in the palette below the description (e.g. `"~2-5s"`, `"varies"`, `"manual"`).
 
-`relatedPatterns` lists the canonical Agentic Design Pattern numbers (1–21) the step is most strongly associated with. The relationship is many-to-many — see `.context/orchestration/patterns-and-steps.md`. An empty array (`external_call`, `send_notification`) is the truthful answer when no canonical pattern fits, and the palette renders no "Learn more" link in that case.
+`relatedPatterns` lists the canonical Agentic Design Pattern numbers (1–21) the step is most strongly associated with. The relationship is many-to-many — see `.context/orchestration/patterns-and-steps.md`. An empty array (`external_call`, `send_notification`, `report`) is the truthful answer when no canonical pattern fits, and the palette renders no "Learn more" link in that case.
 
-**Sixteen entries:**
+**Seventeen entries:**
 
 | Type                | Label             | Category      | Outputs | Related patterns |
 | ------------------- | ----------------- | ------------- | ------- | ---------------- |
@@ -124,6 +124,7 @@ Each entry carries an `estimatedDuration` hint displayed in the palette below th
 | `send_notification` | Send Notification | output        | 1       | —                |
 | `orchestrator`      | Orchestrator      | orchestration | 1       | 6, 7             |
 | `supervisor`        | Supervisor        | decision      | 1       | 19               |
+| `report`            | Report            | output        | 1       | —                |
 
 ### Supervisor step
 

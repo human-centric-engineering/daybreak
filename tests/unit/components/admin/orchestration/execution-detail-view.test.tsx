@@ -130,7 +130,11 @@ describe('ExecutionDetailView', () => {
         <ExecutionDetailView execution={makeExecution({ budgetLimitUsd: null })} trace={[]} />
       );
 
-      expect(screen.getByText('—')).toBeInTheDocument();
+      // Multiple summary cards render an em-dash when their value is null
+      // (Budget, Supervisor when no verdict yet, Duration). Scope to the
+      // count rather than getByText, which would throw on the duplicate.
+      const dashes = screen.getAllByText('—');
+      expect(dashes.length).toBeGreaterThan(0);
     });
   });
 

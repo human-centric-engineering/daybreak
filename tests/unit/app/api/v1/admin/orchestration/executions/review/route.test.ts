@@ -264,6 +264,126 @@ describe('POST /api/v1/admin/orchestration/executions/:id/review', () => {
     });
   });
 
+  it('returns 400 on an invalid CUID id', async () => {
+    const req = new NextRequest(
+      'http://localhost:3000/api/v1/admin/orchestration/executions/not-a-cuid/review',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
+    );
+    const ctx = { params: Promise.resolve({ id: 'not-a-cuid' }) };
+    const res = await POST(req, ctx);
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when the body fails Zod validation', async () => {
+    vi.mocked(prisma.aiWorkflowExecution.findUnique).mockResolvedValue(happyExecution() as never);
+    const req = new NextRequest(
+      `http://localhost:3000/api/v1/admin/orchestration/executions/${EXEC_ID}/review`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ minWeaknesses: -5 }), // below min:0
+      }
+    );
+    const res = await POST(req, makeContext());
+    expect(res.status).toBe(400);
+  });
+
+  it('returns 400 when modelOverride references a model not in the registry', async () => {
+    vi.mocked(prisma.aiWorkflowExecution.findUnique).mockResolvedValue(happyExecution() as never);
+    vi.mocked(getModel).mockReturnValue(undefined as never);
+    const res = await POST(makeRequest({ modelOverride: 'unknown-model' }), makeContext());
+    expect(res.status).toBe(400);
+  });
+
+  it('invokes the llmCall shim during runSupervisorAssessment and bills cost', async () => {
+    // Drive the inner `llmCall` closure: the shim is constructed in the
+    // route and passed to runSupervisorAssessment. Coverage on the shim
+    // requires that the assessment actually invokes it. We do that by
+    // mocking runSupervisorAssessment to call the shim once before
+    // returning a canned report.
+    const { logCost } = await import('@/lib/orchestration/llm/cost-tracker');
+    vi.mocked(prisma.aiWorkflowExecution.findUnique).mockResolvedValue(happyExecution() as never);
+    vi.mocked(prisma.aiWorkflowExecution.update).mockResolvedValue({} as never);
+    vi.mocked(runSupervisorAssessment).mockImplementation(async (params) => {
+      await params.llmCall('test prompt', { temperature: 0.2 });
+      return happyAssessment() as never;
+    });
+
+    const res = await POST(makeRequest(), makeContext());
+    expect(res.status).toBe(200);
+    // Provider chat was invoked
+    const provider = await vi.mocked(getProvider).mock.results[0].value;
+    expect((provider as { chat: ReturnType<typeof vi.fn> }).chat).toHaveBeenCalled();
+    // Cost log fired
+    expect(logCost).toHaveBeenCalledWith(
+      expect.objectContaining({
+        workflowExecutionId: EXEC_ID,
+        operation: 'evaluation',
+        metadata: { phase: 'retroactive_supervisor' },
+      })
+    );
+  });
+
+  it('swallows logCost rejections without breaking the response', async () => {
+    // Cost-tracking failures must not bubble — the supervisor's job is
+    // to add signal, not to gate the workflow on accounting hiccups.
+    const { logCost } = await import('@/lib/orchestration/llm/cost-tracker');
+    vi.mocked(prisma.aiWorkflowExecution.findUnique).mockResolvedValue(happyExecution() as never);
+    vi.mocked(prisma.aiWorkflowExecution.update).mockResolvedValue({} as never);
+    vi.mocked(logCost).mockRejectedValueOnce(new Error('cost log went boom'));
+    vi.mocked(runSupervisorAssessment).mockImplementation(async (params) => {
+      await params.llmCall('p', { temperature: 0.2 });
+      // Allow the unawaited logCost promise's rejection to settle.
+      await new Promise((r) => setTimeout(r, 5));
+      return happyAssessment() as never;
+    });
+    const res = await POST(makeRequest(), makeContext());
+    expect(res.status).toBe(200);
+  });
+
+  it('archives prior verdict with sane defaults when the prior record is partial', async () => {
+    // Covers the `priorReport.score` typeof guard and the
+    // `supervisorReviewedAt?.toISOString() ?? new Date(0).toISOString()`
+    // fallback (the older row has no reviewedAt yet).
+    vi.mocked(prisma.aiWorkflowExecution.findUnique).mockResolvedValue({
+      ...happyExecution(),
+      supervisorVerdict: 'concerns',
+      supervisorScore: null, // typeof 'score' will be non-number → null fallback
+      supervisorReviewedAt: null,
+      supervisorReport: {
+        verdict: 'concerns',
+        score: 'not-a-number', // intentionally bogus to exercise the guard
+        summary: 'older',
+        strengths: [],
+        weaknesses: [],
+        anomalies: [],
+        unverifiedAreas: [],
+        confidence: 'medium',
+        // no triggeredBy → uses default 'in_workflow'
+      },
+    } as never);
+    vi.mocked(prisma.aiWorkflowExecution.update).mockResolvedValue({} as never);
+
+    const res = await POST(makeRequest(), makeContext());
+    expect(res.status).toBe(200);
+    const call = vi.mocked(prisma.aiWorkflowExecution.update).mock.calls[0][0];
+    const reportWritten = call.data.supervisorReport as {
+      previousVerdicts: Array<{
+        verdict: string;
+        score: number | null;
+        triggeredBy: string;
+        reviewedAt: string;
+      }>;
+    };
+    expect(reportWritten.previousVerdicts).toHaveLength(1);
+    expect(reportWritten.previousVerdicts[0]).toMatchObject({
+      verdict: 'concerns',
+      score: null,
+      triggeredBy: 'in_workflow',
+    });
+    expect(reportWritten.previousVerdicts[0].reviewedAt).toBe(new Date(0).toISOString());
+  });
+
   it('passes triggeredBy=retroactive to runSupervisorAssessment', async () => {
     vi.mocked(prisma.aiWorkflowExecution.findUnique).mockResolvedValue(happyExecution() as never);
     vi.mocked(prisma.aiWorkflowExecution.update).mockResolvedValue({} as never);
