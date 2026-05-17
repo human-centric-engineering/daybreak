@@ -204,7 +204,10 @@ export function ExecutionInputDialog({
                   className="flex cursor-pointer items-center gap-2 text-sm font-medium"
                 >
                   Run neutral supervisor review
-                  <FieldHelp title="Neutral supervisor review">
+                  <FieldHelp
+                    title="Neutral supervisor review"
+                    contentClassName="w-96 max-h-80 overflow-y-auto"
+                  >
                     This workflow includes a <code>supervisor</code> step — an independent judge
                     model that audits the execution after it completes and produces an
                     evidence-cited verdict. Adds one judge-model LLM call to the run. Uncheck to
@@ -233,7 +236,10 @@ export function ExecutionInputDialog({
                   className="flex cursor-pointer items-center gap-2 text-sm font-medium"
                 >
                   Generate execution report
-                  <FieldHelp title="Execution report">
+                  <FieldHelp
+                    title="Execution report"
+                    contentClassName="w-96 max-h-80 overflow-y-auto"
+                  >
                     This workflow includes a <code>report</code> step — a deterministic Markdown
                     render of every step in the execution. No LLM cost. The download button on the
                     execution detail page works regardless. Sets{' '}

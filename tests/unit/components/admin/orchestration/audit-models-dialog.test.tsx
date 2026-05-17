@@ -163,8 +163,11 @@ describe('AuditModelsDialog', () => {
     it('all model checkboxes are checked by default', () => {
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
-      const checkboxes = screen.getAllByRole('checkbox');
-      for (const checkbox of checkboxes) {
+      // Scope to model checkboxes only — the supervisor + report toggles
+      // also appear as checkboxes in the dialog but ship unchecked by
+      // design (operator opts in).
+      const modelCheckboxes = screen.getAllByRole('checkbox', { name: /select .* for audit/i });
+      for (const checkbox of modelCheckboxes) {
         expect(checkbox).toBeChecked();
       }
     });
@@ -357,7 +360,7 @@ describe('AuditModelsDialog', () => {
       expect(screen.getByRole('button', { name: /^select all$/i })).toBeInTheDocument();
     });
 
-    it('clicking "Select all" re-checks all visible checkboxes', async () => {
+    it('clicking "Select all" re-checks all visible model checkboxes', async () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
@@ -365,8 +368,9 @@ describe('AuditModelsDialog', () => {
       await user.click(screen.getByRole('button', { name: /deselect all/i }));
       await user.click(screen.getByRole('button', { name: /^select all$/i }));
 
-      const checkboxes = screen.getAllByRole('checkbox');
-      for (const checkbox of checkboxes) {
+      // Scope to model checkboxes — supervisor/report toggles are independent.
+      const modelCheckboxes = screen.getAllByRole('checkbox', { name: /select .* for audit/i });
+      for (const checkbox of modelCheckboxes) {
         expect(checkbox).toBeChecked();
       }
     });
@@ -547,7 +551,10 @@ describe('AuditModelsDialog', () => {
       );
     });
 
-    it('defaults __runSupervisor=true in the submitted inputData', async () => {
+    it('defaults __runSupervisor=false in the submitted inputData (opt-in)', async () => {
+      // The audit dialog is the most common trigger; defaulting to OFF
+      // keeps the cost surface predictable. Operators who want the
+      // honest verdict opt in by ticking the box.
       const { apiClient } = await import('@/lib/api/client');
       vi.mocked(apiClient.get).mockResolvedValue([
         { id: 'wf-123', slug: 'tpl-provider-model-audit' },
@@ -560,38 +567,16 @@ describe('AuditModelsDialog', () => {
       const body = JSON.parse(init.body as string) as {
         inputData: { __runSupervisor: boolean };
       };
-      expect(body.inputData.__runSupervisor).toBe(true);
+      expect(body.inputData.__runSupervisor).toBe(false);
     });
 
-    it('defaults __generateReport=true in the submitted inputData', async () => {
+    it('defaults __generateReport=false in the submitted inputData (opt-in)', async () => {
       const { apiClient } = await import('@/lib/api/client');
       vi.mocked(apiClient.get).mockResolvedValue([
         { id: 'wf-123', slug: 'tpl-provider-model-audit' },
       ]);
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
-      await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
-      await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-      const body = JSON.parse(init.body as string) as {
-        inputData: { __generateReport: boolean };
-      };
-      expect(body.inputData.__generateReport).toBe(true);
-    });
-
-    it('unchecking "Generate execution report" sets __generateReport=false on submit', async () => {
-      const { apiClient } = await import('@/lib/api/client');
-      vi.mocked(apiClient.get).mockResolvedValue([
-        { id: 'wf-123', slug: 'tpl-provider-model-audit' },
-      ]);
-      const user = userEvent.setup();
-      render(<AuditModelsDialog {...DEFAULT_PROPS} />);
-      const reportCheckbox = screen.getByRole('checkbox', {
-        name: /generate execution report/i,
-      });
-      expect(reportCheckbox).toBeChecked();
-      await user.click(reportCheckbox);
-      expect(reportCheckbox).not.toBeChecked();
       await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
       await waitFor(() => expect(fetchMock).toHaveBeenCalled());
       const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -601,7 +586,30 @@ describe('AuditModelsDialog', () => {
       expect(body.inputData.__generateReport).toBe(false);
     });
 
-    it('unchecking "Run neutral supervisor review" sets __runSupervisor=false on submit', async () => {
+    it('checking "Generate execution report" sets __generateReport=true on submit', async () => {
+      const { apiClient } = await import('@/lib/api/client');
+      vi.mocked(apiClient.get).mockResolvedValue([
+        { id: 'wf-123', slug: 'tpl-provider-model-audit' },
+      ]);
+      const user = userEvent.setup();
+      render(<AuditModelsDialog {...DEFAULT_PROPS} />);
+      const reportCheckbox = screen.getByRole('checkbox', {
+        name: /generate execution report/i,
+      });
+      // Starts unchecked (opt-in)
+      expect(reportCheckbox).not.toBeChecked();
+      await user.click(reportCheckbox);
+      expect(reportCheckbox).toBeChecked();
+      await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+      const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+      const body = JSON.parse(init.body as string) as {
+        inputData: { __generateReport: boolean };
+      };
+      expect(body.inputData.__generateReport).toBe(true);
+    });
+
+    it('checking "Run neutral supervisor review" sets __runSupervisor=true on submit', async () => {
       const { apiClient } = await import('@/lib/api/client');
       vi.mocked(apiClient.get).mockResolvedValue([
         { id: 'wf-123', slug: 'tpl-provider-model-audit' },
@@ -609,13 +617,13 @@ describe('AuditModelsDialog', () => {
       const user = userEvent.setup();
       render(<AuditModelsDialog {...DEFAULT_PROPS} />);
 
-      // Untick the supervisor checkbox before submitting.
+      // Tick the supervisor checkbox before submitting (opt-in default).
       const supervisorCheckbox = screen.getByRole('checkbox', {
         name: /run neutral supervisor review/i,
       });
-      expect(supervisorCheckbox).toBeChecked();
-      await user.click(supervisorCheckbox);
       expect(supervisorCheckbox).not.toBeChecked();
+      await user.click(supervisorCheckbox);
+      expect(supervisorCheckbox).toBeChecked();
 
       await user.click(screen.getByRole('button', { name: /audit 2 models/i }));
       await waitFor(() => expect(fetchMock).toHaveBeenCalled());
@@ -623,7 +631,7 @@ describe('AuditModelsDialog', () => {
       const body = JSON.parse(init.body as string) as {
         inputData: { __runSupervisor: boolean };
       };
-      expect(body.inputData.__runSupervisor).toBe(false);
+      expect(body.inputData.__runSupervisor).toBe(true);
     });
 
     it('swaps the dialog body to live progress and does NOT auto-navigate after submit', async () => {

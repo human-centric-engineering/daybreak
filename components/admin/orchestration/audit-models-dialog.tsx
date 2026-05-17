@@ -154,14 +154,16 @@ export function AuditModelsDialog({
   const [providerFilter, setProviderFilter] = useState<string>('all');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Default ON — the audit's primary value prop is honest assessment of
-  // its own work. Operators who want to skip the judge-model bill (e.g.
-  // tight-budget dev environments) can uncheck.
-  const [runSupervisor, setRunSupervisor] = useState<boolean>(true);
-  // Default ON — the report adds context to the notification email
-  // without an LLM cost. Operators on tight notification-body budgets
-  // (long emails) can uncheck.
-  const [generateReport, setGenerateReport] = useState<boolean>(true);
+  // Default OFF — the audit dialog is the most frequent trigger for
+  // this workflow and the supervisor incurs a billable judge-model
+  // call (~$0.02–$0.10). Opt-in keeps cost predictable; operators
+  // who want the honest verdict tick the box.
+  const [runSupervisor, setRunSupervisor] = useState<boolean>(false);
+  // Default OFF — keeps notification emails compact unless the
+  // operator deliberately wants the full step-by-step report attached.
+  // (The Download report button on the execution detail page is still
+  // available regardless.)
+  const [generateReport, setGenerateReport] = useState<boolean>(false);
 
   // Post-submission state — when set, the dialog body swaps from the
   // model-picker form to the live progress panel. Persists across the
@@ -492,7 +494,10 @@ export function AuditModelsDialog({
                     className="flex cursor-pointer items-center gap-2 text-sm font-medium"
                   >
                     Run neutral supervisor review
-                    <FieldHelp title="Neutral supervisor review">
+                    <FieldHelp
+                      title="Neutral supervisor review"
+                      contentClassName="w-96 max-h-80 overflow-y-auto"
+                    >
                       A separate judge model audits the workflow&apos;s execution after it completes
                       — looking at every step&apos;s output, the validator&apos;s decisions, and the
                       changes actually applied — and produces an evidence-cited verdict (pass /
@@ -524,7 +529,10 @@ export function AuditModelsDialog({
                     className="flex cursor-pointer items-center gap-2 text-sm font-medium"
                   >
                     Generate execution report
-                    <FieldHelp title="Execution report">
+                    <FieldHelp
+                      title="Execution report"
+                      contentClassName="w-96 max-h-80 overflow-y-auto"
+                    >
                       Generates a deterministic Markdown report of every step in the audit — inputs,
                       outputs, durations, costs — and attaches it to the notification email. No LLM
                       cost (the trace already has all the data; this just renders it). The download
