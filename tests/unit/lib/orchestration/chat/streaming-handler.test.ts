@@ -22,6 +22,7 @@ vi.mock('@/lib/db/client', () => ({
     aiOrchestrationSettings: { findUnique: vi.fn() },
     aiEvaluationLog: { findFirst: vi.fn(), create: vi.fn() },
     aiEvaluationSession: { findFirst: vi.fn() },
+    aiWorkflowExecution: { findUnique: vi.fn() },
   },
 }));
 
@@ -4130,6 +4131,182 @@ describe('attachment gate', () => {
       };
       expect(user.data.modelId).toBeUndefined();
       expect(user.data.providerSlug).toBeUndefined();
+    });
+  });
+
+  describe('workflow → message provenance snapshot', () => {
+    function setupWorkflowTurn() {
+      const provider = mockProvider([
+        [
+          {
+            type: 'tool_call',
+            toolCall: {
+              id: 'tc-wf',
+              name: 'run_workflow',
+              arguments: { workflowSlug: 'tpl-demo' },
+            },
+          },
+          { type: 'done', usage: { inputTokens: 4, outputTokens: 2 }, finishReason: 'tool_use' },
+        ],
+        [
+          { type: 'text', content: 'Done — here is the summary.' },
+          { type: 'done', usage: { inputTokens: 6, outputTokens: 4 }, finishReason: 'stop' },
+        ],
+      ]);
+      (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+        provider,
+        usedSlug: 'anthropic',
+      });
+      (capabilityDispatcher.dispatch as ReturnType<typeof vi.fn>).mockResolvedValue({
+        success: true,
+        data: {
+          status: 'completed',
+          executionId: 'exec-123',
+          output: { ok: true },
+          totalCostUsd: 0.01,
+          totalTokensUsed: 100,
+        },
+      });
+      return provider;
+    }
+
+    it('pins workflowExecutionId + workflowVersionId on the terminal assistant message', async () => {
+      setupWorkflowTurn();
+      (prisma.aiWorkflowExecution.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: 'exec-123',
+        versionId: 'v-456',
+        executionTrace: [
+          {
+            stepId: 's1',
+            stepType: 'agent_call',
+            label: 'Answer',
+            status: 'completed',
+            output: { text: 'done', sources: [] },
+            tokensUsed: 50,
+            costUsd: 0.005,
+            startedAt: '2026-05-18T00:00:00.000Z',
+            completedAt: '2026-05-18T00:00:01.000Z',
+            durationMs: 1000,
+          },
+        ],
+      });
+
+      await collect(streamChat(baseRequest));
+
+      const assistantCalls = (
+        prisma.aiMessage.create as ReturnType<typeof vi.fn>
+      ).mock.calls.filter(
+        (c: unknown[]) => (c[0] as { data: { role: string } }).data.role === 'assistant'
+      );
+      const terminal = assistantCalls[assistantCalls.length - 1][0] as {
+        data: { workflowExecutionId?: string; workflowVersionId?: string };
+      };
+      expect(terminal.data.workflowExecutionId).toBe('exec-123');
+      expect(terminal.data.workflowVersionId).toBe('v-456');
+    });
+
+    it('snapshots workflowSources from the terminal trace entry onto provenance', async () => {
+      setupWorkflowTurn();
+      const sources = [
+        { source: 'knowledge_base' as const, confidence: 'high' as const, reference: 'doc-1' },
+        { source: 'external_call' as const, confidence: 'medium' as const, reference: 'api-x' },
+      ];
+      (prisma.aiWorkflowExecution.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue({
+        id: 'exec-123',
+        versionId: 'v-456',
+        executionTrace: [
+          {
+            stepId: 's1',
+            stepType: 'agent_call',
+            label: 'Answer',
+            status: 'completed',
+            output: { text: 'done', sources },
+            provenance: sources,
+            tokensUsed: 50,
+            costUsd: 0.005,
+            startedAt: '2026-05-18T00:00:00.000Z',
+            completedAt: '2026-05-18T00:00:01.000Z',
+            durationMs: 1000,
+          },
+        ],
+      });
+
+      await collect(streamChat(baseRequest));
+
+      const assistantCalls = (
+        prisma.aiMessage.create as ReturnType<typeof vi.fn>
+      ).mock.calls.filter(
+        (c: unknown[]) => (c[0] as { data: { role: string } }).data.role === 'assistant'
+      );
+      const terminal = assistantCalls[assistantCalls.length - 1][0] as {
+        data: { provenance?: { workflowSources?: Array<{ source: string }> } };
+      };
+      expect(terminal.data.provenance?.workflowSources).toHaveLength(2);
+      expect(terminal.data.provenance?.workflowSources?.[0]?.source).toBe('knowledge_base');
+    });
+
+    it('omits workflow pins when the execution row is missing (non-fatal)', async () => {
+      setupWorkflowTurn();
+      // Row got pruned between dispatch and the assistant build site —
+      // snapshot returns null and the turn proceeds without workflow pins.
+      (prisma.aiWorkflowExecution.findUnique as ReturnType<typeof vi.fn>).mockResolvedValue(null);
+
+      await collect(streamChat(baseRequest));
+
+      const assistantCalls = (
+        prisma.aiMessage.create as ReturnType<typeof vi.fn>
+      ).mock.calls.filter(
+        (c: unknown[]) => (c[0] as { data: { role: string } }).data.role === 'assistant'
+      );
+      const terminal = assistantCalls[assistantCalls.length - 1][0] as {
+        data: {
+          workflowExecutionId?: string;
+          workflowVersionId?: string;
+          provenance?: { workflowSources?: unknown };
+        };
+      };
+      expect(terminal.data.workflowExecutionId).toBeUndefined();
+      expect(terminal.data.workflowVersionId).toBeUndefined();
+      expect(terminal.data.provenance?.workflowSources).toBeUndefined();
+    });
+
+    it('does not pin workflow scalars for non-workflow capability calls', async () => {
+      const provider = mockProvider([
+        [
+          {
+            type: 'tool_call',
+            toolCall: { id: 'tc-lookup', name: 'lookup_order', arguments: {} },
+          },
+          { type: 'done', usage: { inputTokens: 2, outputTokens: 2 }, finishReason: 'tool_use' },
+        ],
+        [
+          { type: 'text', content: 'Looked up.' },
+          { type: 'done', usage: { inputTokens: 3, outputTokens: 3 }, finishReason: 'stop' },
+        ],
+      ]);
+      (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+        provider,
+        usedSlug: 'anthropic',
+      });
+      (capabilityDispatcher.dispatch as ReturnType<typeof vi.fn>).mockResolvedValue({
+        success: true,
+        data: { id: 'o_1' },
+      });
+
+      await collect(streamChat(baseRequest));
+
+      const assistantCalls = (
+        prisma.aiMessage.create as ReturnType<typeof vi.fn>
+      ).mock.calls.filter(
+        (c: unknown[]) => (c[0] as { data: { role: string } }).data.role === 'assistant'
+      );
+      // Workflow execution lookup must not even be attempted when no
+      // run_workflow call fired.
+      expect(prisma.aiWorkflowExecution.findUnique).not.toHaveBeenCalled();
+      const terminal = assistantCalls[assistantCalls.length - 1][0] as {
+        data: { workflowExecutionId?: string };
+      };
+      expect(terminal.data.workflowExecutionId).toBeUndefined();
     });
   });
 });
