@@ -779,4 +779,75 @@ describe('CapabilityDispatcher', () => {
       });
     });
   });
+
+  describe('register() enforces processesPii ↔ redactProvenance pairing', () => {
+    class PiiCapabilityWithoutOverride extends BaseCapability<unknown, { ok: true }> {
+      readonly slug = 'pii_no_override';
+      readonly processesPii = true;
+      readonly functionDefinition = {
+        name: 'pii_no_override',
+        description: '',
+        parameters: {},
+      };
+      protected readonly schema = z.unknown();
+
+      async execute(_args: unknown) {
+        return this.success({ ok: true as const });
+      }
+      // NOTE: deliberately does not override redactProvenance —
+      // registration should throw at startup before this capability
+      // can fire.
+    }
+
+    class PiiCapabilityWithOverride extends BaseCapability<unknown, { ok: true }> {
+      readonly slug = 'pii_with_override';
+      readonly processesPii = true;
+      readonly functionDefinition = {
+        name: 'pii_with_override',
+        description: '',
+        parameters: {},
+      };
+      protected readonly schema = z.unknown();
+
+      async execute(_args: unknown) {
+        return this.success({ ok: true as const });
+      }
+
+      redactProvenance() {
+        return { args: '<redacted>', resultPreview: '<redacted>' };
+      }
+    }
+
+    it('throws when registering a PII-handling capability without redactProvenance', () => {
+      expect(() => capabilityDispatcher.register(new PiiCapabilityWithoutOverride())).toThrow(
+        /processesPii=true but does not override redactProvenance/
+      );
+    });
+
+    it('points the operator at the pii-redaction doc in the thrown message', () => {
+      expect(() => capabilityDispatcher.register(new PiiCapabilityWithoutOverride())).toThrow(
+        /pii-redaction\.md/
+      );
+    });
+
+    it('does NOT register a capability that fails the check', () => {
+      try {
+        capabilityDispatcher.register(new PiiCapabilityWithoutOverride());
+      } catch {
+        /* expected */
+      }
+      expect(capabilityDispatcher.has('pii_no_override')).toBe(false);
+    });
+
+    it('accepts a PII-handling capability that overrides redactProvenance', () => {
+      expect(() => capabilityDispatcher.register(new PiiCapabilityWithOverride())).not.toThrow();
+      expect(capabilityDispatcher.has('pii_with_override')).toBe(true);
+    });
+
+    it('accepts a non-PII capability with no override (default passthrough)', () => {
+      // OkCapability does NOT declare processesPii — defaults to false.
+      // No override required; register succeeds.
+      expect(() => capabilityDispatcher.register(new OkCapability())).not.toThrow();
+    });
+  });
 });

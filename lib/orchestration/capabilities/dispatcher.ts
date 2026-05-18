@@ -90,8 +90,21 @@ class CapabilityDispatcher {
   /**
    * Register an in-memory capability handler. Idempotent: re-registering
    * the same slug replaces the previous handler.
+   *
+   * Throws if a capability declares `processesPii = true` but does not
+   * override `redactProvenance()`. Forces capability authors to make an
+   * explicit decision about what gets persisted onto durable audit
+   * rows — silent passthrough for PII-handling capabilities is a
+   * footgun, not a feature.
    */
   register(capability: BaseCapability): void {
+    if (capability.processesPii && !isRedactorOverridden(capability)) {
+      throw new Error(
+        `Capability "${capability.slug}" declares processesPii=true but does not ` +
+          `override redactProvenance(). PII-handling capabilities must implement ` +
+          `explicit redaction. See .context/security/pii-redaction.md`
+      );
+    }
     this.handlers.set(capability.slug, capability);
   }
 
@@ -492,3 +505,18 @@ function formatValidationIssues(issues: unknown[]): string {
 export const capabilityDispatcher = new CapabilityDispatcher();
 
 export type { CapabilityDispatcher };
+
+/**
+ * True when the subclass defines its own `redactProvenance` method
+ * (rather than inheriting the passthrough default from `BaseCapability`).
+ *
+ * Used by `register()` to enforce that PII-handling capabilities
+ * provide explicit redaction. Detection is via own-property check on
+ * the instance's prototype — the inherited default lives on
+ * `BaseCapability.prototype`, so a subclass that doesn't override
+ * leaves no own property on its own prototype.
+ */
+function isRedactorOverridden(capability: BaseCapability): boolean {
+  const proto = Object.getPrototypeOf(capability) as object;
+  return Object.prototype.hasOwnProperty.call(proto, 'redactProvenance');
+}
