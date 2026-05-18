@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { WebhookForm } from '@/components/admin/orchestration/webhook-form';
 
 export const metadata: Metadata = {
-  title: 'New Webhook · AI Orchestration',
+  title: 'New Event Subscription · AI Orchestration',
   description: 'Create a new webhook subscription.',
 };
 
@@ -17,7 +17,7 @@ export default function NewWebhookPage() {
         </Link>
         {' / '}
         <Link href="/admin/orchestration/webhooks" className="hover:underline">
-          Webhooks
+          Event Subscriptions
         </Link>
         {' / '}
         <span>New</span>

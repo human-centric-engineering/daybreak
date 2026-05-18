@@ -133,12 +133,6 @@ const navSections: NavSection[] = [
             description: 'Multi-step flows',
           },
           {
-            href: '/admin/orchestration/webhooks',
-            label: 'Webhooks',
-            icon: Webhook,
-            description: 'Event subscriptions',
-          },
-          {
             href: '/admin/orchestration/mcp',
             label: 'MCP Server',
             icon: Plug,
@@ -167,6 +161,12 @@ const navSections: NavSection[] = [
             label: 'Approval Queue',
             icon: ShieldCheck,
             description: 'Pending approvals',
+          },
+          {
+            href: '/admin/orchestration/webhooks',
+            label: 'Event Subscriptions',
+            icon: Webhook,
+            description: 'Webhook notifications',
           },
           {
             href: '/admin/orchestration/evaluations',
