@@ -37,6 +37,11 @@ interface ResultItem {
   chunkId: string;
   documentId: string;
   documentName: string | null;
+  /**
+   * Document content hash at search time. Forwarded to `Citation.contentHash`
+   * by the chat handler so audit trails detect silent re-ingestion.
+   */
+  documentContentHash: string | null;
   content: string;
   patternNumber: number | null;
   patternName: string | null;
@@ -56,6 +61,11 @@ interface Data {
 
 export class SearchKnowledgeCapability extends BaseCapability<Args, Data> {
   readonly slug = 'search_knowledge_base';
+  // The args are the user-facing question (already on the conversation
+  // record) plus optional pattern/document filters; the result is KB
+  // chunks structured as citation envelopes. No PII flows into the
+  // capability's trace beyond what's already on the message content.
+  readonly processesPii = false;
 
   readonly functionDefinition: CapabilityFunctionDefinition = {
     name: 'search_knowledge_base',
@@ -146,6 +156,7 @@ export class SearchKnowledgeCapability extends BaseCapability<Args, Data> {
           chunkId: r.chunk.id,
           documentId: r.chunk.documentId,
           documentName: r.documentName ?? null,
+          documentContentHash: r.documentContentHash ?? null,
           content: r.chunk.content,
           patternNumber: r.chunk.patternNumber,
           patternName: r.chunk.patternName,

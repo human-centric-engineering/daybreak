@@ -1840,6 +1840,26 @@ export const conversationExportQuerySchema = z.object({
 });
 
 /**
+ * Body for `POST /api/v1/chat/conversations/:id/share` — the
+ * end-user-facing consent grant for cross-user conversation access.
+ *
+ * - `reason` is optional free-text the owner supplied for context
+ *   ("complaint about refund X"). Capped at 500 chars to keep the audit
+ *   row compact. Always optional — the share itself is the consent;
+ *   the reason is just context for the admin.
+ * - `expiresInDays` defaults to 7 at the route level when omitted.
+ *   Capped at 90 so a share doesn't outlive a typical support cycle.
+ *   The route translates this to an absolute `expiresAt` timestamp
+ *   before writing. A future compliance-officer role may create
+ *   never-expiring shares directly via the model; that path doesn't
+ *   touch this user-facing schema.
+ */
+export const shareConversationSchema = z.object({
+  reason: z.string().trim().min(1).max(500).optional(),
+  expiresInDays: z.number().int().min(1).max(90).optional(),
+});
+
+/**
  * Clear conversations body (POST /admin/orchestration/conversations/clear).
  *
  * At least one of `olderThan` or `agentId` must be supplied — an empty
@@ -2946,6 +2966,14 @@ export const citationSchema = z.object({
   chunkId: z.string(),
   documentId: z.string(),
   documentName: z.string().nullable(),
+  /**
+   * Document content hash at the moment the citation was produced.
+   * Lets an auditor detect a silent re-ingestion of the same documentId.
+   * Null on legacy citations (pre-snapshot).
+   */
+  contentHash: z.string().nullable(),
+  /** Monotonic document version; null until item 31 lands. */
+  documentVersion: z.number().int().nullable(),
   section: z.string().nullable(),
   patternNumber: z.number().int().nullable(),
   patternName: z.string().nullable(),
@@ -2978,12 +3006,15 @@ export const pendingApprovalSchema = z.object({
 
 /**
  * Per-capability dispatch diagnostic, persisted on an assistant message
- * as `MessageMetadata.toolCalls[]` when the chat request opts in via
- * `includeTrace: true`. Mirrors the `ToolCallTrace` TypeScript type in
- * `types/orchestration.ts`. Bounds (`slug` length, `errorCode` length,
- * `resultPreview` length) are deliberately tight so the persisted JSON
- * column stays well below the configured row-size budget even after a
- * many-tool turn.
+ * as `MessageProvenance.capabilityCalls[]`. Mirrors the `ToolCallTrace`
+ * TypeScript type in `types/orchestration.ts`. Bounds (`slug` length,
+ * `errorCode` length, `resultPreview` length) are deliberately tight so
+ * the persisted JSON column stays well below the configured row-size
+ * budget even after a many-tool turn.
+ *
+ * Always populated for assistant messages that fired at least one
+ * capability — no `includeTrace` gate; audit substrate is not an
+ * admin-only debug toggle.
  */
 export const toolCallTraceSchema = z.object({
   slug: z.string().min(1).max(120),
@@ -2995,20 +3026,52 @@ export const toolCallTraceSchema = z.object({
   resultPreview: z.string().max(2000).optional(),
 });
 
+/**
+ * Per-message provenance bundle, persisted in `AiMessage.provenance`
+ * (JSONB). Mirrors the {@link MessageProvenance} TypeScript shape in
+ * `types/orchestration.ts`. Validate on read-back at API boundaries so
+ * a tampered or malformed row can't crash the rendering or audit path.
+ *
+ * The provenance scalars (`agentVersionId`, `workflowExecutionId`,
+ * `workflowVersionId`, `modelId`, `providerSlug`) are first-class
+ * columns on `AiMessage`, not part of this bundle.
+ */
+export const messageProvenanceSchema = z.object({
+  citations: z.array(citationSchema).max(64).optional(),
+  workflowSources: z
+    .array(
+      z.object({
+        source: z.enum([
+          'training_knowledge',
+          'web_search',
+          'knowledge_base',
+          'prior_step',
+          'external_call',
+          'user_input',
+        ]),
+        confidence: z.enum(['high', 'medium', 'low']),
+        reference: z.string().min(1).max(1024).optional(),
+        snippet: z.string().min(1).max(400).optional(),
+        stepId: z.string().min(1).max(64).optional(),
+        note: z.string().min(1).max(400).optional(),
+      })
+    )
+    .max(64)
+    .optional(),
+  capabilityCalls: z.array(toolCallTraceSchema).max(64).optional(),
+});
+
 export const messageMetadataSchema = z.object({
   tokenUsage: z
     .object({
-      input: z.number().optional(),
-      output: z.number().optional(),
+      inputTokens: z.number().optional(),
+      outputTokens: z.number().optional(),
+      totalTokens: z.number().optional(),
     })
     .optional(),
-  modelUsed: z.string().optional(),
   latencyMs: z.number().optional(),
   costUsd: z.number().optional(),
-  citations: z.array(citationSchema).optional(),
   pendingApproval: pendingApprovalSchema.optional(),
-  /** Per-tool dispatch diagnostics — admin-only, gated by `includeTrace`. */
-  toolCalls: z.array(toolCallTraceSchema).max(64).optional(),
 });
 
 // ============================================================================

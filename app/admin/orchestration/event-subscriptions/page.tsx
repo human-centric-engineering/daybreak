@@ -13,7 +13,7 @@ import { logger } from '@/lib/logging';
 import type { PaginationMeta } from '@/types/api';
 
 export const metadata: Metadata = {
-  title: 'Webhooks · AI Orchestration',
+  title: 'Event Subscriptions · AI Orchestration',
   description: 'Manage webhook subscriptions for orchestration events.',
 };
 
@@ -51,10 +51,10 @@ export default async function WebhooksListPage() {
             AI Orchestration
           </Link>
           {' / '}
-          <span>Webhooks</span>
+          <span>Event Subscriptions</span>
         </nav>
         <h1 className="text-2xl font-semibold">
-          Webhooks{' '}
+          Event Subscriptions{' '}
           <FieldHelp title="What are webhooks?" contentClassName="w-96 max-h-80 overflow-y-auto">
             <p>
               Webhooks let you receive real-time notifications when events happen in the

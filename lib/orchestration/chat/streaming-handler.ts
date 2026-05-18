@@ -28,6 +28,7 @@ import type {
   Citation,
   InputBreakdown,
   MessageMetadata,
+  MessageProvenance,
   PendingApproval,
   SideEffectModelUsage,
   ToolCallTrace,
@@ -51,7 +52,10 @@ import { getOrchestrationSettings } from '@/lib/orchestration/settings';
 import { scanForInjection } from '@/lib/orchestration/chat/input-guard';
 import { scanCitations, scanOutput } from '@/lib/orchestration/chat/output-guard';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
+import type { CapabilityResult } from '@/lib/orchestration/capabilities/types';
 import { extractCitations } from '@/lib/orchestration/chat/citations';
+import type { ProvenanceItem } from '@/lib/orchestration/provenance/types';
+import { executionTraceSchema } from '@/lib/validations/orchestration';
 import {
   getCapabilityDefinitions,
   registerBuiltInCapabilities,
@@ -151,25 +155,48 @@ function buildToolCallTrace(
       : null;
   const errorCode = typeof errorObj?.code === 'string' ? errorObj.code : undefined;
 
-  let resultPreview: string | undefined;
-  try {
-    const json = JSON.stringify(result);
-    if (json) resultPreview = json.length > 480 ? `${json.slice(0, 477)}...` : json;
-  } catch {
-    // Non-serialisable result (cyclic, BigInt) — skip preview rather than throw.
-  }
+  // Route args + resultPreview through the capability's redactor so the
+  // persisted audit row never carries raw PII. Capabilities that don't
+  // override `redactProvenance` get the default passthrough behavior;
+  // PII-handling capabilities mask domain-specific fields. See
+  // `lib/security/redact.ts` + `.context/security/pii-redaction.md`.
+  const handler = capabilityDispatcher.getHandler(slug);
+  const redacted = handler
+    ? handler.redactProvenance(args, result as CapabilityResult<unknown>)
+    : { args, resultPreview: defaultResultPreview(result) };
+
+  const resultPreview =
+    typeof redacted.resultPreview === 'string' && redacted.resultPreview.length > 0
+      ? redacted.resultPreview
+      : undefined;
 
   const sideEffectModel = extractSideEffectModel(result);
 
   return {
     slug,
-    arguments: args,
+    arguments: redacted.args,
     latencyMs,
     success,
     ...(errorCode ? { errorCode } : {}),
     ...(resultPreview ? { resultPreview } : {}),
     ...(sideEffectModel ? { sideEffectModel } : {}),
   };
+}
+
+/**
+ * Fallback preview formatter used when no capability handler is
+ * registered (e.g. dynamic capabilities loaded from the DB without a
+ * matching in-memory class). Mirrors the historical 480-char cap from
+ * before the redactor hook landed so the row size stays bounded.
+ */
+function defaultResultPreview(result: unknown): string {
+  try {
+    const json = JSON.stringify(result);
+    if (!json) return '';
+    return json.length > 480 ? `${json.slice(0, 477)}...` : json;
+  } catch {
+    return '';
+  }
 }
 
 /**
@@ -219,6 +246,15 @@ interface PersistMessageParams {
   capabilitySlug?: string;
   toolCallId?: string;
   metadata?: MessageMetadata;
+  // Provenance pins — Phase 3 populates these from the resolved agent /
+  // model / workflow context at message-creation time. Phase 2 wires the
+  // plumbing only.
+  agentVersionId?: string;
+  workflowExecutionId?: string;
+  workflowVersionId?: string;
+  modelId?: string;
+  providerSlug?: string;
+  provenance?: MessageProvenance;
 }
 
 interface WriteEvaluationLogParams {
@@ -748,9 +784,25 @@ export class StreamingChatHandler {
        */
       const turnToolCalls: ToolCallTrace[] = [];
 
+      /**
+       * Workflow execution IDs returned by `run_workflow` capability
+       * calls during this turn (status=completed only). Drives the
+       * workflow→message provenance snapshot at the terminal assistant
+       * build site: the row is fetched, the terminal trace entry's
+       * `output.sources` are lifted onto the assistant's `provenance.
+       * workflowSources`, and the execution's `versionId` is pinned
+       * onto the message's `workflowVersionId` scalar.
+       *
+       * Convention for multi-workflow turns: the message is pinned to
+       * the LAST workflow execution. Multi-workflow chat turns are
+       * exotic; the single-workflow case is overwhelmingly common.
+       */
+      const turnWorkflowExecutionIds: string[] = [];
+
       let iteration = 0;
       while (iteration < MAX_TOOL_ITERATIONS) {
         iteration++;
+        const iterationStartedAt = Date.now();
 
         // Emit thinking indicator before each LLM turn
         if (iteration === 1) {
@@ -1024,6 +1076,7 @@ export class StreamingChatHandler {
         if (assistantText.length > 0) {
           const isTerminalTurn = toolCalls.size === 0;
           const assistantMetadata: MessageMetadata = {};
+          const assistantProvenance: MessageProvenance = {};
           // TS narrows `usage` (a closure-captured `let`) to its initial
           // `null` value at this point because the closure mutation inside
           // `withSpanGenerator` isn't visible to flow analysis. The cast
@@ -1035,20 +1088,48 @@ export class StreamingChatHandler {
               outputTokens: finalUsage.outputTokens,
               totalTokens: finalUsage.inputTokens + finalUsage.outputTokens,
             };
+            assistantMetadata.costUsd = calculateCost(
+              resolvedModel,
+              finalUsage.inputTokens,
+              finalUsage.outputTokens
+            ).totalCostUsd;
           }
+          assistantMetadata.latencyMs = Date.now() - iterationStartedAt;
           if (isTerminalTurn && citations.length > 0) {
-            assistantMetadata.citations = citations;
+            assistantProvenance.citations = citations;
           }
-          // Admin-only: attach per-tool diagnostics to the terminal
-          // assistant message so the post-hoc trace viewer can render
-          // the same `<MessageTrace>` strip from persisted state.
-          if (isTerminalTurn && request.includeTrace && turnToolCalls.length > 0) {
-            assistantMetadata.toolCalls = turnToolCalls;
+          // Per-capability dispatch diagnostics on the terminal assistant
+          // message. Always-on — audit substrate is not an admin-only
+          // debug toggle. `includeTrace` still controls whether the SSE
+          // event surface streams the trace live, but the persisted
+          // record is unconditional.
+          if (isTerminalTurn && turnToolCalls.length > 0) {
+            assistantProvenance.capabilityCalls = turnToolCalls;
+          }
+          // Snapshot workflow provenance from the LAST synchronously-
+          // completed `run_workflow` capability call in this turn. The
+          // scalar pin (`workflowExecutionId`, `workflowVersionId`)
+          // attributes the message to the execution row; the
+          // `workflowSources` array carries the terminal step's source
+          // attributions for the audit bundle. Failure is non-fatal —
+          // a missing row or malformed trace simply omits the snapshot.
+          let assistantWorkflowExecutionId: string | undefined;
+          let assistantWorkflowVersionId: string | undefined;
+          if (isTerminalTurn && turnWorkflowExecutionIds.length > 0) {
+            const lastExecId = turnWorkflowExecutionIds[turnWorkflowExecutionIds.length - 1];
+            const snapshot = await this.snapshotWorkflowProvenance(lastExecId);
+            if (snapshot) {
+              assistantWorkflowExecutionId = snapshot.executionId;
+              if (snapshot.versionId) assistantWorkflowVersionId = snapshot.versionId;
+              if (snapshot.sources.length > 0) {
+                assistantProvenance.workflowSources = snapshot.sources;
+              }
+            }
           }
           // Surface every model that ran on this turn — not just the
           // main LLM. Embeddings (per `search_knowledge_base` call) and
           // the rolling summariser get aggregated here so the cost
-          // strip can render them alongside `modelUsed`.
+          // strip can render them alongside the persisted modelId scalar.
           if (isTerminalTurn) {
             const sideEffects = aggregateSideEffectModels(
               turnToolCalls.map((t) => t.sideEffectModel),
@@ -1062,7 +1143,18 @@ export class StreamingChatHandler {
             conversationId: conversation.id,
             role: 'assistant',
             content: assistantText,
+            modelId: resolvedModel,
+            providerSlug: resolvedBinding.providerSlug,
+            ...(assistantWorkflowExecutionId
+              ? { workflowExecutionId: assistantWorkflowExecutionId }
+              : {}),
+            ...(assistantWorkflowVersionId
+              ? { workflowVersionId: assistantWorkflowVersionId }
+              : {}),
             ...(Object.keys(assistantMetadata).length > 0 ? { metadata: assistantMetadata } : {}),
+            ...(Object.keys(assistantProvenance).length > 0
+              ? { provenance: assistantProvenance }
+              : {}),
           });
           // Queue async embedding for semantic search (non-blocking)
           queueMessageEmbedding(assistantMsg.id, assistantText);
@@ -1279,16 +1371,26 @@ export class StreamingChatHandler {
           const augmentedResult = extracted.augmentedResult;
 
           const singleLatencyMs = Date.now() - dispatchStart;
-          const singleTrace = request.includeTrace
-            ? buildToolCallTrace(tc.name, tc.arguments, augmentedResult, singleLatencyMs)
-            : undefined;
-          if (singleTrace) turnToolCalls.push(singleTrace);
+          // Always build the trace — audit substrate is unconditional.
+          // `includeTrace` still gates the live SSE surface below.
+          const singleTrace = buildToolCallTrace(
+            tc.name,
+            tc.arguments,
+            augmentedResult,
+            singleLatencyMs
+          );
+          turnToolCalls.push(singleTrace);
+          // If this was a synchronously-completed run_workflow, capture
+          // the executionId so the terminal assistant message can pin
+          // workflow provenance back to the execution row.
+          const singleWfExecId = extractCompletedWorkflowExecutionId(tc.name, augmentedResult);
+          if (singleWfExecId) turnWorkflowExecutionIds.push(singleWfExecId);
 
           yield {
             type: 'capability_result',
             capabilitySlug: tc.name,
             result: augmentedResult,
-            ...(singleTrace ? { trace: singleTrace } : {}),
+            ...(request.includeTrace ? { trace: singleTrace } : {}),
           };
 
           await this.persistMessage({
@@ -1328,6 +1430,8 @@ export class StreamingChatHandler {
               conversationId: conversation.id,
               role: 'assistant',
               content: '',
+              modelId: resolvedModel,
+              providerSlug: resolvedBinding.providerSlug,
               metadata: { pendingApproval },
             });
             yield { type: 'approval_required', pendingApproval };
@@ -1428,14 +1532,16 @@ export class StreamingChatHandler {
 
           // Process skipped tools first
           for (const { tc, result } of skippedResults) {
-            const skippedTrace = request.includeTrace
-              ? buildToolCallTrace(tc.name, tc.arguments, result, 0)
-              : undefined;
-            if (skippedTrace) turnToolCalls.push(skippedTrace);
+            // Audit substrate is always-on; `includeTrace` only gates the
+            // SSE event surface.
+            const skippedTrace = buildToolCallTrace(tc.name, tc.arguments, result, 0);
+            turnToolCalls.push(skippedTrace);
+            const skippedWfExecId = extractCompletedWorkflowExecutionId(tc.name, result);
+            if (skippedWfExecId) turnWorkflowExecutionIds.push(skippedWfExecId);
             results.push({
               capabilitySlug: tc.name,
               result,
-              ...(skippedTrace ? { trace: skippedTrace } : {}),
+              ...(request.includeTrace ? { trace: skippedTrace } : {}),
             });
             await this.persistMessage({
               conversationId: conversation.id,
@@ -1506,14 +1612,21 @@ export class StreamingChatHandler {
             nextCitationMarker = extracted.nextMarker;
             const augmentedResult = extracted.augmentedResult;
 
-            const parallelTrace = request.includeTrace
-              ? buildToolCallTrace(tc.name, tc.arguments, augmentedResult, parallelDispatchEndMs)
-              : undefined;
-            if (parallelTrace) turnToolCalls.push(parallelTrace);
+            // Audit substrate is always-on; `includeTrace` only gates the
+            // SSE event surface.
+            const parallelTrace = buildToolCallTrace(
+              tc.name,
+              tc.arguments,
+              augmentedResult,
+              parallelDispatchEndMs
+            );
+            turnToolCalls.push(parallelTrace);
+            const parallelWfExecId = extractCompletedWorkflowExecutionId(tc.name, augmentedResult);
+            if (parallelWfExecId) turnWorkflowExecutionIds.push(parallelWfExecId);
             results.push({
               capabilitySlug: tc.name,
               result: augmentedResult,
-              ...(parallelTrace ? { trace: parallelTrace } : {}),
+              ...(request.includeTrace ? { trace: parallelTrace } : {}),
             });
 
             await this.persistMessage({
@@ -1568,6 +1681,8 @@ export class StreamingChatHandler {
                 conversationId: conversation.id,
                 role: 'assistant',
                 content: '',
+                modelId: resolvedModel,
+                providerSlug: resolvedBinding.providerSlug,
                 metadata: { pendingApproval: pa },
               });
               yield { type: 'approval_required', pendingApproval: pa };
@@ -1658,6 +1773,11 @@ export class StreamingChatHandler {
             conversationId,
             role: 'assistant',
             content: '[An error occurred and the response could not be completed.]',
+            // Pin provider only — `resolvedModel` lives inside the try
+            // and isn't reliably in scope here. modelId stays null on
+            // error markers; the audit trail reads that as "model in
+            // effect at error time was ambiguous (possibly mid-fallback)".
+            ...(resolvedProviderSlug ? { providerSlug: resolvedProviderSlug } : {}),
             metadata: {
               error: true,
               errorCode: 'internal_error',
@@ -1766,6 +1886,61 @@ export class StreamingChatHandler {
     return messages.reverse();
   }
 
+  /**
+   * Fetch the workflow execution + its terminal step's `output.sources`
+   * for snapshot onto the next assistant message. Returns:
+   *
+   * - `executionId` — pinned onto `AiMessage.workflowExecutionId`
+   * - `versionId`   — pinned onto `AiMessage.workflowVersionId` (may be null
+   *                   for legacy executions written before workflow versioning)
+   * - `sources`     — the terminal trace entry's `provenance` array, lifted
+   *                   onto `MessageProvenance.workflowSources`
+   *
+   * Failure modes (all return `null`):
+   *
+   * - Row not found (e.g. pruned between dispatch and message persist)
+   * - Trace is malformed (parser returns empty array via the `.catch`
+   *   fallback in `executionTraceSchema`)
+   * - Terminal entry has no `provenance` field
+   *
+   * Failure here MUST NOT abort the chat turn — provenance is best-effort
+   * audit metadata, not part of the user-facing happy path. Errors are
+   * logged at warn level and treated as "no snapshot available."
+   */
+  private async snapshotWorkflowProvenance(
+    executionId: string
+  ): Promise<{ executionId: string; versionId: string | null; sources: ProvenanceItem[] } | null> {
+    try {
+      const exec = await prisma.aiWorkflowExecution.findUnique({
+        where: { id: executionId },
+        select: { id: true, versionId: true, executionTrace: true },
+      });
+      if (!exec) return null;
+      const parsed = executionTraceSchema.safeParse(exec.executionTrace);
+      if (!parsed.success || parsed.data.length === 0) {
+        return { executionId: exec.id, versionId: exec.versionId, sources: [] };
+      }
+      // Walk back to the last entry that completed successfully and
+      // carries a provenance array. Skipped / failed entries don't
+      // contribute to the audit signal for the message the user sees.
+      const sources: ProvenanceItem[] = [];
+      for (let i = parsed.data.length - 1; i >= 0; i--) {
+        const entry = parsed.data[i];
+        if (entry?.status === 'completed' && entry.provenance && entry.provenance.length > 0) {
+          sources.push(...entry.provenance);
+          break;
+        }
+      }
+      return { executionId: exec.id, versionId: exec.versionId, sources };
+    } catch (err) {
+      logger.warn('Failed to snapshot workflow provenance (non-fatal)', {
+        executionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+  }
+
   private async persistMessage(params: PersistMessageParams): Promise<AiMessage> {
     const data: Prisma.AiMessageUncheckedCreateInput = {
       conversationId: params.conversationId,
@@ -1779,6 +1954,17 @@ export class StreamingChatHandler {
       // bridges TypeScript's interface-vs-indexed-object mismatch with Prisma's
       // `InputJsonValue` — it is not laundering unvalidated data.
       data.metadata = params.metadata as Prisma.InputJsonValue;
+    }
+    if (params.agentVersionId !== undefined) data.agentVersionId = params.agentVersionId;
+    if (params.workflowExecutionId !== undefined)
+      data.workflowExecutionId = params.workflowExecutionId;
+    if (params.workflowVersionId !== undefined) data.workflowVersionId = params.workflowVersionId;
+    if (params.modelId !== undefined) data.modelId = params.modelId;
+    if (params.providerSlug !== undefined) data.providerSlug = params.providerSlug;
+    if (params.provenance !== undefined) {
+      // Same cast posture as `metadata` above — `MessageProvenance` is a
+      // structured, JSON-serializable shape; not unvalidated data.
+      data.provenance = params.provenance as Prisma.InputJsonValue;
     }
     return prisma.aiMessage.create({ data });
   }
@@ -1906,6 +2092,28 @@ function extractPendingApproval(slug: string, result: unknown): PendingApproval 
     approveToken: d.approveToken,
     rejectToken: d.rejectToken,
   };
+}
+
+/**
+ * Extract the workflow `executionId` from a `run_workflow` capability
+ * result envelope when the workflow completed synchronously. Returns
+ * `null` for any other capability, for failure envelopes, and for
+ * pending-approval results (those flow through `extractPendingApproval`
+ * instead). Mirrors the defensive shape-checking of
+ * `extractPendingApproval` — a malformed result must not crash the chat
+ * turn.
+ */
+function extractCompletedWorkflowExecutionId(slug: string, result: unknown): string | null {
+  if (slug !== 'run_workflow') return null;
+  if (!result || typeof result !== 'object') return null;
+  const r = result as Record<string, unknown>;
+  if (r.success !== true) return null;
+  const data = r.data;
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, unknown>;
+  if (d.status !== 'completed') return null;
+  if (typeof d.executionId !== 'string') return null;
+  return d.executionId;
 }
 
 function buildDoneEvent(

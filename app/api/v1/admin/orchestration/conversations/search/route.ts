@@ -22,6 +22,8 @@ import { successResponse } from '@/lib/api/responses';
 import { ValidationError } from '@/lib/api/errors';
 import { getRouteLogger } from '@/lib/api/context';
 import { embedText } from '@/lib/orchestration/knowledge/embedder';
+import { logConversationAccess } from '@/lib/orchestration/audit/admin-audit-logger';
+import { getClientIP } from '@/lib/security/ip';
 import { z } from 'zod';
 
 const searchQuerySchema = z.object({
@@ -68,8 +70,21 @@ export const GET = withAdminAuth(async (request, session) => {
   }
   const embeddingStr = `[${queryEmbedding.join(',')}]`;
 
-  // Build dynamic WHERE conditions — always scope to the calling admin
-  const conditions: string[] = [`c."userId" = $4`];
+  // Build dynamic WHERE conditions.
+  //
+  // Visibility: caller can see conversations they own AND conversations
+  // the owner has actively shared. "Active" mirrors `isShareActive` in
+  // conversation-access.ts: revokedAt IS NULL AND (expiresAt IS NULL OR
+  // expiresAt > now()). The OR is fixed (no params); the active-share
+  // sub-query reuses the same caller id ($4) only for the owner branch.
+  const conditions: string[] = [
+    `(c."userId" = $4 OR EXISTS (
+       SELECT 1 FROM "ai_conversation_share" s
+       WHERE s."conversationId" = c.id
+         AND s."revokedAt" IS NULL
+         AND (s."expiresAt" IS NULL OR s."expiresAt" > NOW())
+     ))`,
+  ];
   const params: unknown[] = [embeddingStr, threshold, limit, session.user.id];
   let paramIdx = 5;
 
@@ -177,6 +192,30 @@ export const GET = withAdminAuth(async (request, session) => {
         similarity: Math.max(0, 1 - Number(r.distance)),
       },
     }));
+
+  // Audit-of-audits for cross-user matches. The OR-subquery in the SQL
+  // above pulls in actively-shared conversations alongside the caller's
+  // own; for any returned row whose owner is not the caller, write one
+  // shared-basis row. Owner-basis matches no-op via `logConversationAccess`.
+  // One log per unique conversation (grouped is already deduped).
+  const clientIp = getClientIP(request);
+  for (const row of grouped) {
+    if (row.userId === session.user.id) continue;
+    logConversationAccess({
+      adminUserId: session.user.id,
+      conversationId: row.conversationId,
+      conversationTitle: row.title,
+      conversationOwnerId: row.userId,
+      accessBasis: 'shared',
+      action: 'conversation.search_matched',
+      extra: {
+        query: q,
+        similarity: row.bestMatch.similarity,
+        messageId: row.bestMatch.messageId,
+      },
+      clientIp,
+    });
+  }
 
   return successResponse(grouped, { total: grouped.length, semanticAvailable: true });
 });

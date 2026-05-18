@@ -22,6 +22,12 @@ const BASE_MESSAGE: ConversationMessage = {
   capabilitySlug: null,
   toolCallId: null,
   metadata: null,
+  provenance: null,
+  agentVersionId: null,
+  workflowExecutionId: null,
+  workflowVersionId: null,
+  modelId: null,
+  providerSlug: null,
   createdAt: '2025-01-01T10:00:00.000Z',
 };
 
@@ -58,13 +64,13 @@ describe('ConversationTraceViewer', () => {
         makeMessage({
           id: 'msg-1',
           metadata: {
-            tokenUsage: { input: 100, output: 50 },
+            tokenUsage: { inputTokens: 100, outputTokens: 50 },
           },
         }),
         makeMessage({
           id: 'msg-2',
           metadata: {
-            tokenUsage: { input: 200, output: 80 },
+            tokenUsage: { inputTokens: 200, outputTokens: 80 },
           },
         }),
       ];
@@ -178,14 +184,14 @@ describe('ConversationTraceViewer', () => {
   });
 
   describe('Message metadata display', () => {
-    it('shows model name when present in metadata', () => {
+    it('shows model name when present on the modelId column', () => {
       render(
         <ConversationTraceViewer
           messages={[
             makeMessage({
               id: 'msg-1',
               role: 'assistant',
-              metadata: { modelUsed: 'claude-sonnet-4-6' },
+              modelId: 'claude-sonnet-4-6',
             }),
           ]}
         />
@@ -201,7 +207,7 @@ describe('ConversationTraceViewer', () => {
             makeMessage({
               id: 'msg-1',
               role: 'assistant',
-              metadata: { tokenUsage: { input: 150, output: 75 } },
+              metadata: { tokenUsage: { inputTokens: 150, outputTokens: 75 } },
             }),
           ]}
         />
@@ -256,7 +262,7 @@ describe('ConversationTraceViewer', () => {
             makeMessage({
               id: 'msg-1',
               role: 'assistant',
-              metadata: { modelUsed: 'claude-sonnet-4-6' },
+              metadata: { latencyMs: 200 },
             }),
           ]}
         />
@@ -273,7 +279,7 @@ describe('ConversationTraceViewer', () => {
 
     it('reveals full metadata JSON when Raw toggle is clicked', async () => {
       const user = userEvent.setup();
-      const meta = { modelUsed: 'claude-sonnet-4-6', latencyMs: 200 };
+      const meta = { latencyMs: 200, costUsd: 0.005 };
 
       render(
         <ConversationTraceViewer
@@ -281,18 +287,16 @@ describe('ConversationTraceViewer', () => {
         />
       );
 
-      // Metadata JSON not visible initially
-      expect(screen.queryByText(/"modelUsed"/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/"costUsd"/)).not.toBeInTheDocument();
 
       await user.click(screen.getByRole('button', { name: /raw/i }));
 
-      // JSON should now be visible in a pre element
-      expect(screen.getByText(/"modelUsed"/)).toBeInTheDocument();
+      expect(screen.getByText(/"costUsd"/)).toBeInTheDocument();
     });
 
     it('hides metadata JSON when Raw toggle is clicked again (toggle off)', async () => {
       const user = userEvent.setup();
-      const meta = { modelUsed: 'claude-sonnet-4-6' };
+      const meta = { costUsd: 0.005 };
 
       render(
         <ConversationTraceViewer
@@ -303,15 +307,15 @@ describe('ConversationTraceViewer', () => {
       const button = screen.getByRole('button', { name: /raw/i });
 
       await user.click(button);
-      expect(screen.getByText(/"modelUsed"/)).toBeInTheDocument();
+      expect(screen.getByText(/"costUsd"/)).toBeInTheDocument();
 
       await user.click(screen.getByRole('button', { name: /hide raw/i }));
-      expect(screen.queryByText(/"modelUsed"/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/"costUsd"/)).not.toBeInTheDocument();
     });
   });
 
   describe('Citations rehydration', () => {
-    it('renders the sources panel and marker links from persisted metadata.citations', async () => {
+    it('renders the sources panel and marker links from persisted provenance.citations', async () => {
       const user = userEvent.setup();
       render(
         <ConversationTraceViewer
@@ -320,13 +324,15 @@ describe('ConversationTraceViewer', () => {
               id: 'msg-1',
               role: 'assistant',
               content: 'The deposit must be protected within 30 days [1].',
-              metadata: {
+              provenance: {
                 citations: [
                   {
                     marker: 1,
                     chunkId: 'c1',
                     documentId: 'd1',
                     documentName: 'Tenancy Guide',
+                    contentHash: 'sha256-deadbeef',
+                    documentVersion: null,
                     section: 'Page 12',
                     patternNumber: null,
                     patternName: null,
@@ -349,7 +355,7 @@ describe('ConversationTraceViewer', () => {
       expect(screen.getByText(/within 30 days of receipt/)).toBeInTheDocument();
     });
 
-    it('does not render a sources panel when metadata.citations is absent', () => {
+    it('does not render a sources panel when provenance.citations is absent', () => {
       render(
         <ConversationTraceViewer
           messages={[
@@ -357,7 +363,7 @@ describe('ConversationTraceViewer', () => {
               id: 'msg-1',
               role: 'assistant',
               content: 'A general-knowledge answer with no retrieval.',
-              metadata: { modelUsed: 'claude-sonnet-4-6' },
+              modelId: 'claude-sonnet-4-6',
             }),
           ]}
         />
@@ -367,8 +373,8 @@ describe('ConversationTraceViewer', () => {
     });
 
     it('degrades gracefully when persisted citations are malformed', () => {
-      // safeParse on the strict messageMetadataSchema fails for the
-      // whole metadata object when any field is the wrong shape — the
+      // safeParse on the strict messageProvenanceSchema fails for the
+      // whole provenance object when any field is the wrong shape — the
       // trace viewer must still render the message text rather than
       // throwing or showing a broken panel.
       render(
@@ -378,7 +384,7 @@ describe('ConversationTraceViewer', () => {
               id: 'msg-1',
               role: 'assistant',
               content: 'Answer body.',
-              metadata: {
+              provenance: {
                 citations: [
                   {
                     // marker should be a number — pin a string here to
@@ -388,6 +394,8 @@ describe('ConversationTraceViewer', () => {
                     chunkId: 'c1',
                     documentId: 'd1',
                     documentName: 'X',
+                    contentHash: null,
+                    documentVersion: null,
                     section: null,
                     patternNumber: null,
                     patternName: null,
@@ -406,8 +414,8 @@ describe('ConversationTraceViewer', () => {
     });
   });
 
-  describe('Tool-call trace rehydration', () => {
-    it('renders MessageTrace from persisted toolCalls metadata', () => {
+  describe('Capability-call trace rehydration', () => {
+    it('renders MessageTrace from persisted provenance.capabilityCalls', () => {
       render(
         <ConversationTraceViewer
           messages={[
@@ -415,9 +423,9 @@ describe('ConversationTraceViewer', () => {
               id: 'msg-1',
               role: 'assistant',
               content: 'Looked it up.',
-              metadata: {
-                modelUsed: 'claude-sonnet-4-6',
-                toolCalls: [
+              modelId: 'claude-sonnet-4-6',
+              provenance: {
+                capabilityCalls: [
                   {
                     slug: 'lookup_order',
                     arguments: { orderId: 'o_1' },
@@ -437,7 +445,7 @@ describe('ConversationTraceViewer', () => {
       expect(screen.getByTestId('message-trace')).toHaveTextContent('142ms');
     });
 
-    it('does not render MessageTrace for legacy messages without toolCalls', () => {
+    it('does not render MessageTrace for messages without capabilityCalls', () => {
       render(
         <ConversationTraceViewer
           messages={[
@@ -445,13 +453,103 @@ describe('ConversationTraceViewer', () => {
               id: 'msg-1',
               role: 'assistant',
               content: 'Pre-trace answer.',
-              metadata: { modelUsed: 'claude-sonnet-4-6' },
+              modelId: 'claude-sonnet-4-6',
             }),
           ]}
         />
       );
 
       expect(screen.queryByTestId('message-trace')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Download provenance', () => {
+    it('renders the download button group when conversationId is supplied', () => {
+      render(
+        <ConversationTraceViewer
+          messages={[makeMessage({ id: 'msg-1', role: 'assistant', content: 'A.' })]}
+          conversationId="conv-abc"
+        />
+      );
+
+      const jsonLink = screen.getByRole('link', { name: /json/i });
+      const mdLink = screen.getByRole('link', { name: /markdown/i });
+      expect(jsonLink).toHaveAttribute(
+        'href',
+        '/api/v1/admin/orchestration/conversations/conv-abc/provenance'
+      );
+      expect(mdLink).toHaveAttribute(
+        'href',
+        '/api/v1/admin/orchestration/conversations/conv-abc/provenance.md'
+      );
+    });
+
+    it('omits the download button group when conversationId is missing (preview mode)', () => {
+      render(
+        <ConversationTraceViewer
+          messages={[makeMessage({ id: 'msg-1', role: 'assistant', content: 'A.' })]}
+        />
+      );
+
+      expect(screen.queryByTestId('download-provenance')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('Provenance pin badges', () => {
+    it('renders the agent version pill when agentVersionId is set', () => {
+      render(
+        <ConversationTraceViewer
+          messages={[
+            makeMessage({
+              id: 'msg-1',
+              role: 'assistant',
+              content: 'A.',
+              agentVersionId: 'av-1234567890',
+            }),
+          ]}
+        />
+      );
+
+      // The pill prefix + the first-8-char truncation of the id.
+      expect(screen.getByText('agent av-12345')).toBeInTheDocument();
+    });
+
+    it('renders the workflow execution pill with version suffix when set', () => {
+      render(
+        <ConversationTraceViewer
+          messages={[
+            makeMessage({
+              id: 'msg-1',
+              role: 'assistant',
+              content: 'A.',
+              workflowExecutionId: 'exec-abcdef9999',
+              workflowVersionId: 'wv-1234567890',
+            }),
+          ]}
+        />
+      );
+
+      expect(screen.getByText('workflow exec exec-abc @ wv-12345')).toBeInTheDocument();
+    });
+
+    it('omits the pin row when no version pins are set', () => {
+      render(
+        <ConversationTraceViewer
+          messages={[
+            makeMessage({
+              id: 'msg-1',
+              role: 'assistant',
+              content: 'A.',
+              modelId: 'claude-sonnet-4-6',
+            }),
+          ]}
+        />
+      );
+
+      // No agent/workflow pills should render — the badge text would
+      // start with one of these prefixes if present.
+      expect(screen.queryByText(/^agent /)).not.toBeInTheDocument();
+      expect(screen.queryByText(/^workflow exec /)).not.toBeInTheDocument();
     });
   });
 });

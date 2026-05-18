@@ -11,14 +11,25 @@
  */
 
 import { useState } from 'react';
-import { Bot, Code, MessageSquare, Settings, User, Wrench } from 'lucide-react';
+import {
+  Bot,
+  Code,
+  Download,
+  FileJson,
+  FileText,
+  MessageSquare,
+  Settings,
+  User,
+  Wrench,
+} from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { FieldHelp } from '@/components/ui/field-help';
+import { API } from '@/lib/api/endpoints';
 import { cn } from '@/lib/utils';
-import { messageMetadataSchema } from '@/lib/validations/orchestration';
+import { messageMetadataSchema, messageProvenanceSchema } from '@/lib/validations/orchestration';
 import { MessageWithCitations } from '@/components/admin/orchestration/chat/message-with-citations';
 import { MessageTrace } from '@/components/admin/orchestration/chat/message-trace';
 import type { Citation, ToolCallTrace } from '@/types/orchestration';
@@ -26,18 +37,14 @@ import type { Citation, ToolCallTrace } from '@/types/orchestration';
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface MessageMetadata {
-  tokenUsage?: { input?: number; output?: number };
-  modelUsed?: string;
+  tokenUsage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number };
   latencyMs?: number;
   costUsd?: number;
+}
+
+interface MessageProvenance {
   citations?: Citation[];
-  /**
-   * Per-capability dispatch diagnostics persisted by the streaming
-   * handler when the live request opted into `includeTrace`. Old
-   * messages (pre-trace) simply leave this absent and the trace
-   * strip renders nothing.
-   */
-  toolCalls?: ToolCallTrace[];
+  capabilityCalls?: ToolCallTrace[];
 }
 
 export interface ConversationMessage {
@@ -47,11 +54,30 @@ export interface ConversationMessage {
   capabilitySlug: string | null;
   toolCallId: string | null;
   metadata: Record<string, unknown> | null;
+  /**
+   * Provenance bundle: citations, capability calls, workflow sources.
+   * Migrated out of `metadata` so it is queryable + first-class. The
+   * trace viewer reads citations and capabilityCalls from here.
+   */
+  provenance: Record<string, unknown> | null;
+  /** Scalar version pins — null on direct chat with the live agent. */
+  agentVersionId: string | null;
+  workflowExecutionId: string | null;
+  workflowVersionId: string | null;
+  /** Model + provider that produced the assistant turn. */
+  modelId: string | null;
+  providerSlug: string | null;
   createdAt: string;
 }
 
 export interface ConversationTraceViewerProps {
   messages: ConversationMessage[];
+  /**
+   * Conversation id — required to render the provenance download
+   * buttons (JSON + Markdown). Omit when the viewer is used in a
+   * preview / non-routable context.
+   */
+  conversationId?: string;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -72,6 +98,12 @@ function parseMetadata(raw: Record<string, unknown> | null): MessageMetadata {
   return result.success ? result.data : {};
 }
 
+function parseProvenance(raw: Record<string, unknown> | null): MessageProvenance {
+  if (!raw) return {};
+  const result = messageProvenanceSchema.safeParse(raw);
+  return result.success ? result.data : {};
+}
+
 function formatTimestamp(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '—';
@@ -88,6 +120,7 @@ function MessageCard({ message }: { message: ConversationMessage }) {
   const config = ROLE_CONFIG[message.role] ?? ROLE_CONFIG.user;
   const Icon = config.icon;
   const meta = parseMetadata(message.metadata);
+  const prov = parseProvenance(message.provenance);
   const isTool = message.role === 'tool';
 
   return (
@@ -117,11 +150,11 @@ function MessageCard({ message }: { message: ConversationMessage }) {
           <>
             <MessageWithCitations
               content={message.content}
-              citations={meta.citations}
+              citations={prov.citations}
               className="text-sm"
             />
-            {meta.toolCalls && meta.toolCalls.length > 0 && (
-              <MessageTrace toolCalls={meta.toolCalls} />
+            {prov.capabilityCalls && prov.capabilityCalls.length > 0 && (
+              <MessageTrace toolCalls={prov.capabilityCalls} />
             )}
           </>
         ) : (
@@ -130,20 +163,41 @@ function MessageCard({ message }: { message: ConversationMessage }) {
       </div>
 
       {/* Metadata bar */}
-      {(meta.modelUsed ||
+      {(message.modelId ||
         meta.tokenUsage ||
         meta.latencyMs !== undefined ||
         meta.costUsd !== undefined) && (
         <div className="text-muted-foreground mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
-          {meta.modelUsed && <span>{meta.modelUsed}</span>}
-          {meta.tokenUsage?.input !== undefined && (
-            <span>{meta.tokenUsage.input.toLocaleString()} in</span>
+          {message.modelId && <span>{message.modelId}</span>}
+          {message.providerSlug && <span>· {message.providerSlug}</span>}
+          {meta.tokenUsage?.inputTokens !== undefined && (
+            <span>{meta.tokenUsage.inputTokens.toLocaleString()} in</span>
           )}
-          {meta.tokenUsage?.output !== undefined && (
-            <span>{meta.tokenUsage.output.toLocaleString()} out</span>
+          {meta.tokenUsage?.outputTokens !== undefined && (
+            <span>{meta.tokenUsage.outputTokens.toLocaleString()} out</span>
           )}
           {meta.latencyMs !== undefined && <span>{meta.latencyMs} ms</span>}
           {meta.costUsd !== undefined && <span>${meta.costUsd.toFixed(4)}</span>}
+        </div>
+      )}
+
+      {/* Provenance pin row — version pins surface as small badges next
+          to the message so an auditor can see at a glance which
+          agent/workflow version was running. Mirrors the
+          SupervisorVerdictBadge styling in execution-detail-view. */}
+      {(message.agentVersionId || message.workflowExecutionId) && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {message.agentVersionId && (
+            <Badge variant="outline" className="font-mono text-[10px]">
+              agent {message.agentVersionId.slice(0, 8)}
+            </Badge>
+          )}
+          {message.workflowExecutionId && (
+            <Badge variant="outline" className="font-mono text-[10px]">
+              workflow exec {message.workflowExecutionId.slice(0, 8)}
+              {message.workflowVersionId ? ` @ ${message.workflowVersionId.slice(0, 8)}` : ''}
+            </Badge>
+          )}
         </div>
       )}
 
@@ -181,7 +235,7 @@ function SummaryBar({ messages }: { messages: ConversationMessage[] }) {
   for (const msg of messages) {
     const meta = parseMetadata(msg.metadata);
     if (meta.tokenUsage) {
-      totalTokens += (meta.tokenUsage.input ?? 0) + (meta.tokenUsage.output ?? 0);
+      totalTokens += (meta.tokenUsage.inputTokens ?? 0) + (meta.tokenUsage.outputTokens ?? 0);
     }
     if (meta.costUsd !== undefined) totalCost += meta.costUsd;
     if (meta.latencyMs !== undefined) {
@@ -244,12 +298,67 @@ function SummaryBar({ messages }: { messages: ConversationMessage[] }) {
   );
 }
 
+// ─── Download button group ──────────────────────────────────────────────────
+
+/**
+ * Audit-bundle download affordance — JSON + Markdown.
+ *
+ * Mirrors the per-execution "Download report.md" button in
+ * ExecutionDetailView. The PDF button is reserved for the future
+ * Gotenberg-backed `provenance.pdf` route and stays hidden until that
+ * infrastructure is provisioned.
+ */
+function DownloadProvenance({ conversationId }: { conversationId: string }) {
+  return (
+    <div
+      data-testid="download-provenance"
+      className="flex flex-wrap items-center gap-2 rounded-md border p-3"
+    >
+      <Download className="text-muted-foreground h-4 w-4" />
+      <span className="text-sm font-medium">Download provenance</span>
+      <FieldHelp title="What is the provenance bundle?">
+        The audit trail behind every assistant message — agent / workflow / model versions, KB
+        chunks cited (with their content hash at message time), capability calls, and workflow step
+        sources. Hand this to a reviewer to answer &ldquo;how did the agent arrive at this answer on
+        this date?&rdquo;
+      </FieldHelp>
+      <div className="ml-auto flex flex-wrap gap-2">
+        <Button asChild variant="outline" size="sm">
+          <a
+            href={API.ADMIN.ORCHESTRATION.conversationProvenance(conversationId)}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <FileJson className="mr-1 h-3.5 w-3.5" />
+            JSON
+          </a>
+        </Button>
+        <Button asChild variant="outline" size="sm">
+          <a
+            href={API.ADMIN.ORCHESTRATION.conversationProvenanceMarkdown(conversationId)}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            <FileText className="mr-1 h-3.5 w-3.5" />
+            Markdown
+          </a>
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main component ─────────────────────────────────────────────────────────
 
-export function ConversationTraceViewer({ messages }: ConversationTraceViewerProps) {
+export function ConversationTraceViewer({
+  messages,
+  conversationId,
+}: ConversationTraceViewerProps) {
   return (
     <div className="space-y-6">
       <SummaryBar messages={messages} />
+
+      {conversationId && <DownloadProvenance conversationId={conversationId} />}
 
       {messages.length === 0 ? (
         <div className="text-muted-foreground flex items-center gap-2 py-8 text-sm">

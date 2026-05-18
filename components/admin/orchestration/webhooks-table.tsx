@@ -167,9 +167,9 @@ export function WebhooksTable({ initialWebhooks, initialMeta }: WebhooksTablePro
           </Select>
         </div>
         <Button asChild>
-          <Link href="/admin/orchestration/webhooks/new">
+          <Link href="/admin/orchestration/event-subscriptions/new">
             <Plus className="mr-2 h-4 w-4" />
-            New webhook
+            New subscription
           </Link>
         </Button>
       </div>
@@ -197,7 +197,7 @@ export function WebhooksTable({ initialWebhooks, initialMeta }: WebhooksTablePro
             {webhooks.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} className="text-muted-foreground py-8 text-center">
-                  {loading ? 'Loading…' : 'No webhook subscriptions yet.'}
+                  {loading ? 'Loading…' : 'No event subscriptions yet.'}
                 </TableCell>
               </TableRow>
             ) : (
@@ -205,7 +205,7 @@ export function WebhooksTable({ initialWebhooks, initialMeta }: WebhooksTablePro
                 <TableRow key={wh.id} className={loading ? 'opacity-50' : ''}>
                   <TableCell>
                     <Link
-                      href={`/admin/orchestration/webhooks/${wh.id}`}
+                      href={`/admin/orchestration/event-subscriptions/${wh.id}`}
                       className="font-mono text-sm hover:underline"
                     >
                       {truncateUrl(wh.url)}
@@ -253,7 +253,9 @@ export function WebhooksTable({ initialWebhooks, initialMeta }: WebhooksTablePro
                         <DropdownMenuLabel>Actions</DropdownMenuLabel>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
-                          onClick={() => router.push(`/admin/orchestration/webhooks/${wh.id}`)}
+                          onClick={() =>
+                            router.push(`/admin/orchestration/event-subscriptions/${wh.id}`)
+                          }
                         >
                           <Edit className="mr-2 h-4 w-4" />
                           Edit
@@ -307,9 +309,9 @@ export function WebhooksTable({ initialWebhooks, initialMeta }: WebhooksTablePro
       <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete webhook?</AlertDialogTitle>
+            <AlertDialogTitle>Delete subscription?</AlertDialogTitle>
             <AlertDialogDescription>
-              This will permanently delete the webhook subscription to{' '}
+              This will permanently delete the event subscription to{' '}
               <code className="text-xs">{deleteTarget?.url}</code>. Delivery history will also be
               removed. This action cannot be undone.
             </AlertDialogDescription>

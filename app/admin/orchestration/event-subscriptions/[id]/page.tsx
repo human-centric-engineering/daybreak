@@ -10,7 +10,7 @@ import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import { logger } from '@/lib/logging';
 
 export const metadata: Metadata = {
-  title: 'Edit Webhook · AI Orchestration',
+  title: 'Edit Event Subscription · AI Orchestration',
   description: 'Edit webhook subscription and view delivery history.',
 };
 
@@ -48,8 +48,8 @@ export default async function WebhookDetailPage({ params }: { params: Promise<{ 
           AI Orchestration
         </Link>
         {' / '}
-        <Link href="/admin/orchestration/webhooks" className="hover:underline">
-          Webhooks
+        <Link href="/admin/orchestration/event-subscriptions" className="hover:underline">
+          Event Subscriptions
         </Link>
         {' / '}
         <span>Edit</span>
