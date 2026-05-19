@@ -263,7 +263,7 @@ nodes/edges change ─┐
                                                 └─► setNodes(prev => mark data.hasError)
 ```
 
-- **`validateWorkflow(def).errors`** — from `lib/orchestration/workflows/validator.ts`. Covers `MISSING_ENTRY`, `UNKNOWN_TARGET`, `UNREACHABLE_STEP`, `CYCLE_DETECTED`, `DUPLICATE_STEP_ID`, `MISSING_APPROVAL_PROMPT`, `MISSING_CAPABILITY_SLUG`, `MISSING_GUARD_RULES`, `MISSING_EVALUATE_RUBRIC`, `MISSING_EXTERNAL_URL`, `MISSING_AGENT_SLUG`, `INSUFFICIENT_ROUTE_BRANCHES` (12 codes total). This is the authoritative validator — the backend runs the same code on POST / PATCH.
+- **`validateWorkflow(def).errors`** — from `lib/orchestration/workflows/validator.ts`. Covers `MISSING_ENTRY`, `UNKNOWN_TARGET`, `UNREACHABLE_STEP`, `CYCLE_DETECTED`, `DUPLICATE_STEP_ID`, `MISSING_APPROVAL_PROMPT`, `MISSING_CAPABILITY_SLUG`, `MISSING_GUARD_RULES`, `MISSING_GUARD_SCHEMA_NAME`, `MISSING_EVALUATE_RUBRIC`, `MISSING_EXTERNAL_URL`, `MISSING_AGENT_SLUG`, `INSUFFICIENT_ROUTE_BRANCHES` (13 codes total). This is the authoritative validator — the backend runs the same code on POST / PATCH. Note: guard steps validate either `rules` (llm/regex modes) or `schemaName` (schema mode), so the validator emits exactly one of `MISSING_GUARD_RULES` / `MISSING_GUARD_SCHEMA_NAME` depending on `config.mode`.
 - **`runExtraChecks(nodes, edges)`** — `components/admin/orchestration/workflow-builder/extra-checks.ts`. Pure TS. Five FE-only checks that run alongside the backend validator for instant canvas feedback:
   - `DISCONNECTED_NODE` — a non-entry node with zero incoming **and** zero outgoing edges.
   - `PARALLEL_WITHOUT_MERGE` — a `parallel` step whose branches never reconverge at a single downstream node.

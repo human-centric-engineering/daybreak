@@ -62,9 +62,9 @@ Validation schemas for every request body / query live in `lib/validations/orche
 | `/workflows/:id/publish`                  | POST               | Promote `draftDefinition` to a new published version                                                       | 5.1     |
 | `/workflows/:id/discard-draft`            | POST               | Clear `draftDefinition`; published version unchanged                                                       | 5.1     |
 | `/workflows/:id/rollback`                 | POST               | Create a NEW version copied from a target version                                                          | 5.1     |
-| `/executions/:id`                         | GET                | Read execution + parsed trace + `currentStepDetails` for live indicator                                    | 3.2     |
+| `/executions/:id`                         | GET                | Read execution + parsed trace + `currentRunningSteps[]` for live indicator                                 | 3.2     |
 | `/executions/:id/status`                  | GET                | Lightweight status read (no trace, polling-friendly)                                                       | —       |
-| `/executions/:id/live`                    | GET                | Snapshot + trace + cost entries + `currentStepDetails` (1 s-poll friendly)                                 | —       |
+| `/executions/:id/live`                    | GET                | Snapshot + trace + cost entries + `currentRunningSteps[]` (1 s-poll friendly)                              | —       |
 | `/executions/:id/approve`                 | POST               | Approve paused execution                                                                                   | 3.2     |
 | `/executions/:id/reject`                  | POST               | Reject paused execution with reason                                                                        | —       |
 | `/executions/:id/cancel`                  | POST               | Cancel a running/paused execution                                                                          | 5.1     |
@@ -414,9 +414,9 @@ Body: `{ versionIndex: number }`. Returns the updated workflow.
 
 ### `GET /executions/:id`
 
-Returns the execution row with a parsed `ExecutionTraceEntry[]`, step-attributed `costEntries`, and `currentStepDetails`. Scoped to `session.user.id` — cross-user returns 404.
+Returns the execution row with a parsed `ExecutionTraceEntry[]`, step-attributed `costEntries`, and `currentRunningSteps[]`. Scoped to `session.user.id` — cross-user returns 404.
 
-`currentStepDetails: { stepId, label, stepType, startedAt } | null` — populated from the live `currentStep*` columns on `AiWorkflowExecution` when the execution is in a non-terminal status AND the engine has written all three. `null` otherwise (terminal status, partially-populated columns, or a step that hasn't started). Lets the page render the in-flight step's friendly label and elapsed time without parsing the workflow version snapshot.
+`currentRunningSteps: Array<{ stepId, label, stepType, startedAt, turnCount }>` — one entry per step that's currently in flight, ordered by `startedAt` ascending. Sourced from the `AiWorkflowRunningStep` side table rather than scalar columns on `AiWorkflowExecution`, so a `parallel` step's fan-out surfaces every branch concurrently instead of last-writer-wins. Empty array on terminal status; otherwise zero or more entries (zero before the engine enters its first step, N during a parallel fan-out). `turnCount` is the number of multi-turn checkpoint writes recorded for that step — always 0 for single-shot step types, grows for `agent_call` / `orchestrator` / `reflect` as the model fires more iterations. The detail view renders it as a "N turns" indicator so long agent calls show forward progress rather than looking frozen.
 
 ### `GET /executions/:id/live`
 
@@ -433,11 +433,20 @@ Same auth/ownership/rate-limit posture as `/status`, but returns everything the 
   "costEntries": [
     /* per-LLM-call cost rows keyed by stepId */
   ],
-  "currentStepDetails": { "stepId": "...", "label": "...", "stepType": "...", "startedAt": "..." } | null
+  "currentRunningSteps": [
+    {
+      "stepId": "analyse_chat",
+      "label": "Analyse chat models",
+      "stepType": "llm_call",
+      "startedAt": "2026-05-19T15:11:40.573Z",
+      "turnCount": 0,
+    },
+    // During a `parallel` step's fan-out, one entry per branch.
+  ],
 }
 ```
 
-`currentStepDetails` follows the same null-when-incomplete rule as `/executions/:id`.
+`currentRunningSteps` follows the same shape rule as `/executions/:id`. Empty array on terminal status.
 
 ### `POST /executions/:id/approve`
 
