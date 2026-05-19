@@ -1264,6 +1264,7 @@ export function ExecutionDetailView({
                   stepId={entry.stepId}
                   stepType={entry.stepType}
                   label={entry.label}
+                  description={entry.description}
                   status={entry.status}
                   output={entry.output}
                   error={entry.error}

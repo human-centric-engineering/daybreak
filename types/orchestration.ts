@@ -252,7 +252,14 @@ export interface WorkflowDefinition {
  */
 export type ExecutionEvent =
   | { type: 'workflow_started'; executionId: string; workflowId: string }
-  | { type: 'step_started'; stepId: string; stepType: WorkflowStepType; label: string }
+  | {
+      type: 'step_started';
+      stepId: string;
+      stepType: WorkflowStepType;
+      label: string;
+      /** Optional `WorkflowStep.description` so the live execution panel can surface it without waiting for the persisted trace entry. Absent when the step has no description configured. */
+      description?: string;
+    }
   | {
       type: 'step_completed';
       stepId: string;

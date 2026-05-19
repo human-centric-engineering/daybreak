@@ -1008,7 +1008,7 @@ export class OrchestrationEngine {
     unknown
   > {
     const { executionId } = lease;
-    yield stepStarted(step.id, step.type, step.name);
+    yield stepStarted(step.id, step.type, step.name, step.description);
     await this.markCurrentStep(lease, step, baseLogger);
 
     const started = Date.now();
@@ -1327,7 +1327,7 @@ export class OrchestrationEngine {
           const started = Date.now();
           // Per-step telemetry buffer — isolated from sibling parallel branches.
           const telemetryOut: LlmTelemetryEntry[] = [];
-          allEvents.push(stepStarted(step.id, step.type, step.name));
+          allEvents.push(stepStarted(step.id, step.type, step.name, step.description));
 
           try {
             const result = await this.runStepToCompletion(step, ctx, telemetryOut);

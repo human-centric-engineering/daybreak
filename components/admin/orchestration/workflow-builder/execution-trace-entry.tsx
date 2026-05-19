@@ -15,6 +15,7 @@ import {
   Clock,
   Copy,
   GitBranch,
+  Info,
   Loader2,
   RotateCcw,
   XCircle,
@@ -60,6 +61,14 @@ export interface ExecutionTraceEntryRowProps {
   stepId: string;
   stepType: string;
   label: string;
+  /**
+   * Optional `WorkflowStep.description` snapshot. When set, the step
+   * label and a small ⓘ icon both carry `title={description}` so the
+   * native browser tooltip fires on hover. The description also renders
+   * as a muted paragraph at the top of the expanded body. Absent for
+   * steps authored without a description.
+   */
+  description?: string;
   status: Status;
   output?: unknown;
   error?: string;
@@ -155,6 +164,7 @@ export function ExecutionTraceEntryRow({
   stepId,
   stepType,
   label,
+  description,
   status,
   output,
   error,
@@ -232,7 +242,26 @@ export function ExecutionTraceEntryRow({
         <Icon className={cn('mt-0.5 h-4 w-4 shrink-0', style.colour, animate)} />
         <div className="flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="font-medium">{label}</span>
+            <span className="font-medium" title={description}>
+              {label}
+            </span>
+            {description && (
+              // Non-interactive visible signal that a description exists.
+              // We can't use a `<button>` (or shadcn Tooltip's asChild
+              // button) here — the outer expand toggle is already a
+              // `<button>` and nested buttons are invalid HTML. The
+              // step-name span and this icon both carry `title` so the
+              // native browser tooltip fires on hover, matching the
+              // pattern already used by the fork/branch chips below.
+              <span
+                data-testid={`trace-entry-description-icon-${stepId}`}
+                className="text-muted-foreground inline-flex cursor-help"
+                title={description}
+                aria-label="Step description"
+              >
+                <Info className="h-3.5 w-3.5" />
+              </span>
+            )}
             <StepTypeChip stepId={stepId} stepType={stepType} />
             {forkNumber !== undefined && (
               <span
@@ -359,6 +388,14 @@ export function ExecutionTraceEntryRow({
 
       {expanded && (
         <div className="mt-2 space-y-2 border-t pt-2">
+          {description && (
+            <p
+              data-testid={`trace-entry-description-${stepId}`}
+              className="text-muted-foreground text-xs leading-relaxed"
+            >
+              {description}
+            </p>
+          )}
           {error && <ErrorPane error={error} stepId={stepId} expected={expectedSkip} />}
           {(input !== undefined || output !== undefined) && (
             <div className="grid gap-2 lg:grid-cols-2">
