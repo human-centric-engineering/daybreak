@@ -71,6 +71,63 @@ describe('ExecutionTraceEntryRow', () => {
     });
   });
 
+  // ── Description ─────────────────────────────────────────────────────────
+  // The description field surfaces in three places when set: the step
+  // label's `title`, an ⓘ icon next to the label (also `title`-bearing),
+  // and a muted paragraph at the top of the expanded body. When absent
+  // none of those should appear — the row must stay byte-identical to its
+  // pre-description appearance for steps that don't carry one.
+  describe('step description', () => {
+    const DESCRIPTION = 'Picks up the parsed model list and drafts the reply.';
+
+    it('renders the description as a `title` attribute on the step label when set', () => {
+      render(<ExecutionTraceEntryRow {...BASE_PROPS} description={DESCRIPTION} />);
+      // The label's title gives a native browser tooltip on hover without
+      // requiring a click into the expand affordance.
+      expect(screen.getByText('Generate Summary')).toHaveAttribute('title', DESCRIPTION);
+    });
+
+    it('renders the ⓘ icon with matching `title` when description is set', () => {
+      render(<ExecutionTraceEntryRow {...BASE_PROPS} description={DESCRIPTION} />);
+      const icon = screen.getByTestId('trace-entry-description-icon-step-1');
+      expect(icon).toHaveAttribute('title', DESCRIPTION);
+      // The icon is a visible "more info here" signal next to the label,
+      // matching the fork/branch chip pattern already used in this row.
+      expect(icon).toBeInTheDocument();
+    });
+
+    it('omits the ⓘ icon entirely when no description is set', () => {
+      render(<ExecutionTraceEntryRow {...BASE_PROPS} />);
+      expect(screen.queryByTestId('trace-entry-description-icon-step-1')).not.toBeInTheDocument();
+    });
+
+    it('omits the `title` from the label when no description is set', () => {
+      render(<ExecutionTraceEntryRow {...BASE_PROPS} />);
+      // `toHaveAttribute('title', undefined)` is unreliable across DOM
+      // implementations — check that the attribute is absent.
+      expect(screen.getByText('Generate Summary')).not.toHaveAttribute('title');
+    });
+
+    it('renders the description as a muted paragraph at the top of the expanded body', async () => {
+      const user = userEvent.setup();
+      render(<ExecutionTraceEntryRow {...BASE_PROPS} description={DESCRIPTION} output="result" />);
+      // Expand the row first — the description paragraph lives inside the
+      // expanded region, above the input/output panes.
+      await user.click(screen.getByText('Generate Summary'));
+      const paragraph = screen.getByTestId('trace-entry-description-step-1');
+      expect(paragraph).toHaveTextContent(DESCRIPTION);
+    });
+
+    it('omits the expanded-body paragraph when no description is set', async () => {
+      const user = userEvent.setup();
+      render(<ExecutionTraceEntryRow {...BASE_PROPS} output="result" />);
+      await user.click(screen.getByText('Generate Summary'));
+      // Absent description must not leave an empty muted paragraph at the
+      // top of the expanded body.
+      expect(screen.queryByTestId('trace-entry-description-step-1')).not.toBeInTheDocument();
+    });
+  });
+
   describe('expand/collapse toggle', () => {
     it('expands on click to show output', async () => {
       const user = userEvent.setup();
