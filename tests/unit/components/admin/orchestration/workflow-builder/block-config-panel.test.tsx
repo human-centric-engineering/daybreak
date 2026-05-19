@@ -49,6 +49,7 @@ const CAPABILITIES: CapabilityOption[] = [
 
 const DEFAULT_PROPS = {
   onLabelChange: vi.fn(),
+  onDescriptionChange: vi.fn(),
   onConfigChange: vi.fn(),
   onDelete: vi.fn(),
   capabilities: CAPABILITIES,
