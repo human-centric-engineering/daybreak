@@ -36,6 +36,10 @@ import type { Stream } from '@anthropic-ai/sdk/core/streaming';
 
 import { logger } from '@/lib/logging';
 import {
+  anthropicThinkingBudget,
+  supportsReasoningEffort,
+} from '@/lib/orchestration/llm/model-heuristics';
+import {
   DEFAULT_MAX_RETRIES,
   DEFAULT_TIMEOUT_MS,
   ProviderError,
@@ -335,13 +339,75 @@ export class AnthropicProvider implements LlmProvider {
     options: LlmOptions
   ): Omit<MessageCreateParamsNonStreaming, 'stream'> {
     const { system, conversation } = splitSystemMessages(messages);
+    const maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
     const params: Omit<MessageCreateParamsNonStreaming, 'stream'> = {
       model: options.model,
-      max_tokens: options.maxTokens ?? DEFAULT_MAX_TOKENS,
+      max_tokens: maxTokens,
       messages: conversation,
     };
     if (system) params.system = system;
-    if (options.temperature !== undefined) params.temperature = options.temperature;
+    // Extended thinking — Anthropic Claude 4 Opus and Sonnet 4.5+ accept
+    // `thinking: { type: 'enabled', budget_tokens: N }`. We translate
+    // the platform-neutral `reasoningEffort` bucket via the heuristic in
+    // model-heuristics. Three rules apply:
+    //
+    //   1. Drop silently when the model doesn't support thinking — no
+    //      400, mirroring how unsupported max_tokens used to trap us
+    //      before the param-profile rewrite.
+    //   2. Clamp the budget so visible output always has ≥ 1024 tokens
+    //      to work with. Without the clamp, a high effort on a small
+    //      max_tokens would leave no room for the actual reply.
+    //   3. With thinking enabled, Anthropic requires `temperature = 1`.
+    //      We omit the temperature send entirely in that case, mirroring
+    //      how openai-compatible drops temperature on reasoning models.
+    let thinkingEnabled = false;
+    if (
+      options.reasoningEffort !== undefined &&
+      supportsReasoningEffort(options.model, this.name, 'anthropic')
+    ) {
+      const rawBudget = anthropicThinkingBudget(options.reasoningEffort);
+      if (rawBudget !== undefined) {
+        // Anthropic constraints:
+        //   - `budget_tokens` MUST be ≥ 1024 (Anthropic API minimum).
+        //   - `budget_tokens` MUST be < `max_tokens` (thinking + visible
+        //     output share the cap).
+        //   - We additionally insist on a 1024-token visible-output
+        //     floor so the model has room to actually answer after
+        //     thinking.
+        //
+        // Combined: send thinking only if `max_tokens >= 1024 (min budget)
+        // + 1024 (visible floor) = 2048`. Below that, drop silently —
+        // sending `budget_tokens < 1024` would be a guaranteed 400, and
+        // sending the bare minimum with no visible-output room would
+        // truncate the reply.
+        const MIN_THINKING_BUDGET = 1024;
+        const VISIBLE_OUTPUT_FLOOR = 1024;
+        const maxAllowedBudget = maxTokens - VISIBLE_OUTPUT_FLOOR;
+        if (maxAllowedBudget >= MIN_THINKING_BUDGET) {
+          // `rawBudget` is one of {1024, 4096, 16384} — all ≥ MIN_THINKING_BUDGET.
+          // `maxAllowedBudget` is ≥ MIN_THINKING_BUDGET by the branch
+          // guard. Their min is therefore ≥ MIN_THINKING_BUDGET too.
+          const budget = Math.min(rawBudget, maxAllowedBudget);
+          // The Anthropic SDK type union narrows `thinking` to two
+          // shapes; we cast through unknown so a future SDK version
+          // that adds a field doesn't force a churn here.
+          (params as unknown as Record<string, unknown>).thinking = {
+            type: 'enabled',
+            budget_tokens: budget,
+          };
+          thinkingEnabled = true;
+        }
+        // maxAllowedBudget < MIN_THINKING_BUDGET → max_tokens too small
+        // to fit Anthropic's minimum budget alongside the visible-output
+        // floor. Drop thinking entirely. The caller's intent is still
+        // visible on the trace's `requestParams.reasoningEffort`.
+      }
+      // rawBudget === undefined → reasoningEffort === 'minimal' on
+      // Anthropic, which deliberately means "no extended thinking".
+    }
+    if (!thinkingEnabled && options.temperature !== undefined) {
+      params.temperature = options.temperature;
+    }
     if (options.tools?.length) {
       params.tools = options.tools.map<Tool>((t) => ({
         name: t.name,

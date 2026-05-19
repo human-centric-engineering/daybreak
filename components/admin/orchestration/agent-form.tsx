@@ -49,6 +49,10 @@ import { AgentVersionHistoryTab } from '@/components/admin/orchestration/agent-v
 import { AgentTestCard } from '@/components/admin/orchestration/agent-test-card';
 import { EmbedConfigPanel } from '@/components/admin/orchestration/agents/embed-config-panel';
 import { KnowledgeAccessSection } from '@/components/admin/orchestration/knowledge-access-section';
+import {
+  ReasoningEffortSelect,
+  toReasoningEffortFormValue,
+} from '@/components/admin/orchestration/reasoning-effort-select';
 import { slugSchema } from '@/lib/validations/common';
 import type { EffectiveAgentDefaults, ModelOption } from '@/lib/orchestration/prefetch-helpers';
 import type { AiAgent, AiProviderConfig } from '@/types/prisma';
@@ -70,6 +74,11 @@ const agentFormSchema = z.object({
   model: z.string().min(1, 'Model is required'),
   temperature: z.number().min(0).max(2),
   maxTokens: z.number().int().min(1).max(200000),
+  // Reasoning-effort bucket. `'auto'` is the form sentinel for "let
+  // the provider apply its default" — Radix Select forbids empty-string
+  // values, so we can't use `''` even though the column persists as
+  // null. The submit handler translates `'auto'` → null.
+  reasoningEffort: z.enum(['auto', 'minimal', 'low', 'medium', 'high']),
   monthlyBudgetUsd: z.number().positive().max(10000).optional(),
   isActive: z.boolean(),
   inputGuardMode: z.enum(['log_only', 'warn_and_continue', 'block']).nullable().optional(),
@@ -167,6 +176,7 @@ export function AgentForm({ mode, agent, providers, models, effectiveDefaults }:
       model: initialModel,
       temperature: agent?.temperature ?? 0.7,
       maxTokens: agent?.maxTokens ?? 4096,
+      reasoningEffort: toReasoningEffortFormValue(agent?.reasoningEffort),
       monthlyBudgetUsd: agent?.monthlyBudgetUsd ?? undefined,
       isActive: agent?.isActive ?? true,
       inputGuardMode: (agent?.inputGuardMode as AgentFormData['inputGuardMode']) ?? null,
@@ -309,9 +319,12 @@ export function AgentForm({ mode, agent, providers, models, effectiveDefaults }:
     // Transform comma-separated strings into arrays for the API and map the
     // form's knowledgeTagIds / knowledgeDocumentIds onto the API contract
     // (grantedTagIds / grantedDocumentIds).
-    const { knowledgeTagIds, knowledgeDocumentIds, ...rest } = data;
+    const { knowledgeTagIds, knowledgeDocumentIds, reasoningEffort, ...rest } = data;
     const payload = {
       ...rest,
+      // `'auto'` is the form sentinel for "let the runtime use the
+      // provider default" — persist as null so the DB column matches.
+      reasoningEffort: reasoningEffort === 'auto' ? null : reasoningEffort,
       topicBoundaries: rest.topicBoundaries
         ? rest.topicBoundaries
             .split(',')
@@ -820,6 +833,12 @@ export function AgentForm({ mode, agent, providers, models, effectiveDefaults }:
               <p className="text-destructive text-xs">{errors.maxTokens.message}</p>
             )}
           </div>
+
+          <ReasoningEffortSelect
+            id="reasoningEffort"
+            value={watch('reasoningEffort')}
+            onChange={(v) => setValue('reasoningEffort', v, { shouldDirty: true })}
+          />
 
           <div className="grid gap-2">
             <Label htmlFor="monthlyBudgetUsd">
@@ -1353,6 +1372,7 @@ export function AgentForm({ mode, agent, providers, models, effectiveDefaults }:
                       model: fresh.model,
                       temperature: fresh.temperature,
                       maxTokens: fresh.maxTokens,
+                      reasoningEffort: toReasoningEffortFormValue(fresh.reasoningEffort),
                       monthlyBudgetUsd: fresh.monthlyBudgetUsd ?? undefined,
                       isActive: fresh.isActive,
                       inputGuardMode:

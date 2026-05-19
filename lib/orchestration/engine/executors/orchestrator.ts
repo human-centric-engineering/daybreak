@@ -171,8 +171,35 @@ async function runDelegation(
     recordTurn: undefined,
   };
 
+  // Capture the telemetry array length BEFORE the delegation so we can
+  // tag every entry the delegation pushed as `source: 'delegation'`.
+  // Delegations share `ctx.stepTelemetry` with the orchestrator (the
+  // engine pre-allocates one array per parent step); tagging keeps the
+  // trace's headline rollup pointed at the planner's identity instead
+  // of whichever sub-agent ran last. Token totals continue to sum
+  // across both planner and delegation entries.
+  //
+  // Tagging runs in the `finally` so a delegation that pushed telemetry
+  // before throwing is still classified correctly — without that, a
+  // failed delegation's partial entries would slip into the rollup as
+  // untagged "last entry wins" candidates and steal the headline.
+  const telemetryStartIdx = childCtx.stepTelemetry?.length ?? 0;
+  const tagDelegationEntries = (): void => {
+    const telemetry = childCtx.stepTelemetry;
+    if (!telemetry) return;
+    for (let i = telemetryStartIdx; i < telemetry.length; i++) {
+      // Don't overwrite if the inner code somehow already tagged
+      // (defensive — agent-call doesn't set this today, but a future
+      // change might).
+      if (telemetry[i].source === undefined) {
+        telemetry[i].source = 'delegation';
+      }
+    }
+  };
+
   try {
     const result = await executeAgentCall(syntheticStep, childCtx);
+    tagDelegationEntries();
     return {
       agentSlug,
       message,
@@ -181,6 +208,7 @@ async function runDelegation(
       costUsd: result.costUsd,
     };
   } catch (err) {
+    tagDelegationEntries();
     const errorMessage = err instanceof Error ? err.message : String(err);
     logger.warn('orchestrator: delegation failed', {
       stepId: step.id,
@@ -350,7 +378,16 @@ export async function executeOrchestrator(
         prompt: `${systemPrompt}\n\n${userPrompt}`,
         modelOverride: config.modelOverride,
         temperature: config.temperature ?? DEFAULT_TEMPERATURE,
+        // `reasoningEffort` applies to the PLANNER only — delegated
+        // agents continue to use their own `AiAgent.reasoningEffort`
+        // setting. Each delegation routes through `agent-call`'s
+        // executor independently.
+        reasoningEffort: config.reasoningEffort ?? undefined,
         responseFormat: { type: 'json_object' },
+        // Tag so `rollupTelemetry` picks this entry for the trace's
+        // headline model/provider/requestParams even when delegations
+        // (which share `ctx.stepTelemetry` with us) ran later.
+        source: 'planner',
       });
     } catch (err) {
       throw new ExecutorError(
@@ -383,7 +420,9 @@ export async function executeOrchestrator(
           prompt: `${systemPrompt}\n\n${userPrompt}\n\nYour previous response was not valid JSON. Please respond with ONLY valid JSON matching the required schema.`,
           modelOverride: config.modelOverride,
           temperature: config.temperature ?? DEFAULT_TEMPERATURE,
+          reasoningEffort: config.reasoningEffort ?? undefined,
           responseFormat: { type: 'json_object' },
+          source: 'planner',
         });
         totalTokensUsed += retryResult.tokensUsed;
         totalCostUsd += retryResult.costUsd;

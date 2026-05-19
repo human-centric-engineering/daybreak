@@ -18,9 +18,19 @@
 
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
-import type { AgentCallTurn, StepResult, WorkflowStep } from '@/types/orchestration';
+import type {
+  AgentCallTurn,
+  LlmRequestParamsSnapshot,
+  StepResult,
+  WorkflowStep,
+} from '@/types/orchestration';
 import { CostOperation } from '@/types/orchestration';
-import type { LlmMessage, LlmToolCall, LlmToolDefinition } from '@/lib/orchestration/llm/types';
+import type {
+  LlmMessage,
+  LlmToolCall,
+  LlmToolDefinition,
+  ReasoningEffort,
+} from '@/lib/orchestration/llm/types';
 import type { LlmProvider } from '@/lib/orchestration/llm/provider';
 import { getProviderWithFallbacks } from '@/lib/orchestration/llm/provider-manager';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
@@ -34,6 +44,7 @@ import { agentCallConfigSchema } from '@/lib/validations/orchestration';
 import type { ExecutionContext } from '@/lib/orchestration/engine/context';
 import { ExecutorError } from '@/lib/orchestration/engine/errors';
 import { interpolatePrompt } from '@/lib/orchestration/engine/llm-runner';
+import { narrowReasoningEffort } from '@/lib/orchestration/llm/model-heuristics';
 import { registerStepType } from '@/lib/orchestration/engine/executor-registry';
 import {
   GEN_AI_OPERATION_NAME,
@@ -87,6 +98,14 @@ interface RunSingleTurnOptions {
    * right point. Optional — multi-turn mode passes undefined.
    */
   recordTurn?: (turn: AgentCallTurn) => Promise<void>;
+  /**
+   * Resolved reasoning-effort to use for THIS step's LLM calls. Step
+   * config (`agentCallConfigSchema.reasoningEffort`) beats the agent's
+   * own `AiAgent.reasoningEffort`; the executor resolves the precedence
+   * once at the entry point and passes the effective value here so the
+   * inner loop doesn't have to repeat the resolution per turn.
+   */
+  effectiveReasoningEffort?: ReasoningEffort;
 }
 
 /**
@@ -112,6 +131,7 @@ async function runSingleTurn(
     startCost = 0,
     startContent = '',
     recordTurn,
+    effectiveReasoningEffort,
   } = options;
   let totalTokensUsed = startTokens;
   let totalCostUsd = startCost;
@@ -142,6 +162,9 @@ async function runSingleTurn(
             model: model,
             ...(agent!.temperature !== null ? { temperature: agent!.temperature } : {}),
             ...(agent!.maxTokens !== null ? { maxTokens: agent!.maxTokens } : {}),
+            ...(effectiveReasoningEffort !== undefined
+              ? { reasoningEffort: effectiveReasoningEffort }
+              : {}),
             ...(toolDefinitions.length > 0 ? { tools: toolDefinitions } : {}),
             signal: ctx.signal,
           });
@@ -162,12 +185,20 @@ async function runSingleTurn(
         }
         const turnDurationMs = Date.now() - turnStarted;
 
+        const requestParams: LlmRequestParamsSnapshot = {};
+        if (agent!.maxTokens !== null) requestParams.maxTokens = agent!.maxTokens;
+        if (agent!.temperature !== null) requestParams.temperature = agent!.temperature;
+        if (effectiveReasoningEffort !== undefined) {
+          requestParams.reasoningEffort = effectiveReasoningEffort;
+        }
+        if (toolDefinitions.length > 0) requestParams.toolCount = toolDefinitions.length;
         ctx.stepTelemetry?.push({
           model: model,
           provider: usedSlug,
           inputTokens: response.usage.inputTokens,
           outputTokens: response.usage.outputTokens,
           durationMs: turnDurationMs,
+          ...(Object.keys(requestParams).length > 0 ? { requestParams } : {}),
         });
 
         const turnTokens = response.usage.inputTokens + response.usage.outputTokens;
@@ -342,6 +373,21 @@ export async function executeAgentCall(
     );
   }
 
+  // Resolve reasoning-effort precedence ONCE — step config beats the
+  // agent's own `reasoningEffort` column. When both are null/unset, the
+  // effective value is undefined and the provider sends nothing.
+  //
+  // Both sources are runtime-narrowed via `narrowReasoningEffort`: the
+  // step config is plain JSON on the workflow definition, and the agent
+  // column is plain TEXT in Postgres. Either could carry a value outside
+  // the enum if it bypassed the form / Zod (raw SQL, hand-edited
+  // workflow JSON, backup bundle from a fork). The narrow drops unknown
+  // strings to `undefined` so the runtime falls back to "no effort sent"
+  // instead of letting a phantom enum member 400 the provider call.
+  const stepEffort = narrowReasoningEffort(config.reasoningEffort);
+  const agentEffort = narrowReasoningEffort(agent.reasoningEffort);
+  const effectiveReasoningEffort: ReasoningEffort | undefined = stepEffort ?? agentEffort;
+
   // Interpolate the message template
   const interpolatedMessage = interpolatePrompt(message, ctx);
 
@@ -480,6 +526,7 @@ export async function executeAgentCall(
           // loop will exit immediately and return this as the output.
           startContent: lastPrior.assistantContent,
           recordTurn: ctx.recordTurn,
+          effectiveReasoningEffort,
         }
       );
     }
@@ -494,7 +541,10 @@ export async function executeAgentCall(
       usedSlug,
       resolvedModel,
       maxIterations,
-      ctx.recordTurn ? { recordTurn: ctx.recordTurn } : {}
+      {
+        ...(ctx.recordTurn ? { recordTurn: ctx.recordTurn } : {}),
+        effectiveReasoningEffort,
+      }
     );
   }
 
@@ -535,7 +585,8 @@ export async function executeAgentCall(
         provider,
         usedSlug,
         resolvedModel,
-        maxIterations
+        maxIterations,
+        { effectiveReasoningEffort }
       );
     } catch (err) {
       if (err instanceof ExecutorError) {

@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/select';
 import { apiClient } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
+import { narrowParamProfile } from '@/lib/orchestration/llm/db-model-adapter';
 import {
   DEPLOYMENT_PROFILES,
   DEPLOYMENT_PROFILE_META,
@@ -122,6 +123,12 @@ const modelFormSchema = z.object({
   costEfficiency: z.enum(['very_high', 'high', 'medium', 'none']),
   contextLength: z.enum(['very_high', 'high', 'medium', 'n_a']),
   toolUse: z.enum(['strong', 'moderate', 'none']),
+  // Wire-level parameter convention. `'auto'` is the sentinel for "not set"
+  // (the runtime derives a fallback via `deriveParamProfile`). Radix
+  // Select forbids an empty-string value on `<SelectItem>` so we can't
+  // use `''` as the sentinel even though that's how the column persists
+  // (NULL → "not set"). The submit handler translates `'auto'` → null.
+  paramProfile: z.enum(['auto', 'openai-legacy', 'openai-reasoning', 'anthropic', 'gemini']),
   bestRole: z.string().min(1, 'Best role is required').max(200),
   // Embedding-specific
   dimensions: z
@@ -162,6 +169,7 @@ export interface ProviderModelData {
   costEfficiency: string;
   contextLength: string;
   toolUse: string;
+  paramProfile?: string | null;
   bestRole: string;
   dimensions?: number | null;
   schemaCompatible?: boolean | null;
@@ -234,6 +242,7 @@ export function ProviderModelForm({ model }: ProviderModelFormProps) {
       costEfficiency: (model?.costEfficiency as ModelFormData['costEfficiency']) ?? 'medium',
       contextLength: (model?.contextLength as ModelFormData['contextLength']) ?? 'medium',
       toolUse: (model?.toolUse as ModelFormData['toolUse']) ?? 'moderate',
+      paramProfile: narrowParamProfile(model?.paramProfile) ?? 'auto',
       bestRole: model?.bestRole ?? '',
       dimensions: model?.dimensions?.toString() ?? '',
       schemaCompatible: model?.schemaCompatible ?? false,
@@ -297,6 +306,10 @@ export function ProviderModelForm({ model }: ProviderModelFormProps) {
       costEfficiency: data.costEfficiency,
       contextLength: data.contextLength,
       toolUse: data.toolUse,
+      // `'auto'` is the form sentinel for "let the runtime derive it" —
+      // persist as null so the DB column matches the on-write intent.
+      // The runtime applies `deriveParamProfile()` for null rows.
+      paramProfile: data.paramProfile === 'auto' ? null : data.paramProfile,
       bestRole: data.bestRole,
       isActive: data.isActive,
       local: data.local,
@@ -682,6 +695,63 @@ export function ProviderModelForm({ model }: ProviderModelFormProps) {
               </SelectContent>
             </Select>
           </div>
+        </div>
+
+        {/* Param Profile — wire-level convention. Drives whether the
+            runtime sends `max_tokens` vs `max_completion_tokens`, etc. */}
+        <div className="space-y-2">
+          <Label>
+            Param Profile{' '}
+            <FieldHelp title="Param profile">
+              <p>
+                Wire-level parameter convention the model expects. Determines whether the runtime
+                sends <code>max_tokens</code> or <code>max_completion_tokens</code>, and whether
+                <code> temperature</code> is honoured.
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-4">
+                <li>
+                  <strong>OpenAI legacy</strong> — <code>max_tokens</code>, free{' '}
+                  <code>temperature</code>. Use for gpt-4o, gpt-4, gpt-3.5, and any Llama / Mixtral
+                  hosted via Groq / Together / Fireworks.
+                </li>
+                <li>
+                  <strong>OpenAI reasoning</strong> — <code>max_completion_tokens</code>,{' '}
+                  <code>temperature</code> locked to 1 (engine skips the send). Use for o1/o3/o4 and
+                  gpt-5 family.
+                </li>
+                <li>
+                  <strong>Anthropic</strong> — used by the Anthropic provider class only.
+                </li>
+                <li>
+                  <strong>Gemini</strong> — reserved for a future Gemini provider class.
+                </li>
+              </ul>
+              <p className="mt-2">
+                Leave on <em>Auto</em> to let the runtime derive a profile from the model id and
+                provider — safe default for most rows. Set explicitly when an automated derivation
+                gets it wrong (e.g. a renamed o-series model that no longer matches the heuristic).
+              </p>
+            </FieldHelp>
+          </Label>
+          <Select
+            defaultValue={model?.paramProfile ?? 'auto'}
+            onValueChange={(v) => setValue('paramProfile', v as ModelFormData['paramProfile'])}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="auto">Auto (derive from model id)</SelectItem>
+              <SelectItem value="openai-legacy">
+                OpenAI legacy — max_tokens, free temperature
+              </SelectItem>
+              <SelectItem value="openai-reasoning">
+                OpenAI reasoning — max_completion_tokens, temperature locked
+              </SelectItem>
+              <SelectItem value="anthropic">Anthropic — max_tokens required</SelectItem>
+              <SelectItem value="gemini">Gemini — maxOutputTokens</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Best Role */}

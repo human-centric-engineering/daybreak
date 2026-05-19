@@ -16,7 +16,7 @@ Shared create/edit form for `AiAgent`. Eight shadcn tabs, one underlying `<form>
 | 4   | Capabilities  | 🚫     | ✅   | Attach/detach, isEnabled, customConfig                                                                                                                                                          |
 | 5   | Invite tokens | 🚫     | ✅\* | Token CRUD table; only enabled when `visibility = 'invite_only'`                                                                                                                                |
 | 6   | Versions      | 🚫     | ✅   | Full config version history with restore                                                                                                                                                        |
-| 7   | Test          | 🚫     | ✅   | Embeds `<AgentTestChat>`                                                                                                                                                                        |
+| 7   | Test          | 🚫     | ✅   | Embeds the shared admin `<ChatInterface>` against this agent                                                                                                                                    |
 | 8   | Embed         | 🚫     | ✅   | `<EmbedConfigPanel>` stacks two cards: **Appearance & copy** (per-agent widget colours / fonts / copy / starters) + **Tokens** (create, copy `<script>` snippet, toggle active, manage origins) |
 
 Tabs 4–8 are `disabled` in create mode — they require a persisted `agent.id`. Tab 5 additionally requires `visibility = 'invite_only'` — it is disabled for other visibility modes.
@@ -60,6 +60,18 @@ shadcn `<Slider>` from 0 to 2 with step 0.05. Readout shows the current value to
 
 Number input. Default 4096. Validation min 1, max 200_000.
 
+### Reasoning effort
+
+Radix `<Select>` (`AiAgent.reasoningEffort`). Controls how much internal reasoning the model does before producing visible output. Values: `auto` (form sentinel, persists as null) · `minimal` · `low` · `medium` · `high`.
+
+Honoured only by reasoning-capable models:
+
+- **OpenAI o-series / gpt-5** (`paramProfile === 'openai-reasoning'`) — sends `reasoning_effort` with the chosen bucket.
+- **Anthropic Claude 4 Opus and Sonnet 4.5+** — enables extended thinking with a token budget derived from the bucket (low = 1024, medium = 4096, high = 16384 tokens). Anthropic enforces two hard rules: `budget_tokens` must be ≥ 1024, and `budget_tokens + visible output` must fit inside `max_tokens`. The provider class therefore requires `maxTokens ≥ 2048` (1024 minimum budget + 1024 visible-output floor) before sending `thinking` at all — below that, thinking is dropped silently. When sent, the budget is clamped to `min(requested, maxTokens − 1024)` so visible output always has room. `minimal` on Anthropic deliberately means "no extended thinking" (the field is omitted entirely).
+- **Everything else** — silently dropped. No 400. The caller intent is still recorded on `LlmRequestParamsSnapshot.reasoningEffort` so a misconfigured agent shows up in the execution trace's request-envelope line.
+
+When set on a thinking-capable Anthropic model, the provider class also strips thinking blocks from the response content (callers see only the answer). Streaming `chatStream()` applies the same filter — thinking-delta events are not yielded as text. See `lib/orchestration/llm/anthropic.ts` and `lib/orchestration/llm/model-heuristics.ts → supportsReasoningEffort()` / `anthropicThinkingBudget()`.
+
 ### Max history tokens
 
 Optional number input (`AiAgent.maxHistoryTokens`). Overrides the context-window budget when building the prompt. Leave blank to use the model's full context window. Validation min 1 000, max 2 000 000. **This is the token knob** — it protects the model's context window from overflow.
@@ -84,7 +96,7 @@ Optional number input. Per-agent rate limit in requests per minute. When set, ov
 
 Switch toggle (`AiAgent.enableVoiceInput`, default off). When on, every chat surface tied to this agent renders a microphone button in the input area:
 
-- `AgentTestChat` in the form's Test tab
+- The embedded `<ChatInterface>` in the form's Test tab
 - The Learning Hub chat tabs (`/admin/orchestration/learn` — Pattern Advisor and Quiz Master) when this agent backs the tab
 - Any embed widget bound to this agent
 
@@ -98,7 +110,7 @@ The effective maximum recording length depends on the deployment platform — Su
 
 Switch toggle (`AiAgent.enableImageInput`, default off). When on, the chat surfaces bound to this agent render a paperclip control in the input area for image attachments (JPEG, PNG, WebP, GIF):
 
-- `AgentTestChat` in the form's Test tab
+- The embedded `<ChatInterface>` in the form's Test tab
 - Any embed widget bound to this agent
 
 Images are forwarded to the LLM as multimodal `ContentPart` entries and discarded after the turn — bytes are not persisted. Per-attachment cap ~5 MB binary (`MAX_CHAT_ATTACHMENT_BASE64_CHARS = 7_500_000` base64 chars); per-turn combined cap ~25 MB across all attachments; maximum of 10 attachments per turn.
@@ -263,17 +275,29 @@ All rows except the latest version show a **Restore** button. Clicking opens an 
 
 ## Tab 7 — Test
 
-Edit mode only. Embeds `<AgentTestChat agentSlug={agent.slug} minHeight="min-h-[200px]" />`. This is the **same component** the Setup Wizard's Step 4 uses — see [`setup-wizard.md`](./setup-wizard.md).
+Edit mode only. Embeds the shared admin `<ChatInterface>` (from `@/components/admin/orchestration/chat/chat-interface`) bound to this agent so the author can talk to it without leaving the form. Disabled until the agent has been saved (an `agent.id` is required).
 
-### `<AgentTestChat>` contract
+```tsx
+<ChatInterface
+  agentSlug={agent.slug}
+  agentId={agent.id}
+  voiceInputEnabled={currentVoiceInput}
+  imageInputEnabled={currentImageInput}
+  documentInputEnabled={currentDocumentInput}
+  showClearButton
+  persistenceKey={`agent-test-chat:${agent.id}`}
+  showInlineTrace
+  className="h-[500px]"
+/>
+```
 
-File: `components/admin/orchestration/agent-test-chat.tsx`.
+Notable prop choices for this surface:
 
-- POSTs to `/api/v1/admin/orchestration/chat/stream` via `fetch` with `ReadableStream.getReader()`. The body includes `{ message, agentSlug, conversationId?, ... }` — note that the endpoint requires `agentSlug` (not `agentId`), which is passed from the agent object's `slug` field.
-- Parses standard SSE frames (`event:` / `data:` lines separated by `\n\n`).
-- Renders `content` deltas into a growing reply; stops on `done`.
-- `error` frame → **"The agent ran into a problem. Check the server logs for details."** The raw `data.message` is never forwarded to the DOM. The wizard test pins this behaviour; any regression is caught by two unit tests (wizard + direct chat component).
-- Holds an `AbortController` and calls `.abort()` on unmount or on a new send.
+- `showInlineTrace` — surfaces tool-call diagnostics inline so the author can see which capabilities the model invoked and inspect their arguments. The embed widget and end-user chats leave this off.
+- `persistenceKey` is scoped per-agent so switching agents in the admin doesn't bleed messages between conversations.
+- The three `*InputEnabled` props mirror the current form state (not the saved `agent.*` columns) so toggling, e.g., image input shows the paperclip immediately — without waiting for a save round-trip.
+
+See [`orchestration-chat-interface.md`](./orchestration-chat-interface.md) for the full `<ChatInterface>` contract (SSE framing, error handling, abort semantics, persistence).
 
 ## Submit flow
 

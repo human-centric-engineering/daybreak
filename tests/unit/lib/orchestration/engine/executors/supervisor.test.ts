@@ -121,6 +121,31 @@ describe('supervisorConfigSchema (via executor)', () => {
     ).rejects.toThrow(/silently absorb|errorStrategy/i);
   });
 
+  it('forwards reasoningEffort from config to every runLlmCall the supervisor makes', async () => {
+    vi.mocked(runLlmCall).mockResolvedValueOnce({
+      content: JSON.stringify(validReport()),
+      tokensUsed: 100,
+      costUsd: 0.005,
+      model: 'judge-model-id',
+    });
+    const ctx = makeCtx({ stepOutputs: { s1: 'applied 5 changes', s2: 'created new model' } });
+
+    await executeSupervisor(step({ assessmentCriteria: 'r', reasoningEffort: 'high' }), ctx);
+
+    // Guard against vacuous pass — if the supervisor short-circuited
+    // before making any LLM calls, the loop below would assert nothing.
+    // The happy path must fire at least one runLlmCall via the shim.
+    const calls = vi.mocked(runLlmCall).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+
+    // Every call the supervisor made through the LlmCallShim should carry
+    // the step's reasoningEffort — there's no "delegations have their own"
+    // carve-out for supervisor, unlike orchestrator.
+    for (const call of calls) {
+      expect(call[1].reasoningEffort).toBe('high');
+    }
+  });
+
   it("accepts failOnVerdict='fail' paired with errorStrategy='fail' (terminate)", async () => {
     vi.mocked(runLlmCall).mockResolvedValueOnce({
       content: JSON.stringify(validReport()),

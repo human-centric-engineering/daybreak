@@ -1625,6 +1625,117 @@ describe('buildBaseParams', () => {
     });
   });
 
+  // ── reasoning_effort wire param ────────────────────────────────────────
+  //
+  // The provider sends `reasoning_effort` only when (a) the model resolves
+  // to the openai-reasoning profile AND (b) the caller supplied a value.
+  // On any non-reasoning model the field is dropped silently — same drop
+  // pattern as the `max_tokens` / `temperature` adjustments above.
+
+  describe('reasoning_effort wire param', () => {
+    it.each(['minimal', 'low', 'medium', 'high'] as const)(
+      'forwards %s on a reasoning model',
+      async (value) => {
+        chatCreateMock.mockResolvedValue(makeChatCompletion('ok', 'stop'));
+        const provider = makeProvider();
+        await provider.chat([{ role: 'user', content: 'x' }], {
+          model: 'gpt-5',
+          reasoningEffort: value,
+        });
+        const params = chatCreateMock.mock.calls[0]?.[0] as Record<string, unknown>;
+        expect(params?.reasoning_effort).toBe(value);
+      }
+    );
+
+    it('drops the field on a legacy model rather than 400ing', async () => {
+      chatCreateMock.mockResolvedValue(makeChatCompletion('ok', 'stop'));
+      const provider = makeProvider();
+      await provider.chat([{ role: 'user', content: 'x' }], {
+        model: 'gpt-4o',
+        reasoningEffort: 'high',
+      });
+      const params = chatCreateMock.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(params?.reasoning_effort).toBeUndefined();
+    });
+
+    it('omits the field entirely when the caller did not set it', async () => {
+      chatCreateMock.mockResolvedValue(makeChatCompletion('ok', 'stop'));
+      const provider = makeProvider();
+      await provider.chat([{ role: 'user', content: 'x' }], { model: 'gpt-5' });
+      const params = chatCreateMock.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(params?.reasoning_effort).toBeUndefined();
+    });
+
+    // Per-model accepted enum — o-series does NOT accept 'minimal'
+    // (added with gpt-5). The provider drops the field rather than
+    // letting OpenAI 400. Caller intent is still on the trace.
+    it.each([
+      ['o1', 'o-series'],
+      ['o1-mini', 'o-series'],
+      ['o3-mini', 'o-series'],
+      ['o4-mini', 'o-series'],
+    ])('drops `minimal` silently on %s (%s rejects this enum value)', async (modelId) => {
+      chatCreateMock.mockResolvedValue(makeChatCompletion('ok', 'stop'));
+      const provider = makeProvider();
+      await provider.chat([{ role: 'user', content: 'x' }], {
+        model: modelId,
+        reasoningEffort: 'minimal',
+      });
+      const params = chatCreateMock.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(params?.reasoning_effort).toBeUndefined();
+    });
+
+    it.each(['low', 'medium', 'high'] as const)(
+      'still forwards %s on o3-mini (these are the supported buckets)',
+      async (value) => {
+        chatCreateMock.mockResolvedValue(makeChatCompletion('ok', 'stop'));
+        const provider = makeProvider();
+        await provider.chat([{ role: 'user', content: 'x' }], {
+          model: 'o3-mini',
+          reasoningEffort: value,
+        });
+        const params = chatCreateMock.mock.calls[0]?.[0] as Record<string, unknown>;
+        expect(params?.reasoning_effort).toBe(value);
+      }
+    );
+
+    it('forwards `minimal` on gpt-5 (gpt-5 family added this bucket)', async () => {
+      chatCreateMock.mockResolvedValue(makeChatCompletion('ok', 'stop'));
+      const provider = makeProvider();
+      await provider.chat([{ role: 'user', content: 'x' }], {
+        model: 'gpt-5',
+        reasoningEffort: 'minimal',
+      });
+      const params = chatCreateMock.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(params?.reasoning_effort).toBe('minimal');
+    });
+  });
+
+  // ── Prefixed model ids — the failure case that motivated promoting the
+  //    param-shape decision into the model registry. The prior regex was
+  //    anchored on `^(o\d+|gpt-5)`, so an OpenRouter / Azure id like
+  //    `openai/gpt-5-mini` slipped past the check and 400'd with
+  //    "Unsupported parameter: 'max_tokens' is not supported with this
+  //    model. Use 'max_completion_tokens' instead." `deriveParamProfile`
+  //    strips known provider prefixes before testing.
+
+  describe.each([
+    ['openai/gpt-5', 'openai/gpt-5'],
+    ['openai/gpt-5-mini', 'openai/gpt-5-mini'],
+    ['openai/o3-mini', 'openai/o3-mini'],
+    ['azure/gpt-5', 'azure/gpt-5'],
+  ])('prefixed reasoning id — %s', (label, modelId) => {
+    it(`still resolves to max_completion_tokens for ${label}`, async () => {
+      chatCreateMock.mockResolvedValue(makeChatCompletion('ok', 'stop'));
+      const provider = makeProvider();
+      await provider.chat([{ role: 'user', content: 'x' }], { model: modelId, maxTokens: 256 });
+
+      const params = chatCreateMock.mock.calls[0]?.[0] as Record<string, unknown>;
+      expect(params?.max_completion_tokens).toBe(256);
+      expect(params?.max_tokens).toBeUndefined();
+    });
+  });
+
   it('does not include tools when tools array is empty', async () => {
     // Arrange
     chatCreateMock.mockResolvedValue(makeChatCompletion('ok', 'stop'));

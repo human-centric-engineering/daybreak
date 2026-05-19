@@ -125,6 +125,7 @@ const MOCK_AGENT = {
   systemInstructions: 'You are a summarizer.',
   temperature: 0.3,
   maxTokens: 1000,
+  reasoningEffort: null as 'minimal' | 'low' | 'medium' | 'high' | null,
   isActive: true,
 };
 
@@ -214,6 +215,55 @@ describe('executeAgentCall', () => {
     expect(options.model).toBe('claude-sonnet-4-20250514');
     expect(options.temperature).toBe(0.3);
     expect(options.maxTokens).toBe(1000);
+  });
+
+  // ── reasoningEffort precedence ─────────────────────────────────────────
+  //
+  // Resolution order: step config > agent column > undefined. The same
+  // resolved value is forwarded to provider.chat() AND recorded on the
+  // telemetry requestParams snapshot, so the trace reflects what was
+  // actually sent.
+
+  it('reasoningEffort: uses the agent column when the step config does not set it', async () => {
+    vi.mocked(prisma.aiAgent.findFirst).mockResolvedValue({
+      ...MOCK_AGENT,
+      reasoningEffort: 'low',
+    } as never);
+
+    await executeAgentCall(makeStep(), makeCtx());
+
+    expect(mockChat.mock.calls[0][1].reasoningEffort).toBe('low');
+  });
+
+  it('reasoningEffort: step config overrides the agent column when both are set', async () => {
+    vi.mocked(prisma.aiAgent.findFirst).mockResolvedValue({
+      ...MOCK_AGENT,
+      reasoningEffort: 'low',
+    } as never);
+
+    await executeAgentCall(makeStep({ reasoningEffort: 'high' }), makeCtx());
+
+    expect(mockChat.mock.calls[0][1].reasoningEffort).toBe('high');
+  });
+
+  it('reasoningEffort: omits the field entirely when neither step nor agent sets it', async () => {
+    // Default MOCK_AGENT has reasoningEffort: null and the step has none.
+    await executeAgentCall(makeStep(), makeCtx());
+
+    expect(mockChat.mock.calls[0][1].reasoningEffort).toBeUndefined();
+  });
+
+  it('reasoningEffort: step config beats the agent column in BOTH directions (high→low and low→high)', async () => {
+    // Bidirectional sanity check — one direction (low→high) on its own
+    // is consistent with "always pick the larger bucket"; the inverse
+    // direction confirms the resolution is genuinely "step value wins"
+    // and not some max() or precedence-by-magnitude.
+    vi.mocked(prisma.aiAgent.findFirst).mockResolvedValue({
+      ...MOCK_AGENT,
+      reasoningEffort: 'high',
+    } as never);
+    await executeAgentCall(makeStep({ reasoningEffort: 'low' }), makeCtx());
+    expect(mockChat.mock.calls[0][1].reasoningEffort).toBe('low');
   });
 
   it('interpolates the message template', async () => {

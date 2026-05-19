@@ -17,7 +17,8 @@
 
 import { logger } from '@/lib/logging';
 import { CostOperation } from '@/types/orchestration';
-import type { LlmResponseFormat } from '@/lib/orchestration/llm/types';
+import type { LlmRequestParamsSnapshot } from '@/types/orchestration';
+import type { LlmResponseFormat, ReasoningEffort } from '@/lib/orchestration/llm/types';
 import { calculateCost, logCost } from '@/lib/orchestration/llm/cost-tracker';
 import { getModel } from '@/lib/orchestration/llm/model-registry';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
@@ -49,8 +50,24 @@ export interface LlmRunParams {
   modelOverride?: string;
   temperature?: number;
   maxTokens?: number;
+  /**
+   * How much reasoning the model should do before producing visible
+   * output. Honoured only by reasoning-capable models (the OpenAI
+   * o-series / gpt-5 families and Anthropic Claude 4 thinking models);
+   * silently dropped on others. See `lib/orchestration/llm/types.ts`
+   * for the per-provider mapping.
+   */
+  reasoningEffort?: ReasoningEffort;
   /** Request structured JSON output from the model. */
   responseFormat?: LlmResponseFormat;
+  /**
+   * Origin tag for steps whose `ctx.stepTelemetry` mixes calls of
+   * different intent (today: only `orchestrator`'s planner call).
+   * Forwarded onto the telemetry entry so `rollupTelemetry` can pick
+   * the planner's identity for the trace headline instead of whichever
+   * delegation ran last. Omit on single-purpose calls.
+   */
+  source?: 'planner' | 'delegation';
   /** Most recent step id, used to resolve `{{previous.output}}`. */
   previousStepId?: string;
 }
@@ -122,6 +139,7 @@ export async function runLlmCall(
           model: modelId,
           temperature: params.temperature,
           maxTokens: params.maxTokens,
+          ...(params.reasoningEffort ? { reasoningEffort: params.reasoningEffort } : {}),
           ...(params.responseFormat ? { responseFormat: params.responseFormat } : {}),
           signal: ctx.signal,
         });
@@ -140,12 +158,19 @@ export async function runLlmCall(
       // `snapshotContext(ctx, telemetryOut)`; test harnesses that don't care
       // about telemetry leave the field undefined and the optional chain
       // silently no-ops.
+      const requestParams: LlmRequestParamsSnapshot = {};
+      if (params.maxTokens !== undefined) requestParams.maxTokens = params.maxTokens;
+      if (params.temperature !== undefined) requestParams.temperature = params.temperature;
+      if (params.responseFormat) requestParams.responseFormat = params.responseFormat.type;
+      if (params.reasoningEffort) requestParams.reasoningEffort = params.reasoningEffort;
       ctx.stepTelemetry?.push({
         model: modelId,
         provider: modelInfo.provider,
         inputTokens: response.usage.inputTokens,
         outputTokens: response.usage.outputTokens,
         durationMs: callDurationMs,
+        ...(Object.keys(requestParams).length > 0 ? { requestParams } : {}),
+        ...(params.source ? { source: params.source } : {}),
       });
 
       const cost = calculateCost(modelId, response.usage.inputTokens, response.usage.outputTokens);
