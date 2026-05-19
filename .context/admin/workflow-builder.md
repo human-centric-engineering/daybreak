@@ -239,7 +239,7 @@ All editors live under `components/admin/orchestration/workflow-builder/block-ed
 
 ### Step description
 
-Optional field on every step. One or two sentences explaining what the step does and what it contributes downstream — operator-facing, not author-facing. Shown on hover in the execution trace viewer (a `title` tooltip on the step label plus an ⓘ icon next to it) and as a muted paragraph at the top of the expanded row when an operator clicks to inspect a step.
+Optional field on every step. One or two sentences explaining what the step does and what it contributes downstream — operator-facing, not author-facing. Shown only inside the expanded accordion body of the execution trace viewer (a muted paragraph at the top of the expanded row, above the input / output panes). The collapsed row stays compact; the description is reveal-on-expand only.
 
 Authoring guidance (used to backfill every step in the 12 seed templates):
 

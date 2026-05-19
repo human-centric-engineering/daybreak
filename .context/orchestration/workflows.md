@@ -37,7 +37,7 @@ interface WorkflowStep {
 }
 ```
 
-The optional `description` is the "why this step exists and what it contributes" hover text shown in the execution trace viewer (on hover and in the expanded row). Authoring guidance lives in [`workflow-builder.md` § Step description](../admin/workflow-builder.md#step-description). Capped at 500 chars by the Zod schema; `.trim()` is applied so a paste-with-blank-lines doesn't persist.
+The optional `description` is the "why this step exists and what it contributes" copy shown inside the expanded accordion body of the execution trace viewer (the collapsed row stays compact; it's a reveal-on-expand field). Authoring guidance lives in [`workflow-builder.md` § Step description](../admin/workflow-builder.md#step-description). Capped at 500 chars by the Zod schema; `.trim()` is applied so a paste-with-blank-lines doesn't persist.
 
 Zod validates the **shape** (in `createWorkflowSchema` / `updateWorkflowSchema`). `validateWorkflow` validates the **structure**: reachability, cycles, per-type config requirements.
 

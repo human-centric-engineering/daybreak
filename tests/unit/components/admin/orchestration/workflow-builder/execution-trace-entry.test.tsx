@@ -72,43 +72,26 @@ describe('ExecutionTraceEntryRow', () => {
   });
 
   // ── Description ─────────────────────────────────────────────────────────
-  // The description field surfaces in three places when set: the step
-  // label's `title`, an ⓘ icon next to the label (also `title`-bearing),
-  // and a muted paragraph at the top of the expanded body. When absent
-  // none of those should appear — the row must stay byte-identical to its
-  // pre-description appearance for steps that don't carry one.
+  // The description surfaces ONLY when the operator expands the row.
+  // It is not shown on the collapsed row, not in a `title` tooltip,
+  // and not next to a ⓘ icon — collapsing the row hides it again, by
+  // design. These tests pin both the present and absent cases.
   describe('step description', () => {
     const DESCRIPTION = 'Picks up the parsed model list and drafts the reply.';
 
-    it('renders the description as a `title` attribute on the step label when set', () => {
+    it('does NOT render the description on the collapsed row (no inline text, no title, no icon)', () => {
       render(<ExecutionTraceEntryRow {...BASE_PROPS} description={DESCRIPTION} />);
-      // The label's title gives a native browser tooltip on hover without
-      // requiring a click into the expand affordance.
-      expect(screen.getByText('Generate Summary')).toHaveAttribute('title', DESCRIPTION);
-    });
-
-    it('renders the ⓘ icon with matching `title` when description is set', () => {
-      render(<ExecutionTraceEntryRow {...BASE_PROPS} description={DESCRIPTION} />);
-      const icon = screen.getByTestId('trace-entry-description-icon-step-1');
-      expect(icon).toHaveAttribute('title', DESCRIPTION);
-      // The icon is a visible "more info here" signal next to the label,
-      // matching the fork/branch chip pattern already used in this row.
-      expect(icon).toBeInTheDocument();
-    });
-
-    it('omits the ⓘ icon entirely when no description is set', () => {
-      render(<ExecutionTraceEntryRow {...BASE_PROPS} />);
+      // No description paragraph visible while collapsed.
+      expect(screen.queryByTestId('trace-entry-description-step-1')).not.toBeInTheDocument();
+      // No native browser tooltip on the step name either — the
+      // description is reveal-on-expand only.
+      expect(screen.getByText('Generate Summary')).not.toHaveAttribute('title');
+      // And no ⓘ icon — the test id from the prior icon-based design
+      // must stay absent so a future regression doesn't reintroduce it.
       expect(screen.queryByTestId('trace-entry-description-icon-step-1')).not.toBeInTheDocument();
     });
 
-    it('omits the `title` from the label when no description is set', () => {
-      render(<ExecutionTraceEntryRow {...BASE_PROPS} />);
-      // `toHaveAttribute('title', undefined)` is unreliable across DOM
-      // implementations — check that the attribute is absent.
-      expect(screen.getByText('Generate Summary')).not.toHaveAttribute('title');
-    });
-
-    it('renders the description as a muted paragraph at the top of the expanded body', async () => {
+    it('renders the description as a muted paragraph at the top of the expanded body when set', async () => {
       const user = userEvent.setup();
       render(<ExecutionTraceEntryRow {...BASE_PROPS} description={DESCRIPTION} output="result" />);
       // Expand the row first — the description paragraph lives inside the
