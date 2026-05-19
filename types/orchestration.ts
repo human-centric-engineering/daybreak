@@ -205,6 +205,13 @@ export interface WorkflowStep {
   id: string;
   /** Human-readable step name */
   name: string;
+  /**
+   * Optional one-or-two sentence explanation of why this step exists and what
+   * it contributes. Surfaces on hover and in the expanded trace row in the
+   * execution viewer, and renders as a `<Textarea>` in the workflow builder's
+   * block-config panel. Capped at 500 chars by the Zod schema.
+   */
+  description?: string;
   /** Step type — see WorkflowStepType for known types */
   type: WorkflowStepType;
   /** Step-specific configuration */
@@ -392,6 +399,13 @@ export interface ExecutionTraceEntry {
   stepId: string;
   stepType: WorkflowStepType;
   label: string;
+  /**
+   * Snapshot of `WorkflowStep.description` at execution time. Carried onto
+   * every trace entry by the engine so the viewer can show step context on
+   * hover and in the expanded row without rejoining to the workflow
+   * snapshot. Absent when the step had no description configured.
+   */
+  description?: string;
   status: 'completed' | 'failed' | 'skipped' | 'awaiting_approval' | 'rejected';
   output: unknown;
   error?: string;

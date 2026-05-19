@@ -905,6 +905,12 @@ const conditionalEdgeSchema = z.object({
 const workflowStepSchema = z.object({
   id: z.string().min(1, 'Step ID is required'),
   name: z.string().min(1, 'Step name is required').max(100),
+  // Operator-facing context surfaced on hover and in the expanded trace
+  // row. Optional — short, self-explanatory steps don't need it. Capped at
+  // 500 chars so the tooltip body stays legible and authors don't paste
+  // essays here. `.trim()` discards leading/trailing whitespace so a
+  // blank-line paste doesn't persist.
+  description: z.string().trim().max(500).optional(),
   type: z.enum(KNOWN_STEP_TYPES, {
     message: `Step type must be one of: ${KNOWN_STEP_TYPES.join(', ')}`,
   }),
