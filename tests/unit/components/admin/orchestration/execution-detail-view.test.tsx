@@ -885,6 +885,51 @@ describe('ExecutionDetailView', () => {
       expect(rows[0]).toHaveTextContent('Analyse data');
     });
 
+    it('marks a running-step row with completedAt as a completed entry in the trace', () => {
+      // Phase 2 of the parallel-bar work: the engine stamps completedAt
+      // on a branch's running-step row when it finishes ahead of its
+      // siblings. The detail view turns that into a synthesised
+      // `status: 'completed'` row so the trace UI and the timeline both
+      // see the branch as done (and the latter draws the greyed wait
+      // segment).
+      render(
+        <ExecutionDetailView
+          execution={makeExecution({
+            status: 'running',
+            completedAt: null,
+            currentStep: 'fast-branch',
+          })}
+          trace={[]}
+          initialRunningSteps={[
+            {
+              stepId: 'fast-branch',
+              label: 'Fast branch',
+              stepType: 'llm_call',
+              startedAt: '2025-01-01T10:00:00.000Z',
+              completedAt: '2025-01-01T10:00:02.000Z',
+              turnCount: 0,
+            },
+            {
+              stepId: 'slow-branch',
+              label: 'Slow branch',
+              stepType: 'llm_call',
+              startedAt: '2025-01-01T10:00:00.000Z',
+              completedAt: null,
+              turnCount: 0,
+            },
+          ]}
+        />
+      );
+
+      // The finished branch reads as Completed, the still-running one
+      // as Running — even though both are sitting in the running-step
+      // table.
+      const fast = screen.getByTestId('trace-entry-fast-branch');
+      const slow = screen.getByTestId('trace-entry-slow-branch');
+      expect(fast).toHaveTextContent('Completed');
+      expect(slow).toHaveTextContent('Running');
+    });
+
     it('does not synthesise a running row when initialRunningSteps is empty', () => {
       render(
         <ExecutionDetailView

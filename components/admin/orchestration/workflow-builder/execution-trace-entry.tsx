@@ -152,6 +152,17 @@ export interface ExecutionTraceEntryRowProps {
   forkNumber?: number;
   parallelBranchOfNumber?: number;
   /**
+   * Ms this branch sat waiting for the slowest sibling to finish — i.e.
+   * the gap between this branch's own end and the fork's join time.
+   * Set only on rows that are an immediate branch of a parallel fork
+   * and that finished before at least one sibling. Rendered as a small
+   * "+Xs waited for slower siblings" line under the duration so the
+   * operator can see at a glance which branches ate idle time. The
+   * parent view recomputes this each tick while siblings are still
+   * running, so the displayed value grows live.
+   */
+  parallelWaitMs?: number;
+  /**
    * Controlled expand state. When provided, the row is in controlled mode
    * and the parent owns which entry is open — used to enforce
    * single-open accordion behaviour across the trace list. When omitted,
@@ -215,6 +226,7 @@ export function ExecutionTraceEntryRow({
   onRetry,
   forkNumber,
   parallelBranchOfNumber,
+  parallelWaitMs,
   expanded: expandedProp,
   onExpandedChange,
   interpolationContext,
@@ -331,6 +343,15 @@ export function ExecutionTraceEntryRow({
           <div className="text-muted-foreground mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs">
             <span>{style.text}</span>
             {typeof durationMs === 'number' && <span>{durationMs.toLocaleString()} ms</span>}
+            {typeof parallelWaitMs === 'number' && parallelWaitMs > 0 && (
+              <span
+                data-testid={`trace-entry-parallel-wait-${stepId}`}
+                title="Time this branch sat waiting for slower sibling branches to finish"
+                className="text-muted-foreground/80"
+              >
+                +{parallelWaitMs.toLocaleString()} ms waited for siblings
+              </span>
+            )}
             {status === 'running' && typeof turnCount === 'number' && turnCount > 0 && (
               <span data-testid={`trace-entry-turn-count-${stepId}`}>
                 {turnCount === 1 ? '1 turn' : `${turnCount.toLocaleString()} turns`}

@@ -69,6 +69,20 @@ describe('ExecutionTraceEntryRow', () => {
       render(<ExecutionTraceEntryRow {...BASE_PROPS} costUsd={0.0042} />);
       expect(screen.getByText('$0.0042')).toBeInTheDocument();
     });
+
+    it('shows the parallel-wait annotation when parallelWaitMs > 0', () => {
+      render(<ExecutionTraceEntryRow {...BASE_PROPS} durationMs={1234} parallelWaitMs={5678} />);
+      expect(screen.getByTestId('trace-entry-parallel-wait-step-1')).toHaveTextContent(
+        /5,?678 ms waited for siblings/
+      );
+    });
+
+    it('omits the parallel-wait annotation when parallelWaitMs is 0 or undefined', () => {
+      const { rerender } = render(<ExecutionTraceEntryRow {...BASE_PROPS} durationMs={1234} />);
+      expect(screen.queryByTestId('trace-entry-parallel-wait-step-1')).not.toBeInTheDocument();
+      rerender(<ExecutionTraceEntryRow {...BASE_PROPS} durationMs={1234} parallelWaitMs={0} />);
+      expect(screen.queryByTestId('trace-entry-parallel-wait-step-1')).not.toBeInTheDocument();
+    });
   });
 
   // ── Description ─────────────────────────────────────────────────────────
