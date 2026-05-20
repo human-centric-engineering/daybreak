@@ -35,6 +35,7 @@ import {
   ShieldCheck,
   PlayCircle,
   MessagesSquare,
+  UserCog,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { API } from '@/lib/api/endpoints';
@@ -114,6 +115,12 @@ const navSections: NavSection[] = [
             label: 'Agents',
             icon: Users,
             description: 'Manage AI agents',
+          },
+          {
+            href: '/admin/orchestration/agent-profiles',
+            label: 'Agent Profiles',
+            icon: UserCog,
+            description: 'Shared persona / voice / guardrails',
           },
           {
             href: '/admin/orchestration/capabilities',
