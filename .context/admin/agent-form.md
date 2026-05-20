@@ -8,16 +8,16 @@ Shared create/edit form for `AiAgent`. Eight shadcn tabs, one underlying `<form>
 
 ## Tab structure
 
-| #   | Tab           | Create | Edit | Notes                                                                                                                                                                                           |
-| --- | ------------- | ------ | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | General       | ✅     | ✅   | Name, slug, description, active, **visibility**, retention days                                                                                                                                 |
-| 2   | Model         | ✅     | ✅   | Provider, **fallback providers**, model, temperature, max tokens, budget, **rate limit RPM**, test conn                                                                                         |
-| 3   | Instructions  | ✅     | ✅   | Textarea, **brand voice**, **knowledge categories**, **topic boundaries**, character count, history panel (edit only)                                                                           |
-| 4   | Capabilities  | 🚫     | ✅   | Attach/detach, isEnabled, customConfig                                                                                                                                                          |
-| 5   | Invite tokens | 🚫     | ✅\* | Token CRUD table; only enabled when `visibility = 'invite_only'`                                                                                                                                |
-| 6   | Versions      | 🚫     | ✅   | Full config version history with restore                                                                                                                                                        |
-| 7   | Test          | 🚫     | ✅   | Embeds the shared admin `<ChatInterface>` against this agent                                                                                                                                    |
-| 8   | Embed         | 🚫     | ✅   | `<EmbedConfigPanel>` stacks two cards: **Appearance & copy** (per-agent widget colours / fonts / copy / starters) + **Tokens** (create, copy `<script>` snippet, toggle active, manage origins) |
+| #   | Tab           | Create | Edit | Notes                                                                                                                                                                                                                  |
+| --- | ------------- | ------ | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | General       | ✅     | ✅   | Name, slug, description, **inherit from profile**, active, **visibility**, retention days                                                                                                                              |
+| 2   | Model         | ✅     | ✅   | Provider, **fallback providers**, model, temperature, max tokens, budget, **rate limit RPM**, test conn                                                                                                                |
+| 3   | Instructions  | ✅     | ✅   | **Persona**, system instructions, **guardrails**, **brand voice** (all three inheritable from profile with override/append mode), **effective prompt preview**, knowledge, topic boundaries, history panel (edit only) |
+| 4   | Capabilities  | 🚫     | ✅   | Attach/detach, isEnabled, customConfig                                                                                                                                                                                 |
+| 5   | Invite tokens | 🚫     | ✅\* | Token CRUD table; only enabled when `visibility = 'invite_only'`                                                                                                                                                       |
+| 6   | Versions      | 🚫     | ✅   | Full config version history with restore                                                                                                                                                                               |
+| 7   | Test          | 🚫     | ✅   | Embeds the shared admin `<ChatInterface>` against this agent                                                                                                                                                           |
+| 8   | Embed         | 🚫     | ✅   | `<EmbedConfigPanel>` stacks two cards: **Appearance & copy** (per-agent widget colours / fonts / copy / starters) + **Tokens** (create, copy `<script>` snippet, toggle active, manage origins)                        |
 
 Tabs 4–8 are `disabled` in create mode — they require a persisted `agent.id`. Tab 5 additionally requires `visibility = 'invite_only'` — it is disabled for other visibility modes.
 
@@ -164,11 +164,27 @@ Implementation: `getAgentModels()` in `lib/orchestration/prefetch-helpers.ts` fi
 
 ## Tab 3 — Instructions
 
-Single `<Textarea rows={16}>` bound to `systemInstructions`, with a character count in the footer.
+The Instructions tab composes the LLM's `system` message from four sections in this fixed order:
 
-### Brand voice instructions
+```
+[Persona] → systemInstructions → [Guardrails] → [Brand Voice]
+```
 
-Textarea (4 rows) for brand-voice guidance. Injected into the system prompt as a separate section so the LLM follows tone/style rules consistently. Example: "Always respond in a professional, concise tone. Avoid slang."
+**Persona**, **Guardrails**, and **Brand voice** are _inheritable_ from the [agent profile](./orchestration-agent-profiles.md) selected on the General tab. **System instructions** is always agent-only — it's the task description, the reason the agent exists separately. See [`.context/orchestration/agent-profiles.md`](../orchestration/agent-profiles.md) for the resolution rules.
+
+### Inheritable fields (Persona / Guardrails / Brand voice)
+
+Each renders a `<Textarea>` plus an "Append to profile" checkbox that appears only when both a profile is attached AND the agent has populated the field:
+
+- **Empty agent text** → inherits the profile's value. Placeholder shows `Profile says: …` so the operator sees what they're inheriting.
+- **Populated agent text, checkbox off (default)** → agent value overrides the profile.
+- **Populated agent text, checkbox on** → agent value appends to the profile (`${profile}\n\n${agent}`), composed as a single joined section in the system message.
+
+When no profile is selected, the checkbox is hidden and the field behaves exactly as today (agent-only).
+
+### System instructions
+
+`<Textarea rows={16}>` bound to `systemInstructions`, with a character count in the footer. Never inheritable.
 
 ### Knowledge categories
 
@@ -179,6 +195,18 @@ Comma-separated text input. Tags that scope the agent to specific knowledge base
 Comma-separated text input. Topics the output guard checks against. If the LLM response touches these topics, the output guard fires. Transformed to `string[]` on submit.
 
 Below the textarea, in edit mode only, `<InstructionsHistoryPanel>` renders a collapsible audit log.
+
+### Effective prompt preview
+
+A collapsible card at the bottom of the tab shows the **merged system message** the LLM will actually receive — composed via the same `resolveEffectivePrompt` + `composeSystemPromptString` helpers used by the chat streaming handler and the workflow `agent_call` executor. Per-section source badges label each part as:
+
+- `from profile "X"` — inherited verbatim
+- `override` — the agent replaces the profile value
+- `profile + agent additions` — append mode joined both
+- `unset` — neither side contributed
+- `agent-only` — system instructions (always agent-only)
+
+The preview re-renders live as the operator types or flips a mode checkbox. What you see is what the model gets.
 
 ### History panel
 

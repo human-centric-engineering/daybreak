@@ -314,6 +314,8 @@ All commands default to branch diff mode but accept file/folder paths. The test-
 | Orchestration Dashboard  | `.context/admin/orchestration-dashboard.md`               | Admin landing page, data sources, layout                                                |
 | Agents List / Pages      | `.context/admin/orchestration-agents.md`                  | List, create, edit shells; table, bulk export                                           |
 | Agent Form               | `.context/admin/agent-form.md`                            | 6-tab create/edit form, FieldHelp reference                                             |
+| Agent Profiles (admin)   | `.context/admin/orchestration-agent-profiles.md`          | Shared persona / voice / guardrails library, attached-agent counts                      |
+| Agent Profiles (runtime) | `.context/orchestration/agent-profiles.md`                | Inheritance resolver, override/append modes, composition order                          |
 | Capabilities List        | `.context/admin/orchestration-capabilities.md`            | Table, category filter, agents-using count                                              |
 | Capability Form          | `.context/admin/capability-form.md`                       | 4 tabs, visual builder ↔ JSON editor, safety                                            |
 | Providers List           | `.context/admin/orchestration-providers.md`               | Card grid, status dots, env-var-only security                                           |

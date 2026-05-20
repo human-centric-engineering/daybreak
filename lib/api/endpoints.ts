@@ -101,6 +101,8 @@ export const API = {
       PROVIDER_MODELS_BULK: '/api/v1/admin/orchestration/provider-models/bulk',
       PROVIDER_MODEL_RECOMMEND: '/api/v1/admin/orchestration/provider-models/recommend',
       DISCOVERY_MODELS: '/api/v1/admin/orchestration/discovery/models',
+      AGENT_PROFILES: '/api/v1/admin/orchestration/agent-profiles',
+      agentProfileById: (id: string): string => `/api/v1/admin/orchestration/agent-profiles/${id}`,
       PROVIDERS: '/api/v1/admin/orchestration/providers',
       PROVIDERS_DETECT: '/api/v1/admin/orchestration/providers/detect',
       PROVIDERS_TEST_BULK: '/api/v1/admin/orchestration/providers/test-bulk',
