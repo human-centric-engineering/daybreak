@@ -930,6 +930,125 @@ describe('ExecutionDetailView', () => {
       expect(slow).toHaveTextContent('Running');
     });
 
+    it('computes parallelWaitMs per branch and renders the annotation on early-finishing branches', () => {
+      // Exercises parallelWaitMsByStepId. The trace contains a `parallel`
+      // fork (its output.branches is the source of truth for
+      // `buildParallelBranchMap`) plus two branch entries with very
+      // different completedAt values. Branch A finishes 4 s before
+      // Branch B, so A picks up a wait annotation; B is the slowest
+      // sibling, so its row has no annotation.
+      const trace: ExecutionTraceEntry[] = [
+        {
+          stepId: 'fork-1',
+          stepType: 'parallel',
+          label: 'Fork',
+          status: 'completed',
+          output: { parallel: true, branches: ['branch-a', 'branch-b'] },
+          tokensUsed: 0,
+          costUsd: 0,
+          startedAt: '2025-01-01T10:00:00.000Z',
+          completedAt: '2025-01-01T10:00:00.001Z',
+          durationMs: 1,
+        },
+        {
+          stepId: 'branch-a',
+          stepType: 'llm_call',
+          label: 'Branch A',
+          status: 'completed',
+          output: 'a-done',
+          tokensUsed: 0,
+          costUsd: 0,
+          startedAt: '2025-01-01T10:00:00.001Z',
+          completedAt: '2025-01-01T10:00:01.001Z',
+          durationMs: 1000,
+        },
+        {
+          stepId: 'branch-b',
+          stepType: 'llm_call',
+          label: 'Branch B',
+          status: 'completed',
+          output: 'b-done',
+          tokensUsed: 0,
+          costUsd: 0,
+          startedAt: '2025-01-01T10:00:00.001Z',
+          completedAt: '2025-01-01T10:00:05.001Z',
+          durationMs: 5000,
+        },
+      ];
+
+      render(
+        <ExecutionDetailView
+          execution={makeExecution({ status: 'completed' })}
+          trace={trace}
+          initialRunningSteps={[]}
+        />
+      );
+
+      // A wait ≈ 4000 ms (B's end − A's end). The annotation lives in
+      // the trace row; assert it's there for A and absent for B.
+      const aWait = screen.getByTestId('trace-entry-parallel-wait-branch-a');
+      expect(aWait).toHaveTextContent(/4,?000 ms waited for siblings/);
+      expect(screen.queryByTestId('trace-entry-parallel-wait-branch-b')).not.toBeInTheDocument();
+    });
+
+    it('does not annotate a branch as waiting while a sibling is still running with no completedAt', () => {
+      // Mixed state: fast branch in `trace` as completed, slow branch
+      // synthesised from `initialRunningSteps` with no completedAt. The
+      // memo treats the still-running branch as "join time = now", so
+      // the completed branch does get a wait — but the running branch
+      // itself must not be annotated (it's the work, not the wait).
+      const trace: ExecutionTraceEntry[] = [
+        {
+          stepId: 'fork-2',
+          stepType: 'parallel',
+          label: 'Fork',
+          status: 'completed',
+          output: { parallel: true, branches: ['fast', 'slow'] },
+          tokensUsed: 0,
+          costUsd: 0,
+          startedAt: '2025-01-01T10:00:00.000Z',
+          completedAt: '2025-01-01T10:00:00.001Z',
+          durationMs: 1,
+        },
+        {
+          stepId: 'fast',
+          stepType: 'llm_call',
+          label: 'Fast branch',
+          status: 'completed',
+          output: 'done',
+          tokensUsed: 0,
+          costUsd: 0,
+          startedAt: '2025-01-01T10:00:00.001Z',
+          completedAt: '2025-01-01T10:00:01.001Z',
+          durationMs: 1000,
+        },
+      ];
+
+      render(
+        <ExecutionDetailView
+          execution={makeExecution({ status: 'running', completedAt: null })}
+          trace={trace}
+          initialRunningSteps={[
+            {
+              stepId: 'slow',
+              label: 'Slow branch',
+              stepType: 'llm_call',
+              startedAt: '2025-01-01T10:00:00.001Z',
+              completedAt: null,
+              turnCount: 0,
+            },
+          ]}
+        />
+      );
+
+      // The completed sibling carries a wait (join time = "now", which
+      // is well past its end).
+      expect(screen.getByTestId('trace-entry-parallel-wait-fast')).toBeInTheDocument();
+      // The still-running branch must not have a wait annotation —
+      // it's the work itself, not idle time.
+      expect(screen.queryByTestId('trace-entry-parallel-wait-slow')).not.toBeInTheDocument();
+    });
+
     it('does not synthesise a running row when initialRunningSteps is empty', () => {
       render(
         <ExecutionDetailView
