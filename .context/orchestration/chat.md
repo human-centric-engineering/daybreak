@@ -318,6 +318,27 @@ The handler tracks per-tool consecutive failure counts in a `Map<string, number>
 
 Multiple tool calls in a single LLM turn are dispatched in parallel via `Promise.allSettled`. Each result is persisted individually. The backoff threshold applies per-tool — a failing tool in a multi-call turn doesn't block other tools.
 
+## System message composition
+
+The first `system` message is the merged agent prompt — composed in fixed order by `composeSections` in `lib/orchestration/agents/resolve-effective-prompt.ts`:
+
+```
+[Persona]
+<persona text>
+
+<systemInstructions>
+
+[Guardrails]
+<guardrails text>
+
+[Brand Voice]
+<brand voice text>
+```
+
+Persona / guardrails / brand voice are **inheritable** from the agent's optional `AiAgentProfile`. The streaming handler calls `resolveEffectivePrompt(agent, agent.profile)` before `buildMessages` so the text passed in already reflects the inheritance + override/append mode resolution. Sections with null text are omitted (no empty headers). The same resolver and helper are used by the workflow `agent_call` executor — chat and workflow produce byte-identical system prompts for a given agent.
+
+See [`.context/orchestration/agent-profiles.md`](./agent-profiles.md) for the resolution rules and source-map contract.
+
 ## Context Builder
 
 `buildContext(type, id)` returns a `LOCKED CONTEXT` text block that gets spliced in as a second `system` message after the agent's stable instructions (KV-cache friendly — the instructions prefix is invariant across turns).
