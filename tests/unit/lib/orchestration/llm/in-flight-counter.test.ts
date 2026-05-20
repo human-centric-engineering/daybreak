@@ -294,4 +294,99 @@ describe('getInFlightCounts()', () => {
     resolveSecond();
     await Promise.all([pFirst, pSecond]);
   });
+
+  // Explicit `iterator.throw()` is rarely called by `for await`, but it is
+  // part of the AsyncIterator contract — generators delegate to it on
+  // `yield*` errors. Both branches must release the counter so the only
+  // failure mode is "counter leaks until process exits."
+  it('trackStream() — explicit iter.throw() forwards to inner throw and releases the count', async () => {
+    const seenInThrow: unknown[] = [];
+    async function* gen(): AsyncGenerator<number> {
+      try {
+        yield 1;
+        yield 2;
+      } catch (err) {
+        seenInThrow.push(err);
+        // Swallow and end the iterator cleanly so the caller observes
+        // `done: true` instead of a re-throw — proves we forwarded to
+        // the inner throw and let the generator decide what to do.
+      }
+    }
+    const stream = trackStream('thrower', () => gen());
+    const iter = stream[Symbol.asyncIterator]();
+    expect(getInFlightCounts()).toEqual([{ provider: 'thrower', inFlight: 1 }]);
+
+    // Drive past the first yield so the generator is suspended at `yield 1`
+    // — that's the point `throw()` is allowed to inject.
+    const first = await iter.next();
+    expect(first).toEqual({ value: 1, done: false });
+
+    const boom = new Error('injected');
+    const result = await iter.throw!(boom);
+
+    // Inner generator caught the error and completed cleanly, so the
+    // wrapped iterator surfaces `{ done: true }` from the inner return.
+    expect(result.done).toBe(true);
+    expect(seenInThrow).toEqual([boom]);
+    // And the count was released exactly once.
+    expect(getInFlightCounts()).toEqual([]);
+  });
+
+  it('trackStream() — explicit iter.throw() rethrows when inner iterator has no throw handler', async () => {
+    // Hand-rolled async iterator with NO `throw` method — the wrapper's
+    // fallback branch (`throw err`) must run, and the counter must
+    // still be released first.
+    function makeIter(): AsyncIterable<number> {
+      return {
+        [Symbol.asyncIterator](): AsyncIterator<number> {
+          let i = 0;
+          return {
+            async next(): Promise<IteratorResult<number>> {
+              i += 1;
+              if (i > 3) return { value: undefined as never, done: true };
+              return { value: i, done: false };
+            },
+            // No `throw`, no `return` — minimal contract.
+          };
+        },
+      };
+    }
+
+    const stream = trackStream('no-throw-iter', () => makeIter());
+    const iter = stream[Symbol.asyncIterator]();
+    expect(getInFlightCounts()).toEqual([{ provider: 'no-throw-iter', inFlight: 1 }]);
+
+    await iter.next();
+
+    const boom = new Error('rethrown');
+    await expect(iter.throw!(boom)).rejects.toBe(boom);
+    expect(getInFlightCounts()).toEqual([]);
+  });
+
+  // The matching coverage gap on `return()`: explicit `iter.return()`
+  // with an inner iterator that lacks the hook. The `for await ... break`
+  // tests above exercise the with-hook branch; this covers the fallback.
+  it('trackStream() — explicit iter.return() releases and returns done when inner has no return handler', async () => {
+    function makeIter(): AsyncIterable<number> {
+      return {
+        [Symbol.asyncIterator](): AsyncIterator<number> {
+          let i = 0;
+          return {
+            async next(): Promise<IteratorResult<number>> {
+              i += 1;
+              return { value: i, done: false };
+            },
+          };
+        },
+      };
+    }
+
+    const stream = trackStream('no-return-iter', () => makeIter());
+    const iter = stream[Symbol.asyncIterator]();
+    expect(getInFlightCounts()).toEqual([{ provider: 'no-return-iter', inFlight: 1 }]);
+
+    const result = await iter.return!(42);
+    expect(result).toEqual({ value: 42, done: true });
+    expect(getInFlightCounts()).toEqual([]);
+  });
 });

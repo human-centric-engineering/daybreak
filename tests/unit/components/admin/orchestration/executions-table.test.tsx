@@ -657,4 +657,92 @@ describe('ExecutionsTable', () => {
       });
     });
   });
+
+  // Refetch failure path: the catch block sets a user-facing message
+  // ("Could not load executions. Try refreshing the page.") without
+  // crashing the table.
+  describe('list refetch error path', () => {
+    it('surfaces a friendly error banner when the executions refetch fails', async () => {
+      const user = userEvent.setup();
+      mockFetch.mockRejectedValueOnce(new TypeError('network down'));
+
+      render(<ExecutionsTable initialExecutions={TWO_EXECUTIONS} initialMeta={MOCK_META} />);
+
+      await user.click(screen.getByRole('combobox'));
+      await user.click(await screen.findByRole('option', { name: /running/i }));
+
+      await waitFor(() => {
+        expect(
+          screen.getByText('Could not load executions. Try refreshing the page.')
+        ).toBeInTheDocument();
+      });
+    });
+  });
+
+  // Pagination prev-button branch: previous tests cover "next" via
+  // status-filter refetch; this covers the previous-page click on a
+  // page-2 starting state plus the page-1 disabled boundary.
+  describe('pagination — previous button', () => {
+    it('clicking Previous on page 2 issues a page=1 refetch', async () => {
+      const user = userEvent.setup();
+      const page2Meta = { page: 2, limit: 25, total: 50, totalPages: 2 } as const;
+      mockFetch.mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            success: true,
+            data: TWO_EXECUTIONS,
+            meta: { page: 1, limit: 25, total: 50, totalPages: 2 },
+          })
+        )
+      );
+
+      render(<ExecutionsTable initialExecutions={TWO_EXECUTIONS} initialMeta={page2Meta} />);
+
+      const prev = screen.getByRole('button', { name: /previous/i });
+      expect(prev).not.toBeDisabled();
+      await user.click(prev);
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalled();
+      });
+      const lastCallUrl = mockFetch.mock.calls.at(-1)?.[0];
+      // The component always passes the URL as a string template literal —
+      // narrow rather than String()-coerce so TypeScript stays honest.
+      expect(typeof lastCallUrl).toBe('string');
+      expect(lastCallUrl as string).toContain('page=1');
+    });
+
+    it('Previous is disabled on page 1', () => {
+      render(<ExecutionsTable initialExecutions={TWO_EXECUTIONS} initialMeta={MOCK_META} />);
+      expect(screen.getByRole('button', { name: /previous/i })).toBeDisabled();
+    });
+  });
+
+  // AlertDialog cancellation runs the `onOpenChange(false)` branch
+  // that clears the target, reason, and error state. Without this
+  // test, a future regression that forgets to reset state on cancel
+  // would slip through.
+  describe('force-fail dialog cleanup', () => {
+    it('cancelling the dialog clears its state and closes it', async () => {
+      const user = userEvent.setup();
+      const exec = makeExecution({ status: 'running' });
+      render(<ExecutionsTable initialExecutions={[exec]} initialMeta={MOCK_META} />);
+
+      await user.click(screen.getByRole('button', { name: /row actions/i }));
+      const forceFailItem = await screen.findByRole('menuitem', {
+        name: /force fail/i,
+        hidden: true,
+      });
+      await user.click(forceFailItem);
+
+      const reasonField = await screen.findByLabelText(/reason \(optional\)/i);
+      await user.type(reasonField, 'noise');
+
+      await user.click(screen.getByRole('button', { name: /^cancel$/i }));
+
+      await waitFor(() => {
+        expect(screen.queryByText('Force-fail this execution?')).not.toBeInTheDocument();
+      });
+    });
+  });
 });

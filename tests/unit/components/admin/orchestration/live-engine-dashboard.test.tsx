@@ -454,4 +454,48 @@ describe('LiveEngineDashboard', () => {
       expect(updatedTimeText).not.toBe(initialTimeText);
     });
   });
+
+  // The card's secondary text passes ages through the internal
+  // `formatMs` helper. The base happy-path tests cover the seconds
+  // branch indirectly; these cover the minutes and hours branches so
+  // a future change to the formatter would surface here instead of
+  // silently shipping bad copy ("3600000ms" or similar).
+  describe('formatMs branches via card secondary text', () => {
+    it('renders ages in minutes when p95 is between 1 minute and 1 hour', () => {
+      const snapshot: LiveEngineSnapshotView = {
+        running: { count: 1, p95AgeMs: 5 * 60_000, maxAgeMs: 12 * 60_000 },
+        queued: { count: 0, maxWaitMs: null },
+        orphaned: { count: 0 },
+        providers: [],
+        generatedAt: new Date('2026-05-20T12:00:00Z').toISOString(),
+      };
+      render(<LiveEngineDashboard initial={snapshot} pollIntervalMs={0} />);
+      expect(screen.getByText(/p95 step age 5m · max 12m/i)).toBeInTheDocument();
+    });
+
+    it('renders ages in hours when the max exceeds 1 hour', () => {
+      const snapshot: LiveEngineSnapshotView = {
+        running: { count: 1, p95AgeMs: 90 * 60_000, maxAgeMs: 2 * 60 * 60_000 },
+        queued: { count: 0, maxWaitMs: null },
+        orphaned: { count: 0 },
+        providers: [],
+        generatedAt: new Date('2026-05-20T12:00:00Z').toISOString(),
+      };
+      render(<LiveEngineDashboard initial={snapshot} pollIntervalMs={0} />);
+      // 90 min = 1.5h, 120 min = 2.0h. The formatter uses `toFixed(1)` + 'h'.
+      expect(screen.getByText(/p95 step age 1\.5h · max 2\.0h/i)).toBeInTheDocument();
+    });
+
+    it('renders the Queued card "Oldest wait" in milliseconds when sub-second', () => {
+      const snapshot: LiveEngineSnapshotView = {
+        running: { count: 0, p95AgeMs: null, maxAgeMs: null },
+        queued: { count: 1, maxWaitMs: 250 },
+        orphaned: { count: 0 },
+        providers: [],
+        generatedAt: new Date('2026-05-20T12:00:00Z').toISOString(),
+      };
+      render(<LiveEngineDashboard initial={snapshot} pollIntervalMs={0} />);
+      expect(screen.getByText(/Oldest wait: 250ms/i)).toBeInTheDocument();
+    });
+  });
 });
