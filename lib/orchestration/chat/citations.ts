@@ -117,7 +117,7 @@ export function extractCitations(
       documentName: raw.documentName ?? null,
       // Snapshot the document's content hash at search time. Lets an
       // auditor detect a silent re-ingestion of the same documentId: if
-      // today's `AiKnowledgeDocument.contentHash` differs from this,
+      // today's `AiKnowledgeDocument.fileHash` differs from this,
       // the chunk the LLM saw is no longer available verbatim.
       contentHash: raw.documentContentHash ?? null,
       // documentVersion lands when item 31 (KB freshness scanner)

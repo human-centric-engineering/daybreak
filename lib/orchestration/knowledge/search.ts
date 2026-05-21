@@ -336,7 +336,7 @@ async function runVectorOnlySearch({
       c."embeddingDimension",
       c."embeddedAt",
       d.name AS "documentName",
-      d."contentHash" AS "documentContentHash",
+      d."fileHash" AS "documentContentHash",
       (c.embedding <=> $1::vector) AS distance,
       CASE
         WHEN c.keywords IS NOT NULL
@@ -437,7 +437,7 @@ async function runHybridSearch({
         c."embeddingDimension",
         c."embeddedAt",
         d.name AS "documentName",
-        d."contentHash" AS "documentContentHash",
+        d."fileHash" AS "documentContentHash",
         (c.embedding <=> $1::vector) AS distance,
         GREATEST(0.0, 1.0 - (c.embedding <=> $1::vector)) AS vector_score,
         COALESCE(
