@@ -144,7 +144,7 @@ Authoritative source: [`types/orchestration.ts`](../../types/orchestration.ts) (
 
 ### Citations gain `contentHash` and `documentVersion`
 
-The chat handler's `Citation` type now pins `contentHash` and `documentVersion` per cited chunk. The hash comes from `AiKnowledgeDocument.contentHash` at search time — a later re-ingestion of the same `documentId` will hash differently, so an auditor can detect that the chunk the LLM saw is no longer available verbatim. `documentVersion` stays null until the KB freshness scanner (improvement-priorities item 31) lands; the hash alone carries the audit signal until then.
+The chat handler's `Citation` type now pins `contentHash` and `documentVersion` per cited chunk. The hash comes from `AiKnowledgeDocument.fileHash` at search time — a later re-ingestion of the same `documentId` will hash differently, so an auditor can detect that the chunk the LLM saw is no longer available verbatim. `documentVersion` stays null until the KB freshness scanner (improvement-priorities item 31) lands; the hash alone carries the audit signal until then.
 
 ## How it flows
 
