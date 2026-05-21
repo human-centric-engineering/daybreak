@@ -8,7 +8,7 @@ Every form field whose meaning isn't self-evident from its label must have a `<F
 2. **When** to change it
 3. **What the default is**
 
-Plus a "Learn more" link into the Pattern Explorer (`/admin/orchestration/learning`) when relevant.
+Plus a "Learn more" link into the Pattern Explorer (`/admin/orchestration/learn`) when relevant.
 
 ## Primitive
 
@@ -22,7 +22,7 @@ import { FieldHelp } from '@/components/ui/field-help';
   <FieldHelp title="LLM model">
     The exact model identifier your provider exposes. Changing this switches which model answers
     prompts. Default: <code>claude-opus-4-6</code>.{' '}
-    <Link href="/admin/orchestration/learning" className="underline">
+    <Link href="/admin/orchestration/learn" className="underline">
       Learn more
     </Link>
   </FieldHelp>
@@ -71,7 +71,7 @@ If you catch yourself explaining a field in a tooltip, it should be a `<FieldHel
 
 ## Linking to the Pattern Explorer
 
-When a setting has deeper explanation in the Pattern Explorer (Phase 6), include a `<Link>` at the end of the help body pointing at the relevant section. The explorer isn't built yet — link to `/admin/orchestration/learning` for now; the parent admin error boundary handles the 404 gracefully.
+When a setting has deeper explanation in the Pattern Explorer, include a `<Link>` at the end of the help body pointing at the relevant section. The explorer lives at `/admin/orchestration/learn`, with per-pattern detail pages at `/admin/orchestration/learn/patterns/:n`.
 
 ## Related
 

@@ -422,7 +422,6 @@ Session 5.1a + 5.1b + 5.1c **ship:**
 - **Inline edge condition editor** — click edge → condition textarea. Future work.
 - **Per-capability argument schemas inside Tool Call** — 5.1b only picks the slug; a mini form driven by `capability.functionDefinition.parameters` is future work.
 - **Undo/redo, copy/paste, keyboard shortcuts** — not planned for 5.1 at all.
-- **Pattern Explorer** — the palette "Learn more" links forward to `/admin/orchestration/learning/patterns/:n`, which doesn't exist yet. 404 until the Pattern Explorer ships.
 - **Execution history page** — list UI at `/admin/orchestration/executions` with status filter, workflowId filter, pagination. Linked from the workflows table "Runs" column.
 - **Mid-run resume for non-approval failures** — only `human_approval` resumes cleanly; a dead LLM call leaves the row at its last checkpoint without an automatic replay path.
 

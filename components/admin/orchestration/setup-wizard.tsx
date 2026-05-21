@@ -1487,7 +1487,7 @@ function SmokeTestStatusIcon({ status }: { status: TestStatus }): React.ReactEle
 // Step 4 — Done / next steps
 // ----------------------------------------------------------------------------
 
-function StepDone() {
+export function StepDone() {
   return (
     <div className="space-y-4">
       <div className="flex items-start gap-3 rounded-md border border-green-200 bg-green-50 p-4 text-sm dark:border-green-900/50 dark:bg-green-900/10">
@@ -1502,7 +1502,7 @@ function StepDone() {
 
       <ul className="space-y-2 text-sm">
         <li>
-          <Link href="/admin/orchestration/learning" className="font-medium underline">
+          <Link href="/admin/orchestration/learn" className="font-medium underline">
             Explore patterns
           </Link>{' '}
           — browse agentic design patterns for inspiration.
