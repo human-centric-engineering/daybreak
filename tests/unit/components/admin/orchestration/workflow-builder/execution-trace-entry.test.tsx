@@ -17,7 +17,10 @@ import { describe, it, expect, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import { ExecutionTraceEntryRow } from '@/components/admin/orchestration/workflow-builder/execution-trace-entry';
+import {
+  ExecutionTraceEntryRow,
+  summariseRetryReason,
+} from '@/components/admin/orchestration/workflow-builder/execution-trace-entry';
 import type { ExecutionTraceEntryRowProps } from '@/components/admin/orchestration/workflow-builder/execution-trace-entry';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -575,9 +578,72 @@ describe('ExecutionTraceEntryRow', () => {
       ).toBeInTheDocument();
     });
 
+    it('summarises a retry reason that quotes a field-change object', () => {
+      const reason =
+        'The tierRole change reason doesn\'t mention the current value "worker" or explain why it\'s wrong; it only argues for the proposed "thinking" tier. Offending change: { "field": "tierRole", "currentValue": "worker", "proposedValue": "thinking", "reason": "...", "confidence": "medium", "sources": [{ "source": "training_knowledge" }] }';
+      render(
+        <ExecutionTraceEntryRow
+          {...BASE_PROPS}
+          retries={[{ attempt: 1, maxRetries: 2, reason, targetStepId: 'audit_models' }]}
+        />
+      );
+
+      // Salient summary appears: prose + field transition, no `confidence`,
+      // `sources`, or the verbatim long `reason` text.
+      const pill = screen.getByText(/argues for the proposed "thinking" tier/);
+      expect(pill.textContent).toContain('tierRole: "worker" → "thinking"');
+      expect(pill.textContent).not.toContain('confidence');
+      expect(pill.textContent).not.toContain('sources');
+      expect(pill.textContent).not.toContain('training_knowledge');
+
+      // Full original reason is preserved on hover via `title`.
+      expect(pill).toHaveAttribute('title', reason);
+    });
+
     it('does not render a retries list when no retries are provided', () => {
       render(<ExecutionTraceEntryRow {...BASE_PROPS} />);
       expect(screen.queryByTestId('trace-entry-retries-step-1')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('summariseRetryReason', () => {
+    it('returns the reason unchanged when no JSON object is present', () => {
+      expect(summariseRetryReason('tierRole "supercomputer" is not valid')).toBe(
+        'tierRole "supercomputer" is not valid'
+      );
+    });
+
+    it('keeps the prose and appends a field/current/proposed summary', () => {
+      const result = summariseRetryReason(
+        'Reason is generic. Offending change: { "field": "tierRole", "currentValue": "worker", "proposedValue": "thinking", "confidence": "medium" }'
+      );
+      expect(result).toBe('Reason is generic — tierRole: "worker" → "thinking"');
+    });
+
+    it('summarises a model-shape offending object', () => {
+      const result = summariseRetryReason(
+        'Duplicate model proposed: { "modelName": "Claude Sonnet 4.5", "providerSlug": "anthropic", "modelId": "claude-sonnet-4-5" }'
+      );
+      expect(result).toBe('Duplicate model proposed — Claude Sonnet 4.5 (anthropic)');
+    });
+
+    it('handles array-valued currentValue / proposedValue', () => {
+      const result = summariseRetryReason(
+        'Bad deployment shift: { "field": "deploymentProfiles", "currentValue": ["hosted"], "proposedValue": ["sovereign"] }'
+      );
+      expect(result).toBe('Bad deployment shift — deploymentProfiles: ["hosted"] → ["sovereign"]');
+    });
+
+    it('falls back to prefix-only when the embedded JSON cannot be parsed', () => {
+      const result = summariseRetryReason('See offending change: { not valid json ');
+      expect(result).toBe('See offending change.');
+    });
+
+    it('strips fenced-code markers from the prefix', () => {
+      const result = summariseRetryReason(
+        'Failed. ```json\n{ "field": "tierRole", "currentValue": "worker", "proposedValue": "thinking" }\n```'
+      );
+      expect(result).toBe('Failed — tierRole: "worker" → "thinking"');
     });
   });
 
