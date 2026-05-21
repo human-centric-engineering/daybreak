@@ -16,14 +16,24 @@ Don't use it for billing, quotes, or hard caps — the estimator is **planning-g
 
 The estimator picks one of two modes based on data availability for the specific workflow:
 
-| Mode          | Trigger                                                      | What it does                                                                                                                                                                | Range                           |
-| ------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
-| **empirical** | ≥3 past completed runs match the requested supervisor toggle | Computes a token-shape ratio between past actuals and the heuristic baseline, applies it to the heuristic, then reprices under the current chat-default + judge-model rates | MAD-derived, clamped to ±20–60% |
-| **heuristic** | <3 matching past runs                                        | Counts LLM-producing steps in the published workflow definition, multiplies by per-step token assumptions, adds a supervisor add-on if applicable                           | ±50%                            |
+| Mode          | Trigger                                               | What it does                                                                                                                                                                | Range                           |
+| ------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| **empirical** | ≥3 past completed runs **on the current model setup** | Computes a token-shape ratio between past actuals and the heuristic baseline, applies it to the heuristic, then reprices under the current chat-default + judge-model rates | MAD-derived, clamped to ±20–60% |
+| **heuristic** | <3 matching past runs                                 | Counts LLM-producing steps in the published workflow definition, multiplies by per-step token assumptions, adds a supervisor add-on if applicable                           | ±50%                            |
+
+The supervisor toggle does **not** select the methodology — it only adds or removes the supervisor add-on on top of the same work baseline. Work calibration uses every past run because `loadPastRuns` already isolates work tokens from supervisor tokens (by `stepId`), so a past run with the supervisor on still contributes a clean work-only bucket. Supervisor calibration is narrower: only past runs where the supervisor actually ran contribute, and the result is only consumed when the toggle is on.
 
 ### Repricing under current rates
 
-This is the load-bearing trick: past run token _usage_ is preserved, but **dollar amounts are recomputed at the workflow's currently-configured chat default and judge model**. So a past run on Sonnet still informs a future run on Haiku — token shape carries over, pricing doesn't. This means you can switch the chat default model without invalidating accumulated calibration history.
+Past run token _usage_ is preserved, but **dollar amounts are recomputed at the workflow's currently-configured chat default and judge model**. So if Sonnet's per-token rate shifts (e.g. an OpenRouter refresh picks up an updated matrix value) the empirical estimate immediately reflects the new rate.
+
+### Model-change invalidation
+
+Pricing repricing only works honestly when the _model id_ is unchanged. A step that was on Sonnet and now points at Opus has both a different per-token rate **and** a different token-shape profile (verbosity, tool-use patterns) — recycling Sonnet-era token counts to predict an Opus run would silently misprice it.
+
+The estimator therefore filters past runs by **model fingerprint match** before deciding methodology. For each past run, `loadPastRuns` reads the dominant model per `stepId` from `AiCostLog.model`. A run is admissible if every step that _both_ the past run and the current shape know about resolves to the same model. Steps in the current shape without past data (newly added, conditional branch never taken) pass through — there's no historical token shape to misprice. Steps that exist only in the past run (since deleted) are ignored.
+
+When fewer than 3 runs match, the estimator falls back to heuristic with a clear `notes` line ("N prior runs ran on different models — heuristic used until 3+ runs accumulate under the current model setup"). All cost-estimate consumers — the audit-models dialog, the workflow builder's live banner, any future trigger UI — pick this up automatically because they read the same `WorkflowCostEstimate.notes`.
 
 ### Registry warmup
 
@@ -79,7 +89,7 @@ GET /api/v1/admin/orchestration/workflows/:id/cost-estimate
 **Query params (both optional):**
 
 - `itemCount` — integer 0–10,000. Caller-supplied multiplier for workflows whose cost scales with an input dimension (e.g. number of models being audited, number of documents being processed). Omit (or pass 0) for workflows without a scaling input.
-- `supervisor` — `true` | `false`. Whether the supervisor will run for this estimate. Ignored when the workflow has no supervisor step. Past runs are filtered by the supervisor flag stored in `inputData.__runSupervisor` to keep the calibration set apples-to-apples.
+- `supervisor` — `true` | `false`. Whether the supervisor will run for this estimate. Ignored when the workflow has no supervisor step. Only controls whether the supervisor add-on is included; the work calibration set is the same either way.
 
 **Response:**
 

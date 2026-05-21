@@ -242,6 +242,14 @@ interface PastRun {
   workStepId?: string;
   /** Step id to attribute supervisor tokens to. Must match a step id with type 'supervisor'. */
   supStepId?: string;
+  /**
+   * Model recorded on the work cost-log row. Defaults to the chat-default
+   * (CHAT_MODEL.id) so existing tests stay representative of an unchanged
+   * model setup. Override to simulate a model swap.
+   */
+  workModel?: string;
+  /** Same, but for the supervisor cost-log row. */
+  supModel?: string;
 }
 
 function seedPastRuns(runs: PastRun[]): void {
@@ -262,6 +270,7 @@ function seedPastRuns(runs: PastRun[]): void {
           inputTokens: r.workInput,
           outputTokens: r.workOutput,
           metadata: { stepId: r.workStepId ?? 's0' },
+          model: r.workModel ?? CHAT_MODEL.id,
         },
       ];
       if (r.supervisor && r.supInput && r.supOutput && r.supStepId) {
@@ -270,6 +279,7 @@ function seedPastRuns(runs: PastRun[]): void {
           inputTokens: r.supInput,
           outputTokens: r.supOutput,
           metadata: { stepId: r.supStepId },
+          model: r.supModel ?? CHAT_MODEL.id,
         });
       }
       return rows;
@@ -296,7 +306,11 @@ describe('estimateWorkflowCost — empirical mode', () => {
     expect(estimate.midUsd).toBeCloseTo(0.048, 3);
   });
 
-  it('reprices using the current chat default, not the historical model', async () => {
+  it('reprices empirical tokens at the current registry rate when the model is unchanged', async () => {
+    // Same modelId in past runs and current shape — fingerprint matches.
+    // The registry's per-token rate is the *current* rate, so a price
+    // shift on Sonnet propagates immediately. (Realistic scenario:
+    // OpenRouter refresh picks up an updated cost from the matrix.)
     mockWorkflow(makeDefinition(['llm_call', 'evaluate']));
     seedPastRuns([
       { executionId: 'e1', itemCount: 0, supervisor: false, workInput: 6_000, workOutput: 2_000 },
@@ -304,19 +318,100 @@ describe('estimateWorkflowCost — empirical mode', () => {
       { executionId: 'e3', itemCount: 0, supervisor: false, workInput: 6_000, workOutput: 2_000 },
     ]);
 
-    // Switch the chat default to Haiku.
-    mockChatDefault(HAIKU.id);
+    // Halve Sonnet's rates in the registry — modelId unchanged.
+    mockModelLookup({
+      [CHAT_MODEL.id]: { ...CHAT_MODEL, inputCostPerMillion: 1.5, outputCostPerMillion: 7.5 },
+      [HAIKU.id]: HAIKU,
+    });
 
     const estimate = await estimateWorkflowCost({ workflowId: 'wf-1' });
     expect(estimate.basedOn).toBe('empirical');
-    expect(estimate.modelUsed).toBe(HAIKU.id);
-    // Haiku rates: 6_000/1M*1 + 2_000/1M*5 = $0.006 + $0.010 = $0.016
-    expect(estimate.midUsd).toBeCloseTo(0.016, 3);
+    expect(estimate.modelUsed).toBe(CHAT_MODEL.id);
+    // Halved rates: 6_000/1M*1.5 + 2_000/1M*7.5 = $0.009 + $0.015 = $0.024
+    expect(estimate.midUsd).toBeCloseTo(0.024, 3);
   });
 
-  it('filters past runs by supervisor toggle when the workflow has a supervisor', async () => {
+  it('falls back to heuristic when the chat default has changed since the past runs', async () => {
+    // Past runs all logged Sonnet. We then switch the chat default to
+    // Haiku. The current shape resolves each step to Haiku, so the
+    // per-step model fingerprint diverges from every past run — there
+    // is no way to honestly recycle a Sonnet-run token shape under the
+    // new Haiku-or-equivalent assumption, so empirical must stand down.
+    mockWorkflow(makeDefinition(['llm_call', 'evaluate']));
+    seedPastRuns([
+      { executionId: 'e1', itemCount: 0, supervisor: false, workInput: 6_000, workOutput: 2_000 },
+      { executionId: 'e2', itemCount: 0, supervisor: false, workInput: 6_000, workOutput: 2_000 },
+      { executionId: 'e3', itemCount: 0, supervisor: false, workInput: 6_000, workOutput: 2_000 },
+    ]);
+    mockChatDefault(HAIKU.id);
+
+    const estimate = await estimateWorkflowCost({ workflowId: 'wf-1' });
+    expect(estimate.basedOn).toBe('heuristic');
+    expect(estimate.modelUsed).toBe(HAIKU.id);
+    // 3 of 3 past runs excluded — note must point at the model change,
+    // not at sparse history.
+    expect(estimate.notes).toMatch(/different models/i);
+  });
+
+  it('falls back to heuristic when a step has been pinned to a different model via modelOverride', async () => {
+    // Past runs logged Sonnet on s0. We pin s0 to Haiku — same effect
+    // as switching an agent's bound model to a more expensive one.
+    // Empirical should stand down even though the *chat default*
+    // hasn't moved.
+    const def = makeDefinition(['llm_call']);
+    def.steps[0].config = { ...def.steps[0].config, modelOverride: HAIKU.id };
+    mockWorkflow(def);
+    seedPastRuns([
+      { executionId: 'e1', itemCount: 0, supervisor: false, workInput: 3_000, workOutput: 1_000 },
+      { executionId: 'e2', itemCount: 0, supervisor: false, workInput: 3_000, workOutput: 1_000 },
+      { executionId: 'e3', itemCount: 0, supervisor: false, workInput: 3_000, workOutput: 1_000 },
+    ]);
+
+    const estimate = await estimateWorkflowCost({ workflowId: 'wf-1' });
+    expect(estimate.basedOn).toBe('heuristic');
+    expect(estimate.notes).toMatch(/different models/i);
+  });
+
+  it('keeps empirical when only the *removed* steps had a different model', async () => {
+    // Past runs include cost-log rows for a step id that no longer
+    // exists in the current shape (e.g. step was deleted). The current
+    // fingerprint asks about s0 only — and that matches.
+    mockWorkflow(makeDefinition(['llm_call']));
+    vi.mocked(prisma.aiWorkflowExecution.findMany).mockResolvedValue([
+      { id: 'e1', inputData: { modelIds: [] } },
+      { id: 'e2', inputData: { modelIds: [] } },
+      { id: 'e3', inputData: { modelIds: [] } },
+    ] as never);
+    vi.mocked(prisma.aiCostLog.findMany).mockResolvedValue([
+      // s0 on Sonnet (matches current shape).
+      ...['e1', 'e2', 'e3'].map((id) => ({
+        workflowExecutionId: id,
+        inputTokens: 3_000,
+        outputTokens: 1_000,
+        metadata: { stepId: 's0' },
+        model: CHAT_MODEL.id,
+      })),
+      // A retired step that used to exist, logged on a different model.
+      ...['e1', 'e2', 'e3'].map((id) => ({
+        workflowExecutionId: id,
+        inputTokens: 100,
+        outputTokens: 50,
+        metadata: { stepId: 's_retired' },
+        model: HAIKU.id,
+      })),
+    ] as never);
+
+    const estimate = await estimateWorkflowCost({ workflowId: 'wf-1' });
+    expect(estimate.basedOn).toBe('empirical');
+    expect(estimate.sampleSize).toBe(3);
+  });
+
+  it('calibrates work tokens from all past runs regardless of supervisor toggle', async () => {
+    // Past runs all had the supervisor on — but the work-token bucket
+    // is isolated from supervisor tokens by stepId, so it's valid
+    // calibration data for a supervisor=false request too. The toggle
+    // should change the supervisor add-on, not which methodology runs.
     mockWorkflow(makeDefinition(['llm_call', 'supervisor']));
-    // Three past runs ALL with supervisor=true — should not match a supervisor=false request.
     seedPastRuns([
       {
         executionId: 'e1',
@@ -350,9 +445,20 @@ describe('estimateWorkflowCost — empirical mode', () => {
       },
     ]);
 
-    const noSupRequest = await estimateWorkflowCost({ workflowId: 'wf-1', supervisor: false });
-    expect(noSupRequest.basedOn).toBe('heuristic'); // no matching runs
-    expect(noSupRequest.sampleSize).toBe(0);
+    const withSup = await estimateWorkflowCost({ workflowId: 'wf-1', supervisor: true });
+    const withoutSup = await estimateWorkflowCost({ workflowId: 'wf-1', supervisor: false });
+
+    // Both should pick empirical — work calibration carries across the toggle.
+    expect(withSup.basedOn).toBe('empirical');
+    expect(withoutSup.basedOn).toBe('empirical');
+    expect(withSup.sampleSize).toBe(3);
+    expect(withoutSup.sampleSize).toBe(3);
+
+    // The supervisor add-on must move the cost in the right direction
+    // (adds the judge-model bill) and must not flip the methodology.
+    expect(withSup.midUsd).toBeGreaterThan(withoutSup.midUsd);
+    expect(withoutSup.judgeModelUsed).toBeNull();
+    expect(withSup.judgeModelUsed).toBe(CHAT_MODEL.id);
   });
 
   it('skips supervisor filter when the workflow has no supervisor step', async () => {
