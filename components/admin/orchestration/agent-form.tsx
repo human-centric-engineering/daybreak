@@ -997,13 +997,15 @@ export function AgentForm({
             <Label htmlFor="maxCostPerTurnUsd">
               Per-turn cost cap (USD){' '}
               <FieldHelp title="Runaway-loop guard">
-                Caps the total LLM cost of a single chat turn (the messages exchanged before the
-                model returns a final answer). Protects against a tool loop that keeps
-                round-tripping without converging — a single bad question becomes a few cents
-                instead of a few dollars. When the cap is hit mid-turn, the loop stops and the chat
-                shows a friendly &ldquo;response stopped early&rdquo; message. Leave blank to
-                inherit the org-wide default (Settings → Orchestration). When that is also blank, no
-                per-turn cap applies — only the monthly budget above.
+                Caps the total LLM cost of a single chat turn or workflow agent_call step (the
+                messages exchanged before the model returns a final answer). Protects against a tool
+                loop that keeps round-tripping without converging — a single bad question becomes a
+                few cents instead of a few dollars. When the cap is hit, the loop stops: in chat the
+                user sees a friendly &ldquo;response stopped early&rdquo; message; in a workflow the
+                step fails with budget_exceeded_per_turn and the workflow&apos;s error strategy
+                decides what happens next. Leave blank to inherit the org-wide default (Settings →
+                Orchestration). When that is also blank, no per-turn cap applies — only the monthly
+                budget above.
               </FieldHelp>
             </Label>
             <Input

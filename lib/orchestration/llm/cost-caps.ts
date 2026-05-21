@@ -10,9 +10,12 @@
  *     one run. Enforced after every cost-emitting step by the engine
  *     (`lib/orchestration/engine/orchestration-engine.ts`).
  *
- *   - Per-turn (chat): defends against a tool-loop iteration that
- *     ping-pongs LLM ↔ tool calls without converging. Enforced inside the
- *     streaming chat handler after every LLM turn and tool dispatch.
+ *   - Per-turn (chat + workflow agent_call): defends against a tool-loop
+ *     iteration that ping-pongs LLM ↔ tool calls without converging.
+ *     Enforced inside the streaming chat handler after every LLM turn /
+ *     tool dispatch, AND inside the `agent_call` workflow executor's
+ *     iteration loop so a per-turn cap on an agent applies regardless
+ *     of how the agent is invoked.
  *
  * Resolution order is the same shape both: caller / entity / org default,
  * first non-null wins, `undefined` if none set (= unlimited at this layer).
