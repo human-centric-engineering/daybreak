@@ -291,6 +291,24 @@ describe('proxy (project root)', () => {
 
       expect(response.status).toBe(200);
     });
+
+    it('rejects POST requests whose Origin header is malformed (URL parse throws)', async () => {
+      // Arrange: validateOrigin's try/catch wraps `new URL(origin)`. A
+      // malformed value triggers the catch branch and the function returns
+      // false → proxy responds 403. Exercises an attacker-supplied bogus
+      // header rather than a legitimately mismatched one.
+      const request = createMockRequest('/api/v1/users', {
+        method: 'POST',
+        headers: {
+          origin: 'not a valid url at all',
+          host: 'localhost:3000',
+        },
+      });
+
+      const response = await proxy(request);
+
+      expect(response.status).toBe(403);
+    });
   });
 
   describe('Rate limiting — delegation to applyRateLimit', () => {

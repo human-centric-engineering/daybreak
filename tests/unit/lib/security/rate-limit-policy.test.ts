@@ -236,8 +236,77 @@ describe('rate-limit-policy', () => {
   });
 
   describe('findRateLimitRule — string-prefix match support', () => {
-    it.todo(
-      'string-prefix matching (match: string) is supported by the type and implemented in findRateLimitRule, but is not exercised by the current policy which uses only RegExp. Covered indirectly when a downstream rule is added that uses a string prefix. The string-prefix branch (pathname.startsWith(rule.match)) in the source is straightforward enough that a dedicated test would require injecting a synthetic rule — which adds coupling without meaningful additional assurance beyond reading the 3-line branch. Add a concrete test here once the first string-match rule is added to RATE_LIMIT_POLICY.'
-    );
+    // `RateLimitRule.match` accepts `RegExp | string`. When `match` is a string,
+    // `findRateLimitRule` falls back to `pathname.startsWith(match)`. The current
+    // production policy uses only RegExp rules, so the string-prefix branch isn't
+    // exercised by the tier-resolution suite above. We pass a synthetic policy
+    // directly to the real `findRateLimitRule` (its second arg, defaulted to
+    // RATE_LIMIT_POLICY in production) so these tests exercise the actual source
+    // code path — not a copy.
+
+    const stringPrefixPolicy: import('@/lib/security/rate-limit-policy').RateLimitRule[] = [
+      { match: '/test-prefix/', tier: 'api', key: 'ip' },
+    ];
+
+    it('matches a pathname that starts with the string prefix', () => {
+      // Act: pathname starts with the string prefix
+      const rule = findRateLimitRule('/test-prefix/sub/path', stringPrefixPolicy);
+
+      // Assert: the `typeof rule.match === 'string'` branch in the source ran
+      // `pathname.startsWith(rule.match)` and returned the matching rule.
+      expect(rule).not.toBeNull();
+      expect(rule?.tier).toBe('api');
+      expect(rule?.key).toBe('ip');
+    });
+
+    it('returns null for a pathname that does not start with the string prefix', () => {
+      // Act: completely unrelated path
+      const rule = findRateLimitRule('/other-path/foo', stringPrefixPolicy);
+
+      // Assert: no match → null
+      expect(rule).toBeNull();
+    });
+
+    it('does not match when the pathname equals the prefix without a trailing slash', () => {
+      // Arrange: prefix is '/test-prefix/' (WITH trailing slash).
+      // '/test-prefix' (NO trailing slash) does NOT start with '/test-prefix/'
+      // so it must NOT match — this locks in the exact startsWith() semantics.
+
+      // Act
+      const rule = findRateLimitRule('/test-prefix', stringPrefixPolicy);
+
+      // Assert: no match — this is the key boundary condition for string-prefix rules
+      expect(rule).toBeNull();
+    });
+
+    it('preserves first-match-wins ordering for mixed string+RegExp policies', () => {
+      // Arrange: a string rule shadows a more permissive RegExp catch-all that
+      // would otherwise match. This proves the loop runs the per-rule check
+      // (string OR RegExp) and bails on the first match — the branch interleaving
+      // is the source-level contract worth locking in.
+      const mixedPolicy: import('@/lib/security/rate-limit-policy').RateLimitRule[] = [
+        { match: '/test-prefix/', tier: 'admin', key: 'ip' },
+        { match: /.*/, tier: 'api', key: 'session-user' },
+      ];
+
+      const matchingPath = findRateLimitRule('/test-prefix/foo', mixedPolicy);
+      const nonMatchingPath = findRateLimitRule('/other/path', mixedPolicy);
+
+      // Assert
+      expect(matchingPath?.tier).toBe('admin'); // string rule won
+      expect(nonMatchingPath?.tier).toBe('api'); // fell through to RegExp catch-all
+    });
+
+    it('uses the production policy when called with one argument (defaulted policy)', () => {
+      // Arrange: the no-arg form (default `policy = RATE_LIMIT_POLICY`) must
+      // behave identically to the production callers. This guards against
+      // someone accidentally inverting the default in a future refactor.
+      const adminPath = findRateLimitRule('/api/v1/admin/users');
+      const orchPath = findRateLimitRule('/api/v1/admin/orchestration/agents');
+
+      // Assert: matches what the production policy table declares
+      expect(adminPath?.tier).toBe('admin');
+      expect(orchPath?.tier).toBe('orchestration');
+    });
   });
 });

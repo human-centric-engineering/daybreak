@@ -424,6 +424,31 @@ describe('Rate Limiter', () => {
       expect((await asyncLimiter.check(asyncToken)).success).toBe(true); // count→3 (3<=3)
       expect((await asyncLimiter.check(asyncToken)).success).toBe(false); // count→4 (4<=3 false)
     });
+
+    it('defaults to the configured global store when no store argument is provided', async () => {
+      // Arrange: no `store` arg → factory falls back to `getStore()` (the
+      // store-resolution branch at `store ?? getStore()`). The configured store
+      // in tests defaults to the in-memory MemoryRateLimitStore — same backing
+      // as the explicit-store path above — so the limiter must still function
+      // end-to-end.
+      const limiter = createAsyncRateLimiter({ interval: 60000, maxRequests: 2 });
+      const token = `async-default-store-${Date.now()}`;
+
+      // Act: exhaust + verify exhaustion (proves the default store is connected)
+      const first = await limiter.check(token);
+      const second = await limiter.check(token);
+      const third = await limiter.check(token);
+
+      // Assert: 2 succeed, 3rd blocked — full sliding-window contract works
+      // against the default-resolved store.
+      // test-review:accept tobe_true — structural assertion on rate limiter success field
+      expect(first.success).toBe(true);
+      expect(second.success).toBe(true);
+      expect(third.success).toBe(false);
+
+      // Cleanup
+      await limiter.reset(token);
+    });
   });
 
   describe('createAsyncDynamicLimiter', () => {
@@ -487,6 +512,28 @@ describe('Rate Limiter', () => {
       // test-review:accept tobe_true — structural assertion on rate limiter success field
       expect(secondResult.success).toBe(true);
       expect(blockedResult.success).toBe(false);
+    });
+
+    it('defaults to the configured global store when no store argument is provided', async () => {
+      // Arrange: no `store` arg → factory falls back to `getStore()` (the
+      // store-resolution branch at `store ?? getStore()`). Mirrors the same
+      // gap-closure as the createAsyncRateLimiter equivalent above.
+      const limiter = createAsyncDynamicLimiter('test-default-store', 2);
+      const token = `async-dyn-default-store-${Date.now()}`;
+
+      // Act: exhaust + verify exhaustion against the resolved default store.
+      const first = await limiter.check(token);
+      const second = await limiter.check(token);
+      const third = await limiter.check(token);
+
+      // Assert
+      // test-review:accept tobe_true — structural assertion on rate limiter success field
+      expect(first.success).toBe(true);
+      expect(second.success).toBe(true);
+      expect(third.success).toBe(false);
+
+      // Cleanup
+      await limiter.reset(token);
     });
 
     it('should reset a token', async () => {

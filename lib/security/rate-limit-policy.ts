@@ -185,9 +185,18 @@ export const RATE_LIMIT_POLICY: readonly RateLimitRule[] = [
  * "don't rate-limit this request" (typical for non-API routes like
  * `/admin/users` page or static assets, which the middleware matcher
  * should already have excluded, but we double-check anyway).
+ *
+ * The `policy` parameter defaults to the canonical {@link RATE_LIMIT_POLICY}.
+ * Production callers always use the default. The optional argument exists so
+ * unit tests can exercise the matcher against a synthetic policy — including
+ * the string-prefix `match` branch that no production rule uses yet — without
+ * needing module-level mocks or coverage suppression annotations.
  */
-export function findRateLimitRule(pathname: string): RateLimitRule | null {
-  for (const rule of RATE_LIMIT_POLICY) {
+export function findRateLimitRule(
+  pathname: string,
+  policy: readonly RateLimitRule[] = RATE_LIMIT_POLICY
+): RateLimitRule | null {
+  for (const rule of policy) {
     if (typeof rule.match === 'string') {
       if (pathname.startsWith(rule.match)) return rule;
     } else if (rule.match.test(pathname)) {

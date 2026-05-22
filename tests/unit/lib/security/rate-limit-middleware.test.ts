@@ -449,5 +449,171 @@ describe('applyRateLimit', () => {
       RATE_LIMIT_TIERS.api.reset(tokenA);
       RATE_LIMIT_TIERS.api.reset(tokenB);
     });
+
+    it("'api-key' key falls back to IP when Authorization header is present but not Bearer-format", async () => {
+      // Arrange: synthetic api-key rule; send a non-Bearer authorization header
+      // (e.g. Basic auth). The dispatcher must NOT extract a key — it should
+      // fall back to IP keying, exactly as if no Authorization header were present.
+      const ip = '192.0.2.77';
+      const fallbackToken = `mw:api:api-key:ip:${ip}`;
+      RATE_LIMIT_TIERS.api.reset(fallbackToken);
+
+      vi.mocked(findRateLimitRule).mockReturnValue({
+        match: /^\/api\/v1\/test-apikey-fallback\//,
+        tier: 'api',
+        key: 'api-key',
+      });
+      const path = '/api/v1/test-apikey-fallback/resource';
+      const headers = {
+        'x-forwarded-for': ip,
+        // Basic auth — does not match /^Bearer\s+(.+)$/i → triggers IP fallback
+        authorization: 'Basic dXNlcjpwYXNz',
+      };
+      const request = makeRequest(path, headers);
+
+      // Act
+      const result = await applyRateLimit(request);
+
+      // Assert pass-through (first request, under cap)
+      expect(result).toBeNull();
+
+      // Verify the fallback IP token was consumed. If the dispatcher had (wrongly)
+      // extracted a key from the Basic header, it would have built a key:-prefixed
+      // token and the ip-prefixed bucket would show remaining === cap (untouched).
+      const stats = RATE_LIMIT_TIERS.api.peek(fallbackToken);
+      expect(stats.remaining).toBe(99); // 100-cap api tier − 1 consumed
+
+      // Cleanup
+      RATE_LIMIT_TIERS.api.reset(fallbackToken);
+    });
+
+    it("'api-key' key falls back to IP when no Authorization header is present", async () => {
+      // Arrange: synthetic api-key rule, NO Authorization header at all (distinct
+      // from the "present but not Bearer" case above). Source branches at
+      // `if (header)` — this exercises the falsy side.
+      const ip = '192.0.2.78';
+      const fallbackToken = `mw:api:api-key:ip:${ip}`;
+      RATE_LIMIT_TIERS.api.reset(fallbackToken);
+
+      vi.mocked(findRateLimitRule).mockReturnValue({
+        match: /^\/api\/v1\/test-apikey-noheader\//,
+        tier: 'api',
+        key: 'api-key',
+      });
+      const path = '/api/v1/test-apikey-noheader/resource';
+      // Only x-forwarded-for — no authorization header.
+      const headers = { 'x-forwarded-for': ip };
+      const request = makeRequest(path, headers);
+
+      // Act
+      const result = await applyRateLimit(request);
+
+      // Assert pass-through and verify the IP fallback bucket was consumed.
+      expect(result).toBeNull();
+      const stats = RATE_LIMIT_TIERS.api.peek(fallbackToken);
+      expect(stats.remaining).toBe(99);
+
+      // Cleanup
+      RATE_LIMIT_TIERS.api.reset(fallbackToken);
+    });
+
+    it("'embed-token' key uses X-Embed-Token header + IP composite when header is present", async () => {
+      // Arrange: synthetic embed-token rule; token and IP are composed as
+      // `embed:${token}:${ip}` inside resolveIdentifier.
+      const ip = '203.0.113.50';
+      const tokenA = 'tok_abc123';
+      const tokenB = 'tok_different456';
+      const bucketA = `mw:api:embed-token:embed:${tokenA}:${ip}`;
+      const bucketB = `mw:api:embed-token:embed:${tokenB}:${ip}`;
+      RATE_LIMIT_TIERS.api.reset(bucketA);
+      RATE_LIMIT_TIERS.api.reset(bucketB);
+
+      vi.mocked(findRateLimitRule).mockReturnValue({
+        match: /^\/api\/v1\/embed\/test\//,
+        tier: 'api',
+        key: 'embed-token',
+      });
+      const path = '/api/v1/embed/test/chat';
+
+      // Act: one request with token A
+      const result = await applyRateLimit(
+        makeRequest(path, { 'x-forwarded-for': ip, 'x-embed-token': tokenA })
+      );
+
+      // Assert pass-through
+      expect(result).toBeNull();
+
+      // The composite bucket for token A should show exactly 1 consumed request.
+      // This proves the dispatcher used the header value, not the IP alone.
+      const statsA = RATE_LIMIT_TIERS.api.peek(bucketA);
+      expect(statsA.remaining).toBe(99); // 100-cap api tier − 1 consumed
+
+      // Token B with the same IP must be an independent bucket (untouched).
+      const statsB = RATE_LIMIT_TIERS.api.peek(bucketB);
+      expect(statsB.remaining).toBe(100); // not consumed
+
+      // Cleanup
+      RATE_LIMIT_TIERS.api.reset(bucketA);
+      RATE_LIMIT_TIERS.api.reset(bucketB);
+    });
+
+    it("'embed-token' key falls back to IP when X-Embed-Token header is absent", async () => {
+      // Arrange: same synthetic embed-token rule, but NO x-embed-token header.
+      // The dispatcher must fall back to `ip:${ip}` rather than `embed:...:${ip}`.
+      const ip = '198.51.100.99';
+      const fallbackToken = `mw:api:embed-token:ip:${ip}`;
+      RATE_LIMIT_TIERS.api.reset(fallbackToken);
+
+      vi.mocked(findRateLimitRule).mockReturnValue({
+        match: /^\/api\/v1\/embed\/test-fallback\//,
+        tier: 'api',
+        key: 'embed-token',
+      });
+      const path = '/api/v1/embed/test-fallback/chat';
+      // Deliberately omit x-embed-token header
+      const request = makeRequest(path, { 'x-forwarded-for': ip });
+
+      // Act
+      const result = await applyRateLimit(request);
+
+      // Assert pass-through
+      expect(result).toBeNull();
+
+      // The IP-fallback token should show 1 consumed request.
+      // If the dispatcher (wrongly) fell back to some embed: prefix even
+      // without a token header, the ip-prefixed bucket would be untouched.
+      const stats = RATE_LIMIT_TIERS.api.peek(fallbackToken);
+      expect(stats.remaining).toBe(99); // 100-cap api tier − 1 consumed
+
+      // Cleanup
+      RATE_LIMIT_TIERS.api.reset(fallbackToken);
+    });
+
+    it('returns null (fail-open) when the rule tier is not in the RATE_LIMIT_TIERS registry', async () => {
+      // Arrange: inject a synthetic rule whose tier is NOT in RATE_LIMIT_TIERS.
+      // TypeScript prevents this at compile time, but the source has a defensive
+      // `if (!limiter) return null` branch to avoid breaking production traffic
+      // if the type contract is somehow violated at runtime. This test proves
+      // that the fail-open behaviour fires rather than throwing.
+      //
+      // We force the type error intentionally with `as RateLimitTier` to reach
+      // the branch the type system makes "unreachable" in normal usage.
+      vi.mocked(findRateLimitRule).mockReturnValue({
+        match: /^\/api\/v1\/test-missing-tier\//,
+        tier: 'nonexistent' as import('@/lib/security/rate-limit').RateLimitTier,
+        key: 'ip',
+      });
+      const request = makeRequest('/api/v1/test-missing-tier/resource', {
+        'x-forwarded-for': '10.0.0.1',
+      });
+
+      // Act
+      const result = await applyRateLimit(request);
+
+      // Assert: the dispatcher did not throw — it returned null (fail-open),
+      // which means production traffic continues to flow even if a tier is
+      // misconfigured, rather than causing a 500 error cascade.
+      expect(result).toBeNull();
+    });
   });
 });
