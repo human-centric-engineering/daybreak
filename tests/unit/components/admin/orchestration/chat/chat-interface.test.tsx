@@ -159,6 +159,35 @@ describe('ChatInterface', () => {
     expect(body.agentSlug).toBe('test-agent');
   });
 
+  it('renders streamed content from typing.displayText without mirroring per-tick to messages', async () => {
+    // Regression: a prior implementation mirrored typing.displayText
+    // into messages[last].content on every rAF tick via a useEffect
+    // dependency. Under bursty SSE that triggered React 19's
+    // "Maximum update depth exceeded" at the rAF setDisplayText
+    // site. The renderer now reads the typing buffer directly and
+    // only commits to messages on `done` / `content_reset` / stream
+    // end. The visible content still appears progressively.
+    const user = userEvent.setup();
+    // Many content frames in close succession — the SSE shape that
+    // tripped the old loop. We do not assert on intermediate state;
+    // arriving at the final text without an unbounded render loop
+    // is the contract.
+    const deltas = Array.from({ length: 40 }, (_, i) => contentFrame(`chunk${i} `));
+    const stream = makeSseStream([startFrame('conv-1', 'msg-1'), ...deltas, doneFrame()]);
+
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, body: stream }));
+
+    render(<ChatInterface agentSlug="test-agent" />);
+    const input = screen.getByPlaceholderText(/type a message/i);
+    await user.type(input, 'Hi');
+    await user.click(screen.getByRole('button', { name: /send/i }));
+
+    await waitFor(() => {
+      // After done settles, the message text contains the full payload.
+      expect(screen.getByText(/chunk39/)).toBeInTheDocument();
+    });
+  });
+
   it('renders user and assistant messages during streaming', async () => {
     const user = userEvent.setup();
     const stream = makeSseStream([
