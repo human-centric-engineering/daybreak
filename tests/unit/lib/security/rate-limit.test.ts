@@ -511,7 +511,7 @@ describe('Rate Limiter', () => {
     });
   });
 
-  describe('Tier registry (admin sections)', () => {
+  describe('Tier registry (section tiers)', () => {
     it('orchestrationAdminLimiter is configured with the orchestration tier limit (default 120)', () => {
       // Arrange: unique token to avoid cross-test bucket contamination
       const token = `orch-admin-test-${Date.now()}`;
@@ -532,9 +532,13 @@ describe('Rate Limiter', () => {
     it('RATE_LIMIT_TIERS resolves tier names to the correct singleton limiter instances', () => {
       // Arrange: no setup needed — registry is module-level state
 
-      // Assert: reference identity — the registry must return the SAME instance, not a copy
+      // Assert: reference identity — the registry must return the SAME instance, not a copy.
+      // toBe checks object identity: the registry must hand back the exact same singleton,
+      // not a copy. If any tier is missing or points to a different limiter, this fails.
       expect(RATE_LIMIT_TIERS.admin).toBe(adminLimiter);
       expect(RATE_LIMIT_TIERS.orchestration).toBe(orchestrationAdminLimiter);
+      expect(RATE_LIMIT_TIERS.api).toBe(apiLimiter);
+      expect(RATE_LIMIT_TIERS.auth).toBe(authLimiter);
     });
 
     it('RATE_LIMIT_TIERS.orchestration enforces its configured limit when the bucket is exhausted', () => {
