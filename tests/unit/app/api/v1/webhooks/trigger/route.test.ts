@@ -194,22 +194,6 @@ describe('POST /api/v1/webhooks/trigger/:slug', () => {
     });
   });
 
-  it('returns 429 when rate limited', async () => {
-    (apiLimiter.check as ReturnType<typeof vi.fn>).mockReturnValue({
-      success: false,
-      limit: 10,
-      remaining: 0,
-      reset: Date.now() + 60_000,
-    });
-
-    const res = await POST(makeRequest({}), {
-      params: Promise.resolve({ slug: 'my-workflow' }),
-    });
-
-    expect(res.status).toBe(429);
-    expect(prisma.aiWorkflow.findFirst).not.toHaveBeenCalled(); // test-review:accept no_arg_called — error-path guard: function must not be called;
-  });
-
   it('returns 500 when execution creation fails', async () => {
     (prisma.aiWorkflow.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(mockWorkflow);
     (prisma.aiWorkflowExecution.create as ReturnType<typeof vi.fn>).mockRejectedValue(

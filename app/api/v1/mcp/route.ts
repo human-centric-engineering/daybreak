@@ -6,12 +6,14 @@
  * DELETE /api/v1/mcp — Session termination
  *
  * Authentication: MCP API key (bearer token), not session cookies.
- * Rate limited at IP level via apiLimiter, then per-key via McpRateLimiter.
+ * Rate limiting is layered: the proxy applies the section-level `mcp` tier
+ * (300/min keyed per api-key — see `lib/security/rate-limit-policy.ts`),
+ * and `McpRateLimiter` inside the handler applies the per-key sub-cap
+ * configured on each `apiKey.rateLimit` row.
  */
 
 import { NextRequest } from 'next/server';
 import { handleAPIError } from '@/lib/api/errors';
-import { apiLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { getClientIP } from '@/lib/security/ip';
 import { sseResponse } from '@/lib/api/sse';
 import { logger } from '@/lib/logging';
@@ -38,11 +40,8 @@ export async function POST(request: NextRequest): Promise<Response> {
   try {
     const clientIp = getClientIP(request);
 
-    // 1. IP-level rate limit
-    const ipLimit = apiLimiter.check(clientIp);
-    if (!ipLimit.success) return createRateLimitResponse(ipLimit);
-
-    // 2. Authenticate bearer token
+    // Authenticate bearer token. Section-level rate limiting is enforced
+    // upstream by proxy.ts via the mcp tier (300/min keyed per api-key).
     const authHeader = request.headers.get('authorization') ?? '';
     const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
     const userAgent = request.headers.get('user-agent') ?? '';
@@ -279,8 +278,6 @@ export async function POST(request: NextRequest): Promise<Response> {
 export async function GET(request: NextRequest): Promise<Response> {
   try {
     const clientIp = getClientIP(request);
-    const ipLimit = apiLimiter.check(clientIp);
-    if (!ipLimit.success) return createRateLimitResponse(ipLimit);
 
     const authHeader = request.headers.get('authorization') ?? '';
     const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
@@ -359,8 +356,6 @@ export async function GET(request: NextRequest): Promise<Response> {
 export async function DELETE(request: NextRequest): Promise<Response> {
   try {
     const clientIp = getClientIP(request);
-    const ipLimit = apiLimiter.check(clientIp);
-    if (!ipLimit.success) return createRateLimitResponse(ipLimit);
 
     const authHeader = request.headers.get('authorization') ?? '';
     const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';

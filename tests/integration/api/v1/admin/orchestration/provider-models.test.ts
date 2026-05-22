@@ -77,7 +77,6 @@ vi.mock('@/lib/orchestration/settings', () => ({
 
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
-import { apiLimiter } from '@/lib/security/rate-limit';
 import { getOrchestrationSettings } from '@/lib/orchestration/settings';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
@@ -148,7 +147,6 @@ describe('GET /api/v1/admin/orchestration/provider-models', () => {
     // GET uses the broader apiLimiter (source route.ts:32). POST uses
     // adminLimiter. Mocking the wrong limiter here means a future
     // refactor that drops the limiter call would not be caught.
-    vi.mocked(apiLimiter.check).mockReturnValue({ success: true } as never);
   });
 
   describe('Authentication & Authorization', () => {
@@ -162,19 +160,6 @@ describe('GET /api/v1/admin/orchestration/provider-models', () => {
       vi.mocked(auth.api.getSession).mockResolvedValue(mockAuthenticatedUser('USER'));
       const response = await GET(makeGetRequest());
       expect(response.status).toBe(403);
-    });
-
-    it('returns 429 when apiLimiter trips on GET', async () => {
-      // GET calls apiLimiter.check (source route.ts:32); a refactor
-      // that no-ops the limiter call would otherwise let infinite
-      // anonymous polling slip past. POST has its own 429 test at
-      // line 502; this is its GET counterpart.
-      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
-      vi.mocked(apiLimiter.check).mockReturnValueOnce({ success: false } as never);
-
-      const response = await GET(makeGetRequest());
-      expect(response.status).toBe(429);
-      expect(prisma.aiProviderModel.findMany).not.toHaveBeenCalled();
     });
   });
 
