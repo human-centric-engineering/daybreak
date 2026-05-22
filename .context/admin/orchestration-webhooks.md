@@ -6,11 +6,12 @@ Admin UI for managing webhook subscriptions. Full CRUD with delivery history, re
 
 ## Pages
 
-| Route                                           | File                                                        | Purpose                                      |
-| ----------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------- |
-| `/admin/orchestration/event-subscriptions`      | `app/admin/orchestration/event-subscriptions/page.tsx`      | List all subscriptions                       |
-| `/admin/orchestration/event-subscriptions/new`  | `app/admin/orchestration/event-subscriptions/new/page.tsx`  | Create subscription form                     |
-| `/admin/orchestration/event-subscriptions/[id]` | `app/admin/orchestration/event-subscriptions/[id]/page.tsx` | Edit subscription + test button + deliveries |
+| Route                                           | File                                                        | Purpose                                                                           |
+| ----------------------------------------------- | ----------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `/admin/orchestration/event-subscriptions`      | `app/admin/orchestration/event-subscriptions/page.tsx`      | List all subscriptions                                                            |
+| `/admin/orchestration/event-subscriptions/new`  | `app/admin/orchestration/event-subscriptions/new/page.tsx`  | Create subscription form                                                          |
+| `/admin/orchestration/event-subscriptions/[id]` | `app/admin/orchestration/event-subscriptions/[id]/page.tsx` | Edit subscription + test button + deliveries                                      |
+| `/admin/orchestration/event-subscriptions/dlq`  | `app/admin/orchestration/event-subscriptions/dlq/page.tsx`  | Cross-subscription dead-letter queue: filter, retry, discard exhausted deliveries |
 
 ## Components
 
@@ -46,6 +47,16 @@ Admin UI for managing webhook subscriptions. Full CRUD with delivery history, re
 - Displays result inline: green "Ping delivered (status) in Xms" or red error message
 - 5-second timeout, uses the same HMAC signature flow as real deliveries
 
+### `WebhookDlqTable`
+
+`components/admin/orchestration/webhook-dlq-table.tsx`
+
+- Lists `exhausted` deliveries across all subscriptions the calling admin owns — single console for the "what's currently dead-lettered" question that the per-subscription view can't answer cleanly.
+- Filters: subscription, event type, From / To date range. Filter changes refetch from `GET /webhooks/dlq`.
+- Each row links to its parent subscription's edit page and shows event, last response code, attempts, last error.
+- Row actions: retry (calls `POST /webhooks/deliveries/:id/retry`, same path as the per-subscription view) and discard (calls `DELETE /webhooks/deliveries/:id`, AlertDialog confirmation).
+- Pagination through `parsePaginationMeta`.
+
 ### `WebhookDeliveries`
 
 `components/admin/orchestration/webhook-deliveries.tsx`
@@ -68,6 +79,8 @@ Uses admin orchestration webhook endpoints:
 - `POST /webhooks/:id/test` — send test ping event
 - `GET /webhooks/:id/deliveries` — delivery history (scoped to `session.user.id`)
 - `POST /webhooks/deliveries/:id/retry` — retry failed delivery (verifies parent subscription ownership)
+- `DELETE /webhooks/deliveries/:id` — permanently delete a delivery row (verifies parent subscription ownership, audit-logged as `webhook_delivery.delete`)
+- `GET /webhooks/dlq?page=&pageSize=&subscriptionId=&eventType=&since=&until=` — list exhausted deliveries across all subscriptions the calling admin owns. Always scoped to `status=exhausted` and the caller's subscriptions; filters narrow further.
 
 Consumer-facing:
 

@@ -214,6 +214,8 @@ export const API = {
       webhookTest: (id: string): string => `/api/v1/admin/orchestration/webhooks/${id}/test`,
       retryDelivery: (id: string): string =>
         `/api/v1/admin/orchestration/webhooks/deliveries/${id}/retry`,
+      deliveryById: (id: string): string => `/api/v1/admin/orchestration/webhooks/deliveries/${id}`,
+      WEBHOOK_DLQ: '/api/v1/admin/orchestration/webhooks/dlq',
       COSTS: '/api/v1/admin/orchestration/costs',
       COSTS_SUMMARY: '/api/v1/admin/orchestration/costs/summary',
       COSTS_ALERTS: '/api/v1/admin/orchestration/costs/alerts',
