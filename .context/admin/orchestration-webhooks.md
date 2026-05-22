@@ -81,6 +81,7 @@ Uses admin orchestration webhook endpoints:
 - `POST /webhooks/deliveries/:id/retry` — retry failed delivery (verifies parent subscription ownership)
 - `DELETE /webhooks/deliveries/:id` — permanently delete a delivery row (verifies parent subscription ownership, audit-logged as `webhook_delivery.delete`)
 - `GET /webhooks/dlq?page=&pageSize=&subscriptionId=&eventType=&since=&until=` — list exhausted deliveries across all subscriptions the calling admin owns. Always scoped to `status=exhausted` and the caller's subscriptions; filters narrow further.
+- `GET /webhooks/dlq/stats` — depth signal for the health dashboard. Returns `{ exhausted24h, exhaustedTotal, oldestExhaustedAt }` scoped to the caller's subscriptions. Consumed by improvement #41 (health dashboard).
 
 Consumer-facing:
 
