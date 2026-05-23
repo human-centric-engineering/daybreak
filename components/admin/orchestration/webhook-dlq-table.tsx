@@ -14,7 +14,7 @@ import { ChevronLeft, ChevronRight, Loader2, RotateCcw, Trash2, Repeat } from 'l
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { DatePicker } from '@/components/ui/date-picker';
 import {
   Select,
   SelectContent,
@@ -229,23 +229,13 @@ export function WebhookDlqTable({
           <label className="text-muted-foreground text-xs" htmlFor="dlq-since">
             From
           </label>
-          <Input
-            id="dlq-since"
-            type="date"
-            value={since}
-            onChange={(e) => setSince(e.target.value)}
-          />
+          <DatePicker id="dlq-since" value={since} onChange={setSince} />
         </div>
         <div className="grid gap-1">
           <label className="text-muted-foreground text-xs" htmlFor="dlq-until">
             To
           </label>
-          <Input
-            id="dlq-until"
-            type="date"
-            value={until}
-            onChange={(e) => setUntil(e.target.value)}
-          />
+          <DatePicker id="dlq-until" value={until} onChange={setUntil} />
         </div>
       </div>
 
