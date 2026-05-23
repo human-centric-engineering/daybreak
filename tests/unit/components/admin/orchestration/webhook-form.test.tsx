@@ -170,6 +170,8 @@ describe('WebhookForm', () => {
       description: null,
       channel: 'webhook' as const,
       emailAddress: null,
+      agentIds: [],
+      workflowIds: [],
       maxAttempts: 5,
       retryBackoffMs: [15_000, 60_000, 120_000, 600_000],
     };
@@ -315,6 +317,8 @@ describe('WebhookForm', () => {
       description: 'note',
       channel: 'webhook' as const,
       emailAddress: null,
+      agentIds: [],
+      workflowIds: [],
       maxAttempts: 3,
       retryBackoffMs: [10000, 60000],
     };
@@ -359,6 +363,8 @@ describe('WebhookForm', () => {
       description: 'note',
       channel: 'webhook' as const,
       emailAddress: null,
+      agentIds: [],
+      workflowIds: [],
       maxAttempts: 3,
       retryBackoffMs: [10000, 60000],
     };
@@ -398,6 +404,8 @@ describe('WebhookForm', () => {
       description: null,
       channel: 'webhook' as const,
       emailAddress: null,
+      agentIds: [],
+      workflowIds: [],
       maxAttempts: 3,
       retryBackoffMs: [10000, 60000],
     };
@@ -439,6 +447,8 @@ describe('WebhookForm', () => {
       description: null,
       channel: 'webhook' as const,
       emailAddress: null,
+      agentIds: [],
+      workflowIds: [],
       maxAttempts: 3,
       retryBackoffMs: [10000, 60000],
     };
@@ -536,6 +546,8 @@ describe('WebhookForm', () => {
       description: null,
       channel: 'webhook' as const,
       emailAddress: null,
+      agentIds: [],
+      workflowIds: [],
       maxAttempts: 3,
       retryBackoffMs: [10000, 60000],
     };
