@@ -73,6 +73,37 @@ The `error` field in the `workflow.execution.failed` payload is sanitised before
 
 **Dual dispatch on engine crash.** The same engine-crash event is mirrored into the [Webhook Subscriptions](../admin/orchestration-webhooks.md) subsystem as `execution_crashed` so admins who configure outbound notifications via the webhook UI (rather than the API-only event hooks) receive the alert. The webhook payload is the in-process payload plus `workflowName`, `actorUserId`, and `actorUserName` — the in-process subsystem keeps its leaner shape since it predates the webhook UI. Subscribe via either system depending on your delivery requirements: event hooks for in-process filterable dispatch, webhook subscriptions for durable per-delivery audit + admin-UI configuration.
 
+### Two event-type vocabularies
+
+Event hooks and webhook subscriptions use **different naming conventions** for the same logical event:
+
+| Subsystem                                 | Vocabulary            | Convention                      | Source of truth                                             |
+| ----------------------------------------- | --------------------- | ------------------------------- | ----------------------------------------------------------- |
+| Event hooks (in-process, API-only)        | `HOOK_EVENT_TYPES`    | dot-separated (`agent.updated`) | `lib/orchestration/hooks/types.ts`                          |
+| Webhook subscriptions (durable, admin-UI) | `WEBHOOK_EVENT_TYPES` | snake_case (`agent_updated`)    | `WEBHOOK_EVENT_TYPES` in `lib/validations/orchestration.ts` |
+
+Dual-dispatched events (agent updates, engine crashes, paused-for-approval) fire **both** — the in-process name with its dot-separated form and the webhook name with its snake-case form — so subscribers configured via either subsystem receive the alert.
+
+### Wired vs. disabled webhook event types
+
+`WEBHOOK_EVENT_TYPES` lists every event type the schema accepts. The subset that actually has a `dispatchWebhookEvent` call site lives in `WIRED_WEBHOOK_EVENT_TYPES` (same file). The Subscription form **disables** the rest in the picklist so admins can't subscribe to events that will never fire:
+
+- **Wired (admins can subscribe):** `budget_exceeded`, `workflow_failed`, `approval_required`, `circuit_breaker_opened`, `agent_updated`, `execution_crashed`.
+- **Defined but disabled:** `conversation_started`, `conversation_completed`, `message_created`, `budget_threshold_reached`, `execution_completed`, `execution_failed` — reserved for future emit sites; the form greys them out with an explanatory tooltip.
+
+When you wire a new event, move it from the disabled set to `WIRED_WEBHOOK_EVENT_TYPES` and update the emit-site table above. `isWiredWebhookEvent()` is the runtime check used by the schema and form.
+
+### Granularity convention
+
+Every wired webhook payload follows the same display-identity contract — opaque IDs are always paired with the human-readable slug + name, plus actor display info where the call site has it. This keeps receivers from needing a second round-trip to resolve IDs and makes Slack-style notification templates simple to author. The unified set of identity fields is:
+
+- `agentId` + `agentSlug` + `agentName` (for agent-scoped events)
+- `workflowId` + `workflowSlug` + `workflowName` (for workflow-scoped events)
+- `actorUserId` + `actorUserName` (whenever a human triggered the dispatch)
+- `executionId` (for workflow runs)
+
+Display names are resolved lazily via `resolveUserDisplayName` / `resolveWorkflowDisplay` / `resolveAgentDisplay` in `lib/orchestration/webhooks/payload-context.ts`. A DB lookup failure leaves the field absent rather than blocking dispatch.
+
 ## Event Payload
 
 ```ts
