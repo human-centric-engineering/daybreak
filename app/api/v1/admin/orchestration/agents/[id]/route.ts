@@ -23,6 +23,7 @@ import { getRouteLogger } from '@/lib/api/context';
 import { getClientIP } from '@/lib/security/ip';
 import { logAdminAction, computeChanges } from '@/lib/orchestration/audit/admin-audit-logger';
 import { emitHookEvent } from '@/lib/orchestration/hooks/registry';
+import { dispatchWebhookEvent } from '@/lib/orchestration/webhooks/dispatcher';
 import { logger } from '@/lib/logging';
 import { buildChangeSummary } from '@/lib/orchestration/agent-version-diff';
 import { invalidateAgentAccess } from '@/lib/orchestration/knowledge/resolveAgentDocumentAccess';
@@ -407,11 +408,18 @@ export const PATCH = withAdminAuth<{ id: string }>(async (request, session, { pa
       clientIp: clientIP,
     });
 
-    emitHookEvent('agent.updated', {
+    const agentUpdatedPayload = {
       agentId: id,
       agentSlug: agent.slug,
       fieldsChanged: Object.keys(data),
-    });
+    };
+
+    // Two distinct outbound subsystems — see .context/orchestration/hooks.md.
+    // Event hooks (AiEventHook) use dotted event names; webhook subscriptions
+    // (AiWebhookSubscription) use underscore names. We dual-dispatch so admins
+    // configured via either surface receive the notification.
+    emitHookEvent('agent.updated', agentUpdatedPayload);
+    void dispatchWebhookEvent('agent_updated', agentUpdatedPayload);
 
     return successResponse(agent);
   } catch (err) {

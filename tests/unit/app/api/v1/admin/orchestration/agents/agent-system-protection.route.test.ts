@@ -59,9 +59,19 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
   computeChanges: vi.fn(),
 }));
 
+vi.mock('@/lib/orchestration/hooks/registry', () => ({
+  emitHookEvent: vi.fn(),
+}));
+
+vi.mock('@/lib/orchestration/webhooks/dispatcher', () => ({
+  dispatchWebhookEvent: vi.fn().mockResolvedValue(undefined),
+}));
+
 // ─── Imports after mocks ──────────────────────────────────────────────────────
 
 import { auth } from '@/lib/auth/config';
+import { emitHookEvent } from '@/lib/orchestration/hooks/registry';
+import { dispatchWebhookEvent } from '@/lib/orchestration/webhooks/dispatcher';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -249,6 +259,42 @@ describe('System agent protection', () => {
       );
 
       expect(response.status).toBe(200);
+    });
+  });
+
+  describe('PATCH — outbound notifications', () => {
+    it('dual-dispatches agent.updated to event hooks AND agent_updated to webhook subscriptions', async () => {
+      // The two outbound subsystems use different event-name conventions
+      // (dotted vs underscore). Both must fire so admins configured via
+      // either surface receive the notification — historically the
+      // webhook-subscription side was silently dropped, which is what
+      // this test guards against.
+      const agent = makeCustomAgent({ description: 'updated description' });
+      mockFindUnique.mockResolvedValue(agent);
+      mockUpdate.mockResolvedValue(agent);
+
+      const response = await PATCH(
+        makePatchRequest({ description: 'updated description' }),
+        makeParams(AGENT_ID)
+      );
+      expect(response.status).toBe(200);
+
+      expect(emitHookEvent).toHaveBeenCalledWith(
+        'agent.updated',
+        expect.objectContaining({
+          agentId: AGENT_ID,
+          agentSlug: agent.slug,
+          fieldsChanged: ['description'],
+        })
+      );
+      expect(dispatchWebhookEvent).toHaveBeenCalledWith(
+        'agent_updated',
+        expect.objectContaining({
+          agentId: AGENT_ID,
+          agentSlug: agent.slug,
+          fieldsChanged: ['description'],
+        })
+      );
     });
   });
 });
