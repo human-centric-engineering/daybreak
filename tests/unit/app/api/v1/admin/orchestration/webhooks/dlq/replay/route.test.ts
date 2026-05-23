@@ -43,6 +43,7 @@ import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import { retryDelivery } from '@/lib/orchestration/webhooks/dispatcher';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
+import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { mockAdminUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 
 const ADMIN_ID = 'cmjbv4i3x00003wsloputgwul';
@@ -173,5 +174,52 @@ describe('POST /webhooks/dlq/replay', () => {
 
     const res = await POST(makeRequest({ deliveryIds: ['cmjbv4i3x00003wsldelivone'] }));
     expect(res.status).toBe(401);
+  });
+
+  it('returns the rate-limit response when the limiter rejects the request', async () => {
+    const rlResponse = new Response('rate limited', { status: 429 });
+    vi.mocked(adminLimiter.check).mockReturnValueOnce({ success: false } as never);
+    vi.mocked(createRateLimitResponse).mockReturnValueOnce(rlResponse as never);
+
+    const res = await POST(makeRequest({ deliveryIds: ['cmjbv4i3x00003wsldelivone'] }));
+
+    expect(createRateLimitResponse).toHaveBeenCalled();
+    expect(res.status).toBe(429);
+    expect(retryDelivery).not.toHaveBeenCalled();
+  });
+
+  it('counts failed retryDelivery calls in the skipped bucket', async () => {
+    // Exercises the `(ok ? replayed : skipped).push(id)` else-branch.
+    vi.mocked(prisma.aiWebhookDelivery.findMany).mockResolvedValue([
+      { id: 'cmjbv4i3x00003wsldelivone' },
+      { id: 'cmjbv4i3x00003wsldelivtwo' },
+    ] as never);
+    vi.mocked(retryDelivery).mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+    const res = await POST(
+      makeRequest({
+        deliveryIds: ['cmjbv4i3x00003wsldelivone', 'cmjbv4i3x00003wsldelivtwo'],
+      })
+    );
+    const json = JSON.parse(await res.text());
+
+    expect(res.status).toBe(200);
+    expect(json.data.replayed).toBe(1);
+    expect(json.data.skipped).toBe(1);
+  });
+
+  it('replays subscription rows without a "before" filter when none is supplied', async () => {
+    // Exercises the `: {}` branch of `body.before ? ... : ...`. The findMany
+    // call shouldn't include a createdAt clause.
+    vi.mocked(prisma.aiWebhookSubscription.findFirst).mockResolvedValue({ id: SUB_ID } as never);
+    vi.mocked(prisma.aiWebhookDelivery.findMany).mockResolvedValue([
+      { id: 'cmjbv4i3x00003wsldelivone' },
+    ] as never);
+
+    const res = await POST(makeRequest({ subscriptionId: SUB_ID }));
+
+    expect(res.status).toBe(200);
+    const call = vi.mocked(prisma.aiWebhookDelivery.findMany).mock.calls[0][0];
+    expect(call?.where).not.toHaveProperty('createdAt');
   });
 });

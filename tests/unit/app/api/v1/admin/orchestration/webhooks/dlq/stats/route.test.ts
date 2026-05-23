@@ -32,6 +32,7 @@ vi.mock('@/lib/security/ip', () => ({ getClientIP: vi.fn(() => '127.0.0.1') }));
 import { GET } from '@/app/api/v1/admin/orchestration/webhooks/dlq/stats/route';
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
+import { adminLimiter, createRateLimitResponse } from '@/lib/security/rate-limit';
 import { mockAdminUser, mockUnauthenticatedUser } from '@/tests/helpers/auth';
 
 const ADMIN_ID = 'cmjbv4i3x00003wsloputgwul';
@@ -121,5 +122,17 @@ describe('GET /webhooks/dlq/stats', () => {
     const res = await GET(makeRequest());
 
     expect(res.status).toBe(401);
+  });
+
+  it('returns the rate-limit response when the limiter rejects the request', async () => {
+    const rlResponse = new Response('rate limited', { status: 429 });
+    vi.mocked(adminLimiter.check).mockReturnValueOnce({ success: false } as never);
+    vi.mocked(createRateLimitResponse).mockReturnValueOnce(rlResponse as never);
+
+    const res = await GET(makeRequest());
+
+    expect(createRateLimitResponse).toHaveBeenCalled();
+    expect(res.status).toBe(429);
+    expect(prisma.aiWebhookDelivery.count).not.toHaveBeenCalled();
   });
 });
