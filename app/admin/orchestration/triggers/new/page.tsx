@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 
+import { Button } from '@/components/ui/button';
 import {
   TriggerForm,
   type AgentOption,
@@ -80,11 +81,46 @@ export default async function NewTriggerPage() {
       </div>
 
       {workflows.length === 0 ? (
-        <div className="bg-card rounded-lg border p-6 text-sm">
-          You need at least one workflow before you can create a trigger.{' '}
-          <Link href="/admin/orchestration/workflows/new" className="text-primary hover:underline">
-            Create one →
-          </Link>
+        <div className="bg-card space-y-4 rounded-lg border p-6 text-sm">
+          <div>
+            <h3 className="font-semibold">You need a workflow first</h3>
+            <p className="text-muted-foreground mt-1">
+              Every trigger fires exactly one workflow. The trigger holds the webhook URL config
+              (channel, signing secret, event filter); the workflow holds the actual logic that runs
+              when an inbound message arrives.
+            </p>
+          </div>
+
+          <div className="text-muted-foreground bg-muted/40 rounded border p-3 text-xs">
+            <div className="text-foreground mb-1.5 font-medium">Typical setup</div>
+            <ol className="list-decimal space-y-1 pl-5">
+              <li>
+                Build a workflow under{' '}
+                <Link
+                  href="/admin/orchestration/workflows"
+                  className="text-primary hover:underline"
+                >
+                  Workflows
+                </Link>
+                . The simplest shape is a single <code>llm_call</code> step that takes the inbound
+                message text from <code>trigger.text</code> and asks an agent to respond.
+              </li>
+              <li>Publish the workflow (so it has a version triggers can pin to).</li>
+              <li>
+                Come back here to wire the webhook — pick the workflow + channel, paste the
+                generated URL into Twilio / Slack / etc.
+              </li>
+            </ol>
+          </div>
+
+          <div className="flex gap-2">
+            <Button asChild>
+              <Link href="/admin/orchestration/workflows/new">Create a workflow</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/admin/orchestration/triggers">← Back to triggers</Link>
+            </Button>
+          </div>
         </div>
       ) : (
         <TriggerForm

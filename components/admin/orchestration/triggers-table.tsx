@@ -51,12 +51,81 @@ export function TriggersTable({ triggers, enabledChannels }: Props) {
 
   if (triggers.length === 0) {
     return (
-      <div className="bg-card rounded-lg border p-8 text-center">
-        <p className="text-muted-foreground text-sm">
-          No triggers configured yet. Create one to give a workflow a webhook URL that vendors like
-          Twilio, Slack, or Postmark can call.
-        </p>
-        <div className="mt-4">
+      <div className="bg-card space-y-6 rounded-lg border p-8">
+        <div className="text-center">
+          <h3 className="text-lg font-semibold">No inbound triggers yet</h3>
+          <p className="text-muted-foreground mx-auto mt-2 max-w-2xl text-sm">
+            A <strong>trigger</strong> is a webhook URL on this server that fires one of your
+            workflows. When an external system (Twilio, Slack, Postmark, Meta) POSTs to that URL,
+            Sunrise verifies the signature and starts a new execution of the workflow.
+          </p>
+        </div>
+
+        {/* Concept diagram */}
+        <div className="bg-muted/40 mx-auto max-w-2xl rounded-md border p-4 text-xs">
+          <div className="text-muted-foreground mb-2 font-medium">How it works</div>
+          <ol className="list-decimal space-y-1.5 pl-5">
+            <li>
+              You pick a <strong>workflow</strong> to fire and a <strong>channel</strong> (the
+              vendor protocol — slack / twilio / etc.).
+            </li>
+            <li>
+              We give you a webhook URL like{' '}
+              <code className="bg-background rounded border px-1 py-0.5">
+                /api/v1/inbound/twilio/your-workflow-slug
+              </code>
+              .
+            </li>
+            <li>
+              You paste that URL into the vendor&apos;s webhook config (Twilio Console, Meta App
+              Dashboard, Slack Event Subscriptions, etc.).
+            </li>
+            <li>
+              Every inbound message becomes an <code>AiWorkflowExecution</code> row with the
+              normalised payload. Conversations from SMS / WhatsApp also create{' '}
+              <code>AiConversation</code> rows so the agent can reply on the same channel via{' '}
+              <code>send_message_to_channel</code>.
+            </li>
+          </ol>
+        </div>
+
+        {/* Channel options */}
+        <div className="text-muted-foreground mx-auto max-w-2xl text-xs">
+          <div className="mb-2 font-medium">Channels available out of the box</div>
+          <ul className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+            <li>
+              <code className="bg-muted rounded px-1 py-0.5">twilio</code> — SMS + Twilio-routed
+              WhatsApp
+            </li>
+            <li>
+              <code className="bg-muted rounded px-1 py-0.5">whatsapp_cloud</code> — Meta WhatsApp
+              direct
+            </li>
+            <li>
+              <code className="bg-muted rounded px-1 py-0.5">slack</code> — Slack Events API
+            </li>
+            <li>
+              <code className="bg-muted rounded px-1 py-0.5">postmark</code> — inbound email parse
+            </li>
+            <li>
+              <code className="bg-muted rounded px-1 py-0.5">hmac</code> — generic signed JSON
+            </li>
+          </ul>
+          {enabledChannels.length > 0 && (
+            <p className="mt-2">
+              Currently registered in this deployment:{' '}
+              {enabledChannels.map((c) => (
+                <code key={c} className="bg-background mx-0.5 rounded border px-1 py-0.5">
+                  {c}
+                </code>
+              ))}
+              . Channels without their env vars set show as <em>adapter not registered</em> in the
+              form, and inbound POSTs will 404 until you wire them up.
+            </p>
+          )}
+        </div>
+
+        <div className="flex justify-center">
           <Button asChild>
             <Link href="/admin/orchestration/triggers/new">Create your first trigger</Link>
           </Button>
