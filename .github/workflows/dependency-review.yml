@@ -21,10 +21,10 @@ jobs:
       pull-requests: write # post the summary comment on failure
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Dependency Review
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@v5
         with:
           # Fail only on high+ vulnerabilities. License findings are reported
           # but not blocking — a starter template should not hard-fail forks on

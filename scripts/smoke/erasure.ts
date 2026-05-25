@@ -1,4 +1,3 @@
-/* eslint-disable no-console -- CLI smoke script */
 /**
  * Account-erasure smoke script.
  *
@@ -50,6 +49,8 @@ async function main(): Promise<void> {
   let agentId: string | null = null;
   let auditId: string | null = null;
   let receiptId: string | null = null;
+  let datasetId: string | null = null;
+  let runId: string | null = null;
 
   try {
     // Subject (ADMIN so we also prove a config-creator's createdBy is nulled).
@@ -93,6 +94,25 @@ async function main(): Promise<void> {
     });
     auditId = audit.id;
 
+    // Evaluations (merged from main): dataset = reusable asset (retain/SetNull),
+    // run = the user's run history (cascade, results cascade from the run).
+    const dataset = await prisma.aiDataset.create({
+      data: { userId: subject.id, name: `${PREFIX} dataset`, contentHash: 'smoke-hash' },
+    });
+    datasetId = dataset.id;
+    const run = await prisma.aiEvaluationRun.create({
+      data: {
+        userId: subject.id,
+        name: `${PREFIX} run`,
+        subjectKind: 'agent',
+        agentId: agent.id,
+        datasetId: dataset.id,
+        datasetContentHash: 'smoke-hash',
+        metricConfigs: [],
+      },
+    });
+    runId = run.id;
+
     // Erase.
     const result = await eraseUser({
       userId: subject.id,
@@ -127,6 +147,15 @@ async function main(): Promise<void> {
     check(auditAfter?.userId === null, 'audit.userId nulled (SetNull)');
     check(auditAfter?.clientIp === null, 'audit.clientIp scrubbed (residual PII)');
 
+    // Evaluations: dataset retained + de-attributed; run cascade-deleted.
+    const datasetAfter = await prisma.aiDataset.findUnique({ where: { id: dataset.id } });
+    check(datasetAfter !== null, 'eval dataset retained');
+    check(datasetAfter?.userId === null, 'eval dataset.userId nulled (SetNull)');
+    check(
+      (await prisma.aiEvaluationRun.findUnique({ where: { id: run.id } })) === null,
+      'eval run cascade-deleted'
+    );
+
     // Receipt written without re-introducing PII.
     const receipt = await prisma.dataErasureReceipt.findUnique({ where: { id: result.receiptId } });
     check(receipt !== null, 'erasure receipt written');
@@ -150,6 +179,10 @@ async function main(): Promise<void> {
       await prisma.aiAdminAuditLog.deleteMany({ where: { id: auditId } }).catch(() => undefined);
     if (subjectUserId)
       await prisma.user.deleteMany({ where: { id: subjectUserId } }).catch(() => undefined);
+    if (runId)
+      await prisma.aiEvaluationRun.deleteMany({ where: { id: runId } }).catch(() => undefined);
+    if (datasetId)
+      await prisma.aiDataset.deleteMany({ where: { id: datasetId } }).catch(() => undefined);
     if (agentId) await prisma.aiAgent.deleteMany({ where: { id: agentId } }).catch(() => undefined);
     await prisma.$disconnect().catch(() => undefined);
   }
