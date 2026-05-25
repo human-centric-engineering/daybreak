@@ -243,6 +243,8 @@ export const API = {
         `/api/v1/admin/orchestration/evaluations/datasets/${id}`,
       evalDatasetCases: (id: string): string =>
         `/api/v1/admin/orchestration/evaluations/datasets/${id}/cases`,
+      evalDatasetCapture: (id: string): string =>
+        `/api/v1/admin/orchestration/evaluations/datasets/${id}/capture`,
       EVAL_RUNS: '/api/v1/admin/orchestration/evaluations/runs',
       EVAL_RUN_ESTIMATE: '/api/v1/admin/orchestration/evaluations/runs/estimate',
       evalRunById: (id: string): string => `/api/v1/admin/orchestration/evaluations/runs/${id}`,

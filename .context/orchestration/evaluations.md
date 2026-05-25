@@ -312,6 +312,37 @@ from the run-create form on a 350 ms debounce keyed on
 `(agentId, datasetId, sorted judgeAgentSlugs)`. Toggling a heuristic
 grader does not re-fetch — heuristics are free.
 
+## Phase 2 — trace-to-dataset capture
+
+Admins can convert a real prod conversation turn or workflow execution
+output into a new `AiDatasetCase` row on any existing dataset. Two
+helpers + one endpoint:
+
+- `captureConversationTurnAsCase({ datasetId, messageId, edits? })` —
+  pairs an assistant `AiMessage` with its immediately preceding user
+  turn. The user message becomes `input`; the assistant becomes
+  `expectedOutput`; `provenance.citations` maps to `referenceCitations`.
+- `captureWorkflowExecutionAsCase({ datasetId, executionId, selector, edits? })`
+  — resolves the execution's output via the same `subjectOutputSelector`
+  contract the eval worker uses (`final_report` / `last_step` /
+  `step_id`). `inputData` becomes the case input; the resolved output
+  becomes `expectedOutput`. Only `status='completed'` executions can be
+  captured.
+
+Both helpers delegate to `appendCasesToDataset()`, which validates each
+new case via the same Zod schema upload uses, writes the row at the
+next contiguous position, and **recomputes the dataset's `contentHash`**
+over the full case array. Without the hash recompute, every queued eval
+run pinned to the old hash would fail with `dataset_changed_post_submit`
+on the next worker tick.
+
+`POST /evaluations/datasets/:id/capture` is the wire route — Zod
+discriminated union on `kind`, ownership enforced at three layers:
+dataset (caller must own), source message's conversation (caller must
+own), and source execution (caller must own). Without the source-side
+check, a user could capture another user's prod traffic. UI entry
+points land in 2.6.
+
 ## Roadmap: judges in workflows
 
 Confirmed as future work. Two complementary integrations let workflows
@@ -406,6 +437,9 @@ type; `workflow_as_judge` reuses the same workflow execution path).
 | Tick wiring         | `app/api/v1/admin/orchestration/maintenance/tick/route.ts`                                 |
 | Cost estimator      | `lib/orchestration/cost-estimation/evaluation-cost.ts`                                     |
 | Estimate route      | `app/api/v1/admin/orchestration/evaluations/runs/estimate/route.ts`                        |
+| Append helper       | `lib/orchestration/evaluations/datasets/append-cases.ts`                                   |
+| Capture helpers     | `lib/orchestration/evaluations/datasets/capture.ts`                                        |
+| Capture route       | `app/api/v1/admin/orchestration/evaluations/datasets/[id]/capture/route.ts`                |
 | API routes          | `app/api/v1/admin/orchestration/evaluations/{datasets,runs,graders}/`                      |
 | UI pages            | `app/admin/orchestration/evaluations/{datasets,runs}/`                                     |
 | UI components       | `components/admin/orchestration/evaluations-foundations/`                                  |

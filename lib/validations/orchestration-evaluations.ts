@@ -156,3 +156,43 @@ export const estimateRunCostSchema = z.object({
 });
 
 export type EstimateRunCostInput = z.infer<typeof estimateRunCostSchema>;
+
+// ---------------------------------------------------------------------------
+// Datasets — trace-to-dataset capture
+// ---------------------------------------------------------------------------
+
+const captureEditsSchema = z
+  .object({
+    input: z.union([z.string().min(1).max(50_000), z.record(z.string(), z.unknown())]).optional(),
+    expectedOutput: z.string().max(50_000).optional(),
+    referenceCitations: z.array(z.unknown()).optional(),
+    metadataPatch: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
+
+export const captureDatasetCaseSchema = z.discriminatedUnion('kind', [
+  z
+    .object({
+      kind: z.literal('conversation_turn'),
+      messageId: z.string().min(1),
+      edits: captureEditsSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('workflow_execution'),
+      executionId: z.string().min(1),
+      selector: z
+        .object({
+          kind: z.enum(['final_report', 'last_step', 'step_id']),
+          stepId: z.string().optional(),
+        })
+        .refine((s) => s.kind !== 'step_id' || (s.stepId && s.stepId.length > 0), {
+          message: 'selector.stepId is required when selector.kind="step_id"',
+        }),
+      edits: captureEditsSchema.optional(),
+    })
+    .strict(),
+]);
+
+export type CaptureDatasetCaseInput = z.infer<typeof captureDatasetCaseSchema>;
