@@ -54,6 +54,19 @@ export async function executeJudgeCall(
     );
   }
 
+  // Judge calls write `AiCostLog` rows attributed to the judge agent +
+  // user, so the workflow must be running on behalf of a real user.
+  // System-context executions (scheduler tick without a user) can't use
+  // judge_call — surface a typed error rather than silently writing to
+  // a null user.
+  if (ctx.userId === null) {
+    throw new ExecutorError(
+      step.id,
+      'judge_call_requires_user_context',
+      'judge_call needs a user-scoped execution context; this workflow is running without a userId.'
+    );
+  }
+
   // Template-interpolate every string field so a workflow author can
   // pull values out of prior step outputs without external glue.
   // `interpolatePrompt` returns the empty string for missing refs —
