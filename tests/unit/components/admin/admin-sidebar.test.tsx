@@ -9,8 +9,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ComponentType } from 'react';
 
 import { AdminSidebar } from '@/components/admin/admin-sidebar';
+import { registerNavSection, __resetNavRegistryForTests } from '@/lib/admin-nav/registry';
 
 const pathnameMock = vi.fn(() => '/admin/overview');
 
@@ -47,6 +49,9 @@ describe('AdminSidebar', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    // Clear any app nav sections registered during tests in this suite so
+    // they don't bleed into the integration suite below.
+    __resetNavRegistryForTests();
   });
 
   it('renders all four top-level sections', () => {
@@ -237,5 +242,86 @@ describe('AdminSidebar', () => {
     });
     expect(screen.queryByText('99')).toBeNull();
     expect(screen.getByText('AI Orchestration')).toBeInTheDocument();
+  });
+});
+
+// ─── Integration: admin nav registry seam (Seam 4) ───────────────────────────
+//
+// Proves the end-to-end wiring: registerNavSection() → AdminSidebar renders
+// app sections appended after the core sections, in DOM order.
+
+describe('AdminSidebar – nav registry integration (Seam 4)', () => {
+  const StubIcon: ComponentType<{ className?: string }> = () => null;
+
+  let mockFetch: ReturnType<typeof vi.fn<typeof fetch>>;
+
+  beforeEach(() => {
+    pathnameMock.mockReset();
+    pathnameMock.mockReturnValue('/admin/overview');
+    mockFetch = vi.fn<typeof fetch>();
+    global.fetch = mockFetch;
+    mockFetch.mockResolvedValue(
+      new Response(JSON.stringify({ success: true, data: { counts: ZERO_COUNTS } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    // Prevent registered app sections from leaking into other tests.
+    __resetNavRegistryForTests();
+  });
+
+  it('renders an app-registered section title and its nav link', async () => {
+    // Arrange — register an app section before the sidebar renders.
+    registerNavSection({
+      title: 'My App',
+      items: [
+        {
+          href: '/admin/my-app/dashboard',
+          label: 'App Dashboard',
+          icon: StubIcon,
+          description: 'Main app page',
+        },
+      ],
+    });
+
+    // Act
+    render(<AdminSidebar />);
+
+    // Assert — the section heading is present.
+    expect(screen.getByText('My App')).toBeInTheDocument();
+    // The nav link is present and has the correct href.
+    const link = screen.getByRole('link', { name: /app dashboard/i });
+    expect(link).toHaveAttribute('href', '/admin/my-app/dashboard');
+  });
+
+  it('app section appears in the DOM AFTER the core "System" section', () => {
+    // Arrange — register an app section.
+    registerNavSection({
+      title: 'App Section',
+      items: [
+        {
+          href: '/admin/app/page',
+          label: 'App Page',
+          icon: StubIcon,
+          description: 'An app page',
+        },
+      ],
+    });
+
+    // Act
+    render(<AdminSidebar />);
+
+    // Assert — the "System" heading (last core section) must come before the
+    // "App Section" heading in DOM order.
+    const systemHeading = screen.getByText('System');
+    const appHeading = screen.getByText('App Section');
+
+    // Node.DOCUMENT_POSITION_FOLLOWING (4) means appHeading is after systemHeading.
+    const position = systemHeading.compareDocumentPosition(appHeading);
+    expect(position & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
