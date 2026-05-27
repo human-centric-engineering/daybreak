@@ -1,5 +1,5 @@
 /**
- * Zod schemas for the Phase 1 dataset-driven evaluation endpoints.
+ * Zod schemas for the dataset-driven evaluation endpoints.
  *
  * Kept separate from `orchestration.ts` (already > 3700 lines) for
  * discoverability and to keep dataset/run/grader concerns colocated.
@@ -102,6 +102,37 @@ export const listRunsQuerySchema = z.object({
 // Runs — create / queue
 // ---------------------------------------------------------------------------
 
+/**
+ * Phase 4 (CI gate): per-metric pass/fail thresholds. Persisted on the
+ * AiEvaluationRun row at create time so the run GET can compute a
+ * `gate.passed` block from the completed `summary.stats`.
+ *
+ * Each threshold targets one grader slug (e.g. `judge_agent`) and asserts
+ * `summary.stats[slug].mean >= minMean` and/or `passRate >= minPassRate`.
+ * Both fields are optional; at least one must be set per threshold.
+ */
+export const gateConfigSchema = z
+  .object({
+    thresholds: z
+      .array(
+        z
+          .object({
+            metricSlug: z.string().min(1).max(120),
+            minMean: z.number().min(0).max(1).optional(),
+            minPassRate: z.number().min(0).max(1).optional(),
+          })
+          .strict()
+          .refine((t) => t.minMean !== undefined || t.minPassRate !== undefined, {
+            message: 'At least one of minMean or minPassRate must be set',
+          })
+      )
+      .min(1)
+      .max(20),
+  })
+  .strict();
+
+export type GateConfig = z.infer<typeof gateConfigSchema>;
+
 export const createRunSchema = z
   .object({
     name: z.string().min(1).max(120),
@@ -126,6 +157,7 @@ export const createRunSchema = z
         stepId: z.string().optional(),
       })
       .optional(),
+    gateConfig: gateConfigSchema.optional(),
   })
   .refine(
     (v) =>
@@ -165,12 +197,22 @@ export type ListRunCasesQuery = z.infer<typeof listRunCasesQuerySchema>;
  * caller (the form) sends them all even if the user hasn't selected
  * any judges yet.
  */
-export const estimateRunCostSchema = z.object({
-  agentId: z.string().min(1),
-  datasetId: z.string().min(1),
-  judgeAgentSlugs: z.array(z.string().min(1)).default([]),
-  caseCount: z.coerce.number().int().nonnegative().optional(),
-});
+export const estimateRunCostSchema = z
+  .object({
+    /**
+     * Defaults to 'agent' so callers that pre-date the Phase 3.5b widening
+     * (and tests that don't care about workflow subjects) keep working.
+     */
+    subjectKind: z.enum(['agent', 'workflow']).default('agent'),
+    agentId: z.string().min(1).optional(),
+    workflowId: z.string().min(1).optional(),
+    datasetId: z.string().min(1),
+    judgeAgentSlugs: z.array(z.string().min(1)).default([]),
+    caseCount: z.coerce.number().int().nonnegative().optional(),
+  })
+  .refine((v) => (v.subjectKind === 'agent' ? !!v.agentId : !!v.workflowId), {
+    message: 'agentId required for agent subjects; workflowId required for workflow subjects',
+  });
 
 export type EstimateRunCostInput = z.infer<typeof estimateRunCostSchema>;
 
@@ -314,3 +356,29 @@ export type GenerateFromDescriptionPreviewInput = z.infer<
 export type GenerateFromDescriptionCommitInput = z.infer<
   typeof generateFromDescriptionCommitSchema
 >;
+
+// ---------------------------------------------------------------------------
+// Pairwise verdicts (Phase 3.5a)
+// ---------------------------------------------------------------------------
+
+/**
+ * Body for POST /experiments/:id/verdicts. The endpoint loads both
+ * variants' per-case `AiEvaluationCaseResult` rows, joins them by
+ * `casePosition`, and invokes the `pairwise_judge_agent` grader once per
+ * pair. Result is persisted on `AiExperiment.pairwiseVerdict`.
+ *
+ * `variantAId` / `variantBId` MUST belong to the experiment in the URL
+ * (route handler enforces ownership + membership) and MUST be distinct.
+ */
+export const runPairwiseVerdictSchema = z
+  .object({
+    judgeAgentSlug: z.string().min(1).max(120),
+    variantAId: z.string().min(1),
+    variantBId: z.string().min(1),
+  })
+  .strict()
+  .refine((v) => v.variantAId !== v.variantBId, {
+    message: 'variantAId and variantBId must be different',
+  });
+
+export type RunPairwiseVerdictInput = z.infer<typeof runPairwiseVerdictSchema>;

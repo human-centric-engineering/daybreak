@@ -70,54 +70,72 @@ export type { ModelOption };
  * divergence on the enum/record fields (metadata, providerConfig) that the
  * form doesn't expose.
  */
-const agentFormSchema = z.object({
-  name: z.string().min(1, 'Name is required').max(100),
-  slug: slugSchema.min(1, 'Slug is required').max(100),
-  // Set at create time only (via ?kind= query param); not editable on
-  // existing agents. 'chat' or 'judge'.
-  kind: z.enum(['chat', 'judge']),
-  description: z.string().min(1, 'Description is required').max(5000),
-  // Profile inheritance — see lib/orchestration/agents/resolve-effective-prompt.ts.
-  profileId: z.string().nullable().optional(),
-  persona: z.string().max(50000).nullable().optional(),
-  guardrails: z.string().max(10000).nullable().optional(),
-  personaMode: z.enum(['override', 'append']),
-  voiceMode: z.enum(['override', 'append']),
-  guardrailsMode: z.enum(['override', 'append']),
-  systemInstructions: z.string().min(1, 'System instructions are required').max(50000),
-  provider: z.string().min(1, 'Provider is required'),
-  model: z.string().min(1, 'Model is required'),
-  temperature: z.number().min(0).max(2),
-  maxTokens: z.number().int().min(1).max(200000),
-  // Reasoning-effort bucket. `'auto'` is the form sentinel for "let
-  // the provider apply its default" — Radix Select forbids empty-string
-  // values, so we can't use `''` even though the column persists as
-  // null. The submit handler translates `'auto'` → null.
-  reasoningEffort: z.enum(['auto', 'minimal', 'low', 'medium', 'high']),
-  monthlyBudgetUsd: z.number().positive().max(10000).optional(),
-  // Per-turn cap (improvement #39 runaway-loop guard). Optional /
-  // nullable; null means "use the org default" or "no cap" if that
-  // is also null. min(0.01) matches the API-side validator.
-  maxCostPerTurnUsd: z.number().min(0.01).max(10000).nullable().optional(),
-  isActive: z.boolean(),
-  inputGuardMode: z.enum(['log_only', 'warn_and_continue', 'block']).nullable().optional(),
-  outputGuardMode: z.enum(['log_only', 'warn_and_continue', 'block']).nullable().optional(),
-  citationGuardMode: z.enum(['log_only', 'warn_and_continue', 'block']).nullable().optional(),
-  maxHistoryTokens: z.number().int().min(1000).max(2000000).nullable().optional(),
-  maxHistoryMessages: z.number().int().min(0).max(500).nullable().optional(),
-  retentionDays: z.number().int().min(1).max(3650).nullable().optional(),
-  visibility: z.enum(['internal', 'public', 'invite_only']),
-  rateLimitRpm: z.number().int().min(1).max(10000).nullable().optional(),
-  enableVoiceInput: z.boolean(),
-  enableImageInput: z.boolean(),
-  enableDocumentInput: z.boolean(),
-  fallbackProviders: z.array(z.string()),
-  knowledgeAccessMode: z.enum(['full', 'restricted']),
-  knowledgeTagIds: z.array(z.string()),
-  knowledgeDocumentIds: z.array(z.string()),
-  topicBoundaries: z.string().optional(),
-  brandVoiceInstructions: z.string().max(10000).nullable().optional(),
-});
+const agentFormSchema = z
+  .object({
+    name: z.string().min(1, 'Name is required').max(100),
+    slug: slugSchema.min(1, 'Slug is required').max(100),
+    // Set at create time only (via ?kind= query param); not editable on
+    // existing agents. 'chat' or 'judge'.
+    kind: z.enum(['chat', 'judge']),
+    description: z.string().min(1, 'Description is required').max(5000),
+    // Profile inheritance — see lib/orchestration/agents/resolve-effective-prompt.ts.
+    profileId: z.string().nullable().optional(),
+    persona: z.string().max(50000).nullable().optional(),
+    guardrails: z.string().max(10000).nullable().optional(),
+    personaMode: z.enum(['override', 'append']),
+    voiceMode: z.enum(['override', 'append']),
+    guardrailsMode: z.enum(['override', 'append']),
+    systemInstructions: z.string().min(1, 'System instructions are required').max(50000),
+    provider: z.string().min(1, 'Provider is required'),
+    model: z.string().min(1, 'Model is required'),
+    temperature: z.number().min(0).max(2),
+    maxTokens: z.number().int().min(1).max(200000),
+    // Reasoning-effort bucket. `'auto'` is the form sentinel for "let
+    // the provider apply its default" — Radix Select forbids empty-string
+    // values, so we can't use `''` even though the column persists as
+    // null. The submit handler translates `'auto'` → null.
+    reasoningEffort: z.enum(['auto', 'minimal', 'low', 'medium', 'high']),
+    monthlyBudgetUsd: z.number().positive().max(10000).optional(),
+    // Per-turn cap (improvement #39 runaway-loop guard). Optional /
+    // nullable; null means "use the org default" or "no cap" if that
+    // is also null. min(0.01) matches the API-side validator.
+    maxCostPerTurnUsd: z.number().min(0.01).max(10000).nullable().optional(),
+    isActive: z.boolean(),
+    inputGuardMode: z.enum(['log_only', 'warn_and_continue', 'block']).nullable().optional(),
+    outputGuardMode: z.enum(['log_only', 'warn_and_continue', 'block']).nullable().optional(),
+    citationGuardMode: z.enum(['log_only', 'warn_and_continue', 'block']).nullable().optional(),
+    maxHistoryTokens: z.number().int().min(1000).max(2000000).nullable().optional(),
+    maxHistoryMessages: z.number().int().min(0).max(500).nullable().optional(),
+    retentionDays: z.number().int().min(1).max(3650).nullable().optional(),
+    visibility: z.enum(['internal', 'public', 'invite_only']),
+    rateLimitRpm: z.number().int().min(1).max(10000).nullable().optional(),
+    enableVoiceInput: z.boolean(),
+    enableImageInput: z.boolean(),
+    enableDocumentInput: z.boolean(),
+    fallbackProviders: z.array(z.string()),
+    knowledgeAccessMode: z.enum(['full', 'restricted']),
+    knowledgeRetrievalMode: z.enum(['model', 'first_turn', 'every_turn', 'keywords']),
+    knowledgeTriggerKeywords: z.string().optional(),
+    knowledgeTagIds: z.array(z.string()),
+    knowledgeDocumentIds: z.array(z.string()),
+    topicBoundaries: z.string().optional(),
+    brandVoiceInstructions: z.string().max(10000).nullable().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.knowledgeRetrievalMode === 'keywords') {
+      const trimmed = (data.knowledgeTriggerKeywords ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+      if (trimmed.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['knowledgeTriggerKeywords'],
+          message: 'Add at least one trigger keyword when retrieval mode is "keywords".',
+        });
+      }
+    }
+  });
 
 type AgentFormData = z.infer<typeof agentFormSchema>;
 
@@ -247,6 +265,10 @@ export function AgentForm({
       fallbackProviders: agent?.fallbackProviders ?? [],
       knowledgeAccessMode:
         (agent?.knowledgeAccessMode as 'full' | 'restricted' | undefined) ?? 'full',
+      knowledgeRetrievalMode:
+        (agent?.knowledgeRetrievalMode as AgentFormData['knowledgeRetrievalMode'] | undefined) ??
+        'model',
+      knowledgeTriggerKeywords: agent?.knowledgeTriggerKeywords?.join(', ') ?? '',
       knowledgeTagIds: agent?.grantedTagIds ?? [],
       knowledgeDocumentIds: agent?.grantedDocumentIds ?? [],
       topicBoundaries: agent?.topicBoundaries?.join(', ') ?? '',
@@ -428,6 +450,12 @@ export function AgentForm({
       reasoningEffort: reasoningEffort === 'auto' ? null : reasoningEffort,
       topicBoundaries: rest.topicBoundaries
         ? rest.topicBoundaries
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : [],
+      knowledgeTriggerKeywords: rest.knowledgeTriggerKeywords
+        ? rest.knowledgeTriggerKeywords
             .split(',')
             .map((s) => s.trim())
             .filter(Boolean)
@@ -1589,6 +1617,75 @@ export function AgentForm({
           />
 
           <div className="grid gap-2">
+            <Label htmlFor="knowledgeRetrievalMode">
+              Knowledge retrieval{' '}
+              <FieldHelp title="When the agent searches its knowledge base">
+                Controls when a knowledge base search is forced.
+                <br />
+                <br />
+                <strong>Model decides</strong> — the agent searches only when it judges the question
+                needs it (default).
+                <br />
+                <br />
+                <strong>Force on first message</strong> — search on the first message of each
+                conversation, then let the agent decide.
+                <br />
+                <br />
+                <strong>Force on every message</strong> — search before answering every message.
+                <br />
+                <br />
+                <strong>Force on keywords</strong> — search whenever the message contains a trigger
+                word from the list below.
+                <br />
+                <br />
+                Forcing has no effect unless the Search Knowledge Base capability is enabled for
+                this agent on the Capabilities tab.
+              </FieldHelp>
+            </Label>
+            <Select
+              value={watch('knowledgeRetrievalMode')}
+              onValueChange={(v) =>
+                setValue('knowledgeRetrievalMode', v as AgentFormData['knowledgeRetrievalMode'], {
+                  shouldDirty: true,
+                })
+              }
+            >
+              <SelectTrigger id="knowledgeRetrievalMode">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="model">Model decides (default)</SelectItem>
+                <SelectItem value="first_turn">Force on first message</SelectItem>
+                <SelectItem value="every_turn">Force on every message</SelectItem>
+                <SelectItem value="keywords">Force on keywords</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {watch('knowledgeRetrievalMode') === 'keywords' && (
+            <div className="grid gap-2">
+              <Label htmlFor="knowledgeTriggerKeywords">
+                Trigger keywords{' '}
+                <FieldHelp title="Words that force a knowledge base search">
+                  Comma-separated words or phrases. When a user message contains any of them
+                  (matched whole-word, case-insensitive), the agent must search the knowledge base
+                  before replying. For example: &ldquo;refund, warranty, returns&rdquo;.
+                </FieldHelp>
+              </Label>
+              <Input
+                id="knowledgeTriggerKeywords"
+                placeholder="e.g. refund, warranty, returns"
+                {...register('knowledgeTriggerKeywords')}
+              />
+              {errors.knowledgeTriggerKeywords && (
+                <p className="text-destructive text-xs">
+                  {errors.knowledgeTriggerKeywords.message}
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="grid gap-2">
             <Label htmlFor="topicBoundaries">
               Topic boundaries{' '}
               <FieldHelp title="Forbidden topics for output guard">
@@ -1702,6 +1799,11 @@ export function AgentForm({
                       fallbackProviders: fresh.fallbackProviders ?? [],
                       knowledgeAccessMode:
                         (fresh.knowledgeAccessMode as 'full' | 'restricted' | undefined) ?? 'full',
+                      knowledgeRetrievalMode:
+                        (fresh.knowledgeRetrievalMode as
+                          | AgentFormData['knowledgeRetrievalMode']
+                          | undefined) ?? 'model',
+                      knowledgeTriggerKeywords: fresh.knowledgeTriggerKeywords?.join(', ') ?? '',
                       knowledgeTagIds: fresh.grantedTagIds ?? [],
                       knowledgeDocumentIds: fresh.grantedDocumentIds ?? [],
                       topicBoundaries: fresh.topicBoundaries?.join(', ') ?? '',

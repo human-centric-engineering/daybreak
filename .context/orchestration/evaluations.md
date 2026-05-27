@@ -301,7 +301,10 @@ code, no "AI flourishes". One grep audits the whole surface.
   `subjectOutputSelector` control.
 - ~~Pairwise graders, RAG-specific Ragas metrics~~ — shipped in Phase 3
   (`pairwise_judge_agent` + three new Ragas judges).
-- No CI gating endpoint yet — Phase 4.
+- CI gating shipped as Phase 4 (minimal): an admin-scoped API key
+  can hit the existing `POST /runs` + `GET /runs/:id` endpoints; the
+  GET response includes a computed `gate: { passed, reasons }` block
+  when the run was created with `gateConfig` (see below).
 
 ## Phase 2 — cost estimator
 
@@ -553,9 +556,8 @@ candidate answers side-by-side and parses
 chat-layer or parse errors so downstream consumers always see a
 usable shape. Standalone runs refuse pairwise metrics — they need
 two side-by-side outputs, which only the experiment compare flow
-supplies. The endpoint that runs pairwise verdicts across an
-experiment's variants (with a compare-view verdict badge) is a
-Phase 3.5 follow-up; the grader is callable programmatically today.
+supplies. The endpoint that surfaces verdicts in the admin UI ships
+in Phase 3.5a (see below).
 
 ### What's NOT included
 
@@ -567,9 +569,242 @@ Phase 3.5 follow-up; the grader is callable programmatically today.
 - A first-class "evaluation workflow" template type. Keep workflows
   generic; let the `judge_call` step + `workflow_as_judge` grader
   compose into eval-shaped workflows organically.
-- A workflow-aware cost estimator. The form suppresses the cost
-  banner for workflow subjects; the per-step token mix needs to be
-  unioned across the workflow's defined steps. Phase 3.5.
+
+## Phase 4 — minimal CI gate
+
+A CI runner can now fire an evaluation against a known dataset, poll
+the status, and read a pass/fail verdict — all through the existing
+`/runs` endpoints, no parallel surface. Two thin changes make it work:
+
+### API-key fallback in `withAdminAuth`
+
+`lib/auth/guards.ts` now resolves an `Authorization: Bearer sk_...`
+header via the existing `resolveApiKey` helper before falling back to
+the better-auth cookie session. An admin-scoped API key (created via
+the existing admin UI) is sufficient — the underlying user does not
+need `role: 'ADMIN'`. Keys without the `admin` scope receive 403
+rather than falling through to the cookie path (a 401 on a key-
+bearing CI caller would mislead the operator into debugging the
+key itself).
+
+The orchestration rate-limit rule in
+`lib/security/rate-limit-policy.ts` now matches twice: once with
+`key: 'api-key'` (skipped unless an `Authorization: Bearer sk_...`
+header is present) and once with `key: 'session-user'` as the fall-
+through. CI traffic gets a per-key bucket; the admin UI keeps its
+per-user bucket. Cap stays at 120/min for both.
+
+### `gateConfig` on `AiEvaluationRun`
+
+`POST /runs` accepts an optional `gateConfig` body field — a list of
+per-metric thresholds (`{ metricSlug, minMean?, minPassRate? }`) the
+caller wants to assert. The worker doesn't see this column; only
+`GET /runs/:id` reads it, and only after the run has completed
+(`summary.stats` populated).
+
+`GET /runs/:id` now includes a computed `gate: { passed, reasons }`
+block. `reasons` is per-threshold: `{ metricSlug, threshold:
+'mean'|'passRate', got, want, passed }`. The block is `null` when
+either `gateConfig` or `summary.stats` is missing — callers should
+treat that as "verdict not available" rather than a vacuous pass.
+
+A missing `stats[metricSlug]` row fails the threshold (we'd rather
+surface a real failure than silently treat absence as a pass).
+
+### CI usage
+
+```bash
+KEY=sk_...
+BASE=https://your.sunrise.example.com
+
+RUN_ID=$(curl -sS -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "ci-smoke",
+    "subjectKind": "agent",
+    "agentId": "...",
+    "datasetId": "...",
+    "metricConfigs": [{ "slug": "judge_agent", "config": { "agentSlug": "eval-judge-correctness" } }],
+    "gateConfig": {
+      "thresholds": [{ "metricSlug": "judge_agent", "minMean": 0.8 }]
+    }
+  }' \
+  "$BASE/api/v1/admin/orchestration/evaluations/runs" | jq -r .data.id)
+
+until [ "$(curl -sS -H "Authorization: Bearer $KEY" \
+  "$BASE/api/v1/admin/orchestration/evaluations/runs/$RUN_ID" \
+  | jq -r .data.status)" != "queued" ] && \
+      [ "$(curl -sS -H "Authorization: Bearer $KEY" \
+  "$BASE/api/v1/admin/orchestration/evaluations/runs/$RUN_ID" \
+  | jq -r .data.status)" != "running" ]; do
+  sleep 5
+done
+
+curl -sS -H "Authorization: Bearer $KEY" \
+  "$BASE/api/v1/admin/orchestration/evaluations/runs/$RUN_ID" \
+  | jq -e '.data.gate.passed == true'
+```
+
+The final `jq -e` exits non-zero when `gate.passed` is false (or
+missing), giving CI a clean fail-the-build signal.
+
+### What's NOT included
+
+- A dedicated `/runs/from-ci` endpoint. The existing POST is enough;
+  duplicating the create flow would split admin and CI surfaces for
+  no benefit.
+- Server-side polling helpers or webhook notification. CI does the
+  polling — the run status + maintenance tick cadence (~60s) makes
+  this trivial.
+- Per-environment thresholds. The threshold list is bundled with the
+  run config at submit time; the caller manages variation across
+  branches / staging / prod.
+
+### Critical files
+
+| Concern             | Path                                                                               |
+| ------------------- | ---------------------------------------------------------------------------------- |
+| Auth fallback       | `lib/auth/guards.ts` (`withAuth`, `withAdminAuth`)                                 |
+| Rate-limit policy   | `lib/security/rate-limit-policy.ts` (split orchestration rule)                     |
+| Schema              | `prisma/schema.prisma` (`AiEvaluationRun.gateConfig`)                              |
+| Migration           | `prisma/migrations/20260527073409_add_evaluation_run_gate_config/`                 |
+| Zod                 | `lib/validations/orchestration-evaluations.ts` (`gateConfigSchema`)                |
+| Verdict computation | `lib/orchestration/evaluations/gate.ts` (`computeGateVerdict`)                     |
+| Run POST            | `app/api/v1/admin/orchestration/evaluations/runs/route.ts` (persists `gateConfig`) |
+| Run GET             | `app/api/v1/admin/orchestration/evaluations/runs/[id]/route.ts` (emits `gate`)     |
+
+## Phase 3.5b — workflow-aware cost estimator
+
+The cost estimator now handles workflow subjects so the `/runs/new`
+form's cost banner is no longer suppressed when the operator picks a
+workflow subject.
+
+### Server
+
+`estimateEvaluationRunCost` (`lib/orchestration/cost-estimation/evaluation-cost.ts`)
+branches on `subjectKind`:
+
+- `'agent'` — unchanged. Bound model lookup + heuristic per-case
+  subject tokens.
+- `'workflow'` — calls `loadWorkflowShape(workflowId, chatDefault)`
+  from `workflow-cost.ts` (the same helper the workflow builder
+  uses), walks the resulting `workSteps`, and applies the heuristic
+  `WORKFLOW_STEP_INPUT_TOKENS_PER_CASE / OUTPUT_TOKENS_PER_CASE`
+  (3,000 / 1,000 — same baseline as `workflow-cost.ts`) multiplied
+  by each step's `multiplier` (`agent_call × 3`, `reflect × 2`,
+  others × 1) and `caseCount`. Tokens are aggregated by resolved
+  model — a workflow that calls two different agents binds two
+  `modelMix` rows tagged `role: 'subject'`.
+
+Empirical mode keys on `(subjectKind, agentId | workflowId, sorted
+judgeAgentSlugs, datasetContentHash)` so workflow-subject and
+agent-subject past runs never cross-pollute the estimate.
+
+### UI
+
+`run-create-form.tsx` no longer early-returns for workflow subjects
+in `useEvaluationCostEstimate`. The hook now sends
+`{ subjectKind, agentId|workflowId, datasetId, judgeAgentSlugs }`
+and the response renders through the same banner (one `subject`
+entry per resolved model, plus per-judge rows). Debounce stays at
+350ms; suppression still kicks in until the chosen subject is
+populated.
+
+### What's NOT included
+
+- A per-step cost breakdown in the eval banner. The estimator
+  internally tracks tokens per step, but the UI sums them by model —
+  the workflow builder's per-step tint is the right surface for
+  that detail.
+- Conditional-branch awareness (every LLM step is assumed to fire
+  on every case). Matches the workflow-builder estimator's posture
+  and is documented as a heuristic upper bound.
+
+### Critical files
+
+| Concern                | Path                                                                                         |
+| ---------------------- | -------------------------------------------------------------------------------------------- |
+| Estimator              | `lib/orchestration/cost-estimation/evaluation-cost.ts`                                       |
+| Shape loader (re-used) | `lib/orchestration/cost-estimation/workflow-cost.ts` (`loadWorkflowShape`, `summariseShape`) |
+| Zod schema             | `lib/validations/orchestration-evaluations.ts` (`estimateRunCostSchema`)                     |
+| Estimate route         | `app/api/v1/admin/orchestration/evaluations/runs/estimate/route.ts`                          |
+| Form hook              | `components/admin/orchestration/evaluations-foundations/run-create-form.tsx`                 |
+
+## Phase 3.5a — pairwise verdicts endpoint + compare badge
+
+The `pairwise_judge_agent` grader (Phase 3) is now driven through a
+dedicated admin endpoint and surfaced on the compare view, completing
+the half-shipped pairwise flow.
+
+### Endpoint
+
+`POST /api/v1/admin/orchestration/experiments/:id/verdicts`
+
+- Body: `{ judgeAgentSlug, variantAId, variantBId }`. Variants must
+  belong to the experiment and have a completed `AiEvaluationRun`.
+- Loads both variants' per-case `AiEvaluationCaseResult` rows and joins
+  them by `casePosition`. Drives `pairwiseJudgeAgentGrader` once per
+  pair, tallies `{ A, B, tie }` verdicts, persists a
+  `PairwiseVerdictSummary` blob on `AiExperiment.pairwiseVerdict`.
+- Synchronous, hard-capped at 100 dataset cases — the 409 response
+  recommends a smaller dataset. Above the cap the cost + latency of
+  100 + judge LLM calls outweighs the inline UX value; promote to a
+  queued worker if real datasets blow past the cap.
+- Sub-cap: `pairwiseVerdictLimiter` at 5/min/session-user
+  (`lib/security/rate-limit.ts`). Each call drives up to 100 LLM
+  invocations, so the cap is tighter than the `orchestration` section
+  tier's 120/min.
+- Grader errors (LLM stream failure, malformed JSON) get folded into
+  `casesFailed` rather than polluting the tally — the grader's
+  prefixed reasoning string is the signal.
+- Unpaired positions (one variant missing a result for that case)
+  are recorded in `perCase` with an `error` string and counted in
+  `casesFailed`; the grader is not invoked for them.
+
+### Compare-view card
+
+The compare page (`/admin/orchestration/experiments/:id/compare`)
+now renders a **Pairwise verdict** card between the
+"still queued" banner and the per-metric variant grid. The card
+shows the stored tally (A wins / B wins / Ties / Failed) when one
+exists, plus a **Run verdict / Re-run verdict** button that opens a
+dialog with a judge picker + variant A/B selectors (defaults to
+control + first challenger, judges pulled directly from
+`AiAgent where kind='judge' AND isActive`).
+
+The button is disabled below the threshold of two completed runs,
+above the 100-case cap, or when the experiment has no dataset — the
+empty-state copy explains which condition tripped.
+
+### What's NOT included
+
+- A queued/asynchronous path for >100-case experiments. The 100-cap
+  is a deliberate constraint to keep the endpoint synchronous + the
+  UX legible; we'd revisit if anyone actually wants pairwise tallies
+  on bigger datasets.
+- A history of past verdicts. Re-running overwrites the prior
+  `pairwiseVerdict` blob with the new judge slug + timestamp. The
+  cost rows (tagged `role: 'judge'` on `AiCostLog`) retain the audit
+  trail.
+- Pairwise stats (e.g. binomial test on the tally counts) on the
+  compare page. The Welch + Cohen's d badges on the per-metric grid
+  already serve the "is this difference real?" question; pairwise
+  verdicts answer "which one would a judge prefer?".
+
+### Critical files
+
+| Concern                | Path                                                                        |
+| ---------------------- | --------------------------------------------------------------------------- |
+| Schema                 | `prisma/schema.prisma` (`AiExperiment.pairwiseVerdict`)                     |
+| Migration              | `prisma/migrations/20260527071146_add_experiment_pairwise_verdict/`         |
+| Type                   | `types/orchestration.ts` (`PairwiseVerdictSummary`, `PairwiseVerdictCase`)  |
+| Endpoint               | `app/api/v1/admin/orchestration/experiments/[id]/verdicts/route.ts`         |
+| Compare GET (extended) | `app/api/v1/admin/orchestration/experiments/[id]/compare/route.ts`          |
+| Zod schema             | `lib/validations/orchestration-evaluations.ts` (`runPairwiseVerdictSchema`) |
+| Sub-limiter            | `lib/security/rate-limit.ts` (`pairwiseVerdictLimiter`)                     |
+| Grader (reuse)         | `lib/orchestration/evaluations/graders/pairwise/judge-agent.ts`             |
+| Compare page           | `app/admin/orchestration/experiments/[id]/compare/page.tsx`                 |
+| Verdict card           | `components/admin/orchestration/experiments/pairwise-verdict-card.tsx`      |
 
 ## Phase 3.6 — dataset creation UX
 

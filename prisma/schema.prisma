@@ -205,6 +205,14 @@ model AiAgent {
   maxCostPerTurnUsd         Float?
   metadata                  Json?
   knowledgeAccessMode       String   @default("full") // "full" = unrestricted KB access (default — preserves prior behaviour). "restricted" = effective doc set is (granted docs) ∪ (docs in any granted tag) ∪ (docs with scope = 'system').
+  // When the chat handler forces a search_knowledge_base call (toolChoice) on the
+  // first LLM iteration of a turn. "model" = unchanged (LLM decides); "first_turn" =
+  // force on the opening user turn only; "every_turn" = force every user turn;
+  // "keywords" = force when the user message matches any knowledgeTriggerKeywords entry.
+  // No-op if the agent doesn't have search_knowledge_base enabled. See
+  // lib/orchestration/chat/streaming-handler.ts.
+  knowledgeRetrievalMode    String   @default("model") // model|first_turn|every_turn|keywords
+  knowledgeTriggerKeywords  String[] @default([]) // trigger terms for knowledgeRetrievalMode = "keywords"
   topicBoundaries           String[] @default([]) // forbidden topic keywords/phrases for output guard
   // Inheritable system-prompt sections — see lib/orchestration/agents/resolve-effective-prompt.ts
   // Null/empty agent text => inherit from the linked AiAgentProfile (if any).
@@ -1306,6 +1314,11 @@ model AiEvaluationRun {
   // { metricSlugs: string[], stats: { [slug]: { mean, median, p95, passRate, scoredCount } },
   //   judgeProvider, judgeModel, completedAt, note? }
   summary               Json?
+  // Phase 4 (CI gate): per-metric pass/fail thresholds the caller wants
+  // to assert against. Shape: { thresholds: [{ metricSlug, minMean?, minPassRate? }] }.
+  // Worker doesn't touch this; GET /runs/:id computes a `gate` block from
+  // it + `summary.stats` when both are present.
+  gateConfig            Json?
   totalCostUsd          Float?
   // For "Rescore as new run" — copies metrics/judge but fresh result rows.
   parentRunId           String?
@@ -1703,6 +1716,12 @@ model AiExperiment {
   // run route uses [judge_agent: eval-judge-relevance] as a sensible
   // default when both fields are null on a draft.
   metricConfigs Json?
+  // Phase 3.5a: stored pairwise verdict tally from the
+  // /experiments/:id/verdicts endpoint. Shape: PairwiseVerdictSummary
+  // in `types/orchestration.ts`. One blob per experiment — rerunning
+  // verdicts overwrites with the new judge + timestamp. Null when no
+  // verdict has been computed yet.
+  pairwiseVerdict Json?
   // Erasure: SetNull-retained (de-attributed) when the creator is erased.
   createdBy     String?
   createdAt     DateTime @default(now())
