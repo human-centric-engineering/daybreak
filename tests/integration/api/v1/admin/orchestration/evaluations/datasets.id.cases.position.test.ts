@@ -81,6 +81,10 @@ beforeEach(() => {
     const tx = {
       aiDataset: prisma.aiDataset,
       aiDatasetCase: prisma.aiDatasetCase,
+      // Route takes `SELECT ... FOR UPDATE` on the parent dataset row at
+      // the top of the transaction to serialise concurrent PATCHes. The
+      // mock just needs to be callable.
+      $queryRaw: vi.fn().mockResolvedValue([{ id: DATASET_ID }]),
     };
     return (cb as (t: typeof tx) => Promise<unknown>)(tx);
   });

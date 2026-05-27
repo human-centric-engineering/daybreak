@@ -58,9 +58,17 @@ export const PATCH = withAdminAuth<{ id: string; position: string }>(
     }
 
     // Apply the patch + re-hash + update the dataset's contentHash in
-    // one transaction. The hash uses the full set of cases so any other
-    // case row that was edited concurrently still lands a coherent hash.
+    // one transaction. A `FOR UPDATE` lock on the parent dataset row
+    // serialises concurrent PATCHes against the same dataset, so the
+    // `findMany` below always sees a coherent snapshot of sibling cases
+    // and the recomputed `contentHash` reflects every committed edit.
+    // Without this lock, READ COMMITTED would let two concurrent PATCHes
+    // each miss the other's case update when hashing, leaving the dataset
+    // hash stale and triggering spurious `dataset_changed_post_submit`
+    // failures on subsequent eval runs.
     const { updatedCase, newHash } = await prisma.$transaction(async (tx) => {
+      await tx.$queryRaw`SELECT id FROM "AiDataset" WHERE id = ${datasetId} FOR UPDATE`;
+
       const data: Prisma.AiDatasetCaseUpdateInput = {};
       if (body.input !== undefined) data.input = body.input as Prisma.InputJsonValue;
       if (body.expectedOutput !== undefined) data.expectedOutput = body.expectedOutput;
