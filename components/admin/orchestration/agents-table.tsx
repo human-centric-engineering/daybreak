@@ -110,7 +110,7 @@ export interface AgentsTableProps {
   initialMeta: PaginationMeta;
 }
 
-type SortField = 'createdAt' | 'name' | 'lastActiveAt';
+type SortField = 'createdAt' | 'name' | 'lastActiveAt' | 'chats' | 'spend';
 type ProfileOption = { id: string; name: string; isSystem: boolean };
 const PROFILE_FILTER_ALL = '__all__';
 const PROFILE_FILTER_UNASSIGNED = 'none';
@@ -231,6 +231,14 @@ export function AgentsTable({ initialAgents, initialMeta }: AgentsTableProps) {
               // Nulls last regardless of sort direction.
               av = a.lastActiveAt ? new Date(a.lastActiveAt).getTime() : -Infinity;
               bv = b.lastActiveAt ? new Date(b.lastActiveAt).getTime() : -Infinity;
+            } else if (field === 'chats') {
+              av = a._count.conversations;
+              bv = b._count.conversations;
+            } else if (field === 'spend') {
+              // Null budget rows sort to the bottom on desc — they're
+              // effectively zero-but-unknown rather than a real zero.
+              av = a._budget ? a._budget.spent : -Infinity;
+              bv = b._budget ? b._budget.spent : -Infinity;
             } else {
               av = new Date(a.createdAt).getTime();
               bv = new Date(b.createdAt).getTime();
@@ -843,8 +851,11 @@ export function AgentsTable({ initialAgents, initialMeta }: AgentsTableProps) {
                 </Tip>
               </TableHead>
               <TableHead className="text-right">
-                <Tip label="Total chat conversations this agent has participated in">
-                  <span>Chats</span>
+                <Tip label="Sort this page by chat count — total conversations this agent has participated in">
+                  <Button variant="ghost" className="-mr-4 h-8" onClick={() => handleSort('chats')}>
+                    Chats
+                    {renderSortIcon('chats')}
+                  </Button>
                 </Tip>
               </TableHead>
               <TableHead>
@@ -858,8 +869,11 @@ export function AgentsTable({ initialAgents, initialMeta }: AgentsTableProps) {
                 </Tip>
               </TableHead>
               <TableHead className="text-right">
-                <Tip label="Spend month-to-date — total LLM cost this calendar month (UTC)">
-                  <span>Spend MTD</span>
+                <Tip label="Sort this page by spend month-to-date (UTC). Rows with no spend data sort to the bottom on descending order.">
+                  <Button variant="ghost" className="-mr-4 h-8" onClick={() => handleSort('spend')}>
+                    Spend MTD
+                    {renderSortIcon('spend')}
+                  </Button>
                 </Tip>
               </TableHead>
               <TableHead>
@@ -875,8 +889,15 @@ export function AgentsTable({ initialAgents, initialMeta }: AgentsTableProps) {
                 </Tip>
               </TableHead>
               <TableHead>
-                <Tip label="When this agent was created">
-                  <span>Created</span>
+                <Tip label="Sort this page by creation date">
+                  <Button
+                    variant="ghost"
+                    className="-ml-4 h-8"
+                    onClick={() => handleSort('createdAt')}
+                  >
+                    Created
+                    {renderSortIcon('createdAt')}
+                  </Button>
                 </Tip>
               </TableHead>
               <TableHead className="text-center">
