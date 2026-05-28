@@ -36,10 +36,45 @@ import { CallExternalApiCapability } from '@/lib/orchestration/capabilities/buil
 import { RunWorkflowCapability } from '@/lib/orchestration/capabilities/built-in/run-workflow';
 import { UploadToStorageCapability } from '@/lib/orchestration/capabilities/built-in/upload-to-storage';
 import { SendMessageToChannelCapability } from '@/lib/orchestration/capabilities/built-in/send-message-to-channel';
+import { initAppCapabilities } from '@/lib/app/capabilities';
 import type { BaseCapability } from '@/lib/orchestration/capabilities/base-capability';
 import type { CapabilityFunctionDefinition } from '@/lib/orchestration/capabilities/types';
 
+// ─── Registration state machine ──────────────────────────────────────────────
+//
+// Three module-scoped flags drive a small lazy-flush state machine so the
+// built-ins, the fork's auto-wired init, and any direct `registerAppCapability`
+// calls all reach the dispatcher exactly once per change — never on every
+// dispatch.
+//
+//   registered      false → true (one-shot)
+//     Set after the 13 built-in capabilities are pushed into the dispatcher
+//     inside `registerBuiltInCapabilities`. Never reset except by the test-only
+//     `__resetRegistrationForTests`. Guards the built-in flush from re-running.
+//
+//   appInited       false → true (one-shot per app file)
+//     Set after `initAppCapabilities()` (the fork's `lib/app/capabilities.ts`
+//     hook) runs. Lets the fork accumulate capabilities at module-import time
+//     by calling `registerAppCapability(...)`, without that init firing on
+//     every dispatch.
+//
+//   appRegistered   true ↔ false (re-armable)
+//     Set after `registerAppCapabilities` flushes the `appCapabilities` map
+//     into the dispatcher. RESET back to `false` by `registerAppCapability`
+//     so a late-arriving capability (e.g. under HMR or a delayed import) is
+//     picked up on the next `registerBuiltInCapabilities` call. This is the
+//     only flag with two-way transitions; the other two are one-shot.
+//
+// Order on every call to `registerBuiltInCapabilities`:
+//   1. Flush built-ins (gated by `registered`).
+//   2. Run app init hook (gated by `appInited`).
+//   3. Flush app capabilities (gated by `appRegistered`).
+//
+// `__resetRegistrationForTests` clears all three (and the `appCapabilities`
+// map) so each test starts from a clean slate.
 let registered = false;
+/** Whether the auto-wired app capability init (`lib/app/capabilities.ts`) has run. */
+let appInited = false;
 
 // ─── App capability registration (fork-readiness seam) ───────────────────────
 
@@ -109,6 +144,16 @@ export function registerBuiltInCapabilities(): void {
     capabilityDispatcher.register(new SendMessageToChannelCapability());
     registered = true;
   }
+  // Auto-wire the app's capability registrations (fork-readiness — the
+  // `lib/app/` bootstrap surface). Runs once, here in the server route-handler
+  // realm, so a fork's `registerAppCapability()` calls in `lib/app/capabilities.ts`
+  // land before the flush below — no separate wiring step. Guarded so it isn't
+  // re-run on every dispatch; direct `registerAppCapability()` callers still
+  // flush via the `appRegistered` path.
+  if (!appInited) {
+    initAppCapabilities();
+    appInited = true;
+  }
   // App capabilities register on the same lazy path, right after the
   // built-ins. Cheap when already flushed (one boolean check).
   registerAppCapabilities();
@@ -122,6 +167,7 @@ export function registerBuiltInCapabilities(): void {
 export function __resetRegistrationForTests(): void {
   registered = false;
   appRegistered = false;
+  appInited = false;
   appCapabilities.clear();
 }
 

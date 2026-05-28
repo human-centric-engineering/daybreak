@@ -466,8 +466,11 @@ export const inboundLimiter = createRateLimiter({
  * - `'mcp'` — MCP transport endpoint (LLM-agent tool calls). 300/min per api-key.
  * - `'auth'` — authentication endpoints (login, signup, password reset). 5/min per IP.
  *
- * Add new tiers here, add a matching entry to {@link RATE_LIMIT_TIERS}, then
- * reference the tier from `RATE_LIMIT_POLICY`.
+ * Add new BUILT-IN tiers here, add a matching entry to {@link RATE_LIMIT_TIERS},
+ * then reference the tier from `RATE_LIMIT_POLICY`. Downstream apps/forks do NOT
+ * edit this union — they register their own section tiers at runtime via
+ * {@link registerRateLimitTier} and reference them from app policy rules
+ * registered through `registerRateLimitRule` (see `rate-limit-policy.ts`).
  */
 export type RateLimitTier = 'admin' | 'orchestration' | 'api' | 'mcp' | 'auth';
 
@@ -476,14 +479,107 @@ export type RateLimitTier = 'admin' | 'orchestration' | 'api' | 'mcp' | 'auth';
  *
  * Consumed by the rate-limit middleware. Route handlers should not read this
  * directly — let the middleware do tier resolution from the policy table.
+ *
+ * Typed `Readonly<…>` so a property reassignment (e.g.
+ * `RATE_LIMIT_TIERS.admin = newLimiter`) is a compile error. `tierRegistry`
+ * snapshots the SAME instances at module load; a silent reassignment here
+ * wouldn't propagate to `resolveRateLimitTier`, so the type forbids it. Tests
+ * mutate state on the existing limiter via `.reset(key)`, which is unaffected.
  */
-export const RATE_LIMIT_TIERS: Record<RateLimitTier, RateLimiter> = {
+export const RATE_LIMIT_TIERS: Readonly<Record<RateLimitTier, RateLimiter>> = {
   admin: adminLimiter,
   orchestration: orchestrationAdminLimiter,
   api: apiLimiter,
   mcp: mcpLimiter,
   auth: authLimiter,
 };
+
+// =============================================================================
+// App-Extensible Tier Registry (fork-readiness seam 13)
+// =============================================================================
+
+/**
+ * Combined tier lookup: Sunrise's built-in tiers plus any tiers an app/fork
+ * registers via {@link registerRateLimitTier}. Seeded from {@link RATE_LIMIT_TIERS}
+ * so the built-ins are always resolvable; the Map holds the SAME limiter
+ * instances, so resetting `RATE_LIMIT_TIERS.admin` (e.g. in tests) and
+ * resolving `'admin'` here observe one shared bucket.
+ */
+const tierRegistry = new Map<string, RateLimiter>(Object.entries(RATE_LIMIT_TIERS));
+
+/**
+ * Register an app-defined section tier so the rate-limit middleware can resolve
+ * it for app-registered policy rules (see `registerRateLimitRule` in
+ * `lib/security/rate-limit-policy.ts`).
+ *
+ * Apps own their tiers; Sunrise owns the built-ins. Registration therefore
+ * REJECTS any name that collides with a built-in tier or a previously
+ * registered app tier — silently shadowing `'admin'` (30/min) with a looser
+ * app limiter would be a security regression, so we throw instead.
+ *
+ * Intended to run once at startup (module import side-effect or an explicit
+ * bootstrap call) before the first request is served.
+ *
+ * @throws if `name` is empty, a built-in tier, or already registered.
+ */
+export function registerRateLimitTier(name: string, limiter: RateLimiter): void {
+  if (!name) {
+    throw new Error('registerRateLimitTier: tier name must be a non-empty string.');
+  }
+  // Use `Object.hasOwn` (not `in`) so prototype-chain keys like `'toString'` /
+  // `'constructor'` don't spuriously match the built-in guard — and compare
+  // case-insensitively against the (all-lowercase) built-in names so a
+  // confusable like `'Admin'` cannot register as a separate tier that
+  // operators reading logs would mistake for the real `admin` cap.
+  const normalized = name.toLowerCase();
+  if (Object.hasOwn(RATE_LIMIT_TIERS, normalized)) {
+    throw new Error(
+      `registerRateLimitTier: "${name}" collides with built-in Sunrise tier "${normalized}" ` +
+        '(comparison is case-insensitive to prevent confusable shadows). ' +
+        'Choose an app-specific tier name.'
+    );
+  }
+  // Idempotent when the SAME limiter instance is re-registered. Next.js HMR
+  // re-evaluates the middleware module on file changes, which re-runs
+  // `registerAppRateLimits()` — without this, a second registration would
+  // throw "already registered" and 500 the dev server until a full restart.
+  // A DIFFERENT limiter for the same name is still a genuine duplicate (a
+  // fork pushing two distinct buckets under one tier) and throws.
+  const existing = tierRegistry.get(name);
+  if (existing !== undefined) {
+    if (existing === limiter) return;
+    throw new Error(
+      `registerRateLimitTier: tier "${name}" is already registered with a different limiter ` +
+        'instance. Re-registration is only idempotent for the same limiter reference; supplying a ' +
+        'second limiter would silently keep one bucket and discard the other.'
+    );
+  }
+  tierRegistry.set(name, limiter);
+}
+
+/**
+ * Resolve a tier name (built-in OR app-registered) to its limiter instance.
+ * Returns `undefined` for unknown names — the middleware treats that as
+ * "no limiter" and logs a warning rather than failing the request.
+ *
+ * The rate-limit middleware uses this instead of indexing {@link RATE_LIMIT_TIERS}
+ * directly so app-registered tiers resolve alongside the built-ins.
+ */
+export function resolveRateLimitTier(name: string): RateLimiter | undefined {
+  return tierRegistry.get(name);
+}
+
+/**
+ * Test-only: drop all app-registered tiers, restoring the registry to the
+ * built-in {@link RATE_LIMIT_TIERS} set. Production code never calls this —
+ * registration is a one-time startup action. Exposed so tests that register
+ * tiers can isolate themselves without `vi.resetModules()` gymnastics.
+ */
+export function __resetAppRateLimitTiers(): void {
+  for (const key of tierRegistry.keys()) {
+    if (!(key in RATE_LIMIT_TIERS)) tierRegistry.delete(key);
+  }
+}
 
 // =============================================================================
 // Dynamic Rate Limiter Factory

@@ -57,8 +57,16 @@ export interface RateLimitRule {
    */
   match: RegExp | string;
 
-  /** Which tier (limiter + cap) to apply. Resolved via `RATE_LIMIT_TIERS`. */
-  tier: RateLimitTier;
+  /**
+   * Which tier (limiter + cap) to apply. Resolved at request time via
+   * `resolveRateLimitTier` (built-in tiers + app-registered tiers).
+   *
+   * Built-in Sunrise rules use a {@link RateLimitTier} literal. App-registered
+   * rules (see {@link registerRateLimitRule}) may name a tier created via
+   * `registerRateLimitTier`, hence the widening to `string` — the literal union
+   * is kept in the type for editor autocomplete on the built-in names.
+   */
+  tier: RateLimitTier | (string & {});
 
   /** How to identify the caller. See {@link RateLimitKey}. */
   key: RateLimitKey;
@@ -95,6 +103,22 @@ function skipNonCredentialAuthRoutes(request: Request): boolean {
   const { pathname } = new URL(request.url);
   return !CREDENTIAL_AUTH_PATTERN.test(pathname);
 }
+
+/**
+ * The `/api/v1/**` catch-all rule — the final fallback before requests escape
+ * the policy. Exported as a named const so:
+ *   1. `getEffectiveRateLimitPolicy` can identity-compare on the last element
+ *      and throw at startup if some future PR ever shifts it off the tail.
+ *   2. Tests can reference the same object instead of structural matching.
+ *
+ * Declared above {@link RATE_LIMIT_POLICY} because the policy literal embeds
+ * this reference (declaration order; `const` is not hoisted).
+ */
+export const CATCH_ALL_RULE: RateLimitRule = {
+  match: /^\/api\/v1\//,
+  tier: 'api',
+  key: 'session-user',
+};
 
 /**
  * The rate-limit policy.
@@ -231,11 +255,13 @@ export const RATE_LIMIT_POLICY: readonly RateLimitRule[] = [
   // this (chat-stream, audio, image, upload, invite, password-reset, etc.)
   // keep their sub-limiter call in the handler — it's additive to this
   // section tier.
-  {
-    match: /^\/api\/v1\//,
-    tier: 'api',
-    key: 'session-user',
-  },
+  //
+  // The catch-all is exported as a named const so `getEffectiveRateLimitPolicy`
+  // can runtime-assert it stays last: app rules are spliced in just ahead of
+  // it, and a future PR appending another rule after `CATCH_ALL_RULE` would
+  // silently put app rules in the wrong slot (they'd never match). Identity
+  // check turns that subtle ordering bug into a loud fail-fast at startup.
+  CATCH_ALL_RULE,
 ];
 
 /**
@@ -246,22 +272,168 @@ export const RATE_LIMIT_POLICY: readonly RateLimitRule[] = [
  * `/admin/users` page or static assets, which the middleware matcher
  * should already have excluded, but we double-check anyway).
  *
- * The `policy` parameter defaults to the canonical {@link RATE_LIMIT_POLICY}.
- * Production callers always use the default. The optional argument exists so
- * unit tests can exercise the matcher against a synthetic policy — including
- * the string-prefix `match` branch that no production rule uses yet — without
- * needing module-level mocks or coverage suppression annotations.
+ * The `policy` parameter defaults to {@link getEffectiveRateLimitPolicy} —
+ * the base policy spliced with any app-registered rules — so a caller that
+ * doesn't pass `policy` still sees app rules. Defaulting to the bare
+ * `RATE_LIMIT_POLICY` would silently bypass the fork-readiness extension and
+ * leave any future caller routing on Sunrise rules only. The optional
+ * argument exists so unit tests can exercise the matcher against a synthetic
+ * policy without needing module-level mocks.
  */
 export function findRateLimitRule(
   pathname: string,
-  policy: readonly RateLimitRule[] = RATE_LIMIT_POLICY
+  policy: readonly RateLimitRule[] = getEffectiveRateLimitPolicy()
 ): RateLimitRule | null {
   for (const rule of policy) {
-    if (typeof rule.match === 'string') {
-      if (pathname.startsWith(rule.match)) return rule;
-    } else if (rule.match.test(pathname)) {
-      return rule;
-    }
+    if (pathMatchesRule(rule.match, pathname)) return rule;
   }
   return null;
+}
+
+/**
+ * Whether a rule's `match` accepts `pathname`. String matchers are prefix
+ * (`startsWith`) matches; `RegExp` matchers use `.test()`. Shared by
+ * {@link findRateLimitRule}, the app-rule security guard, AND the middleware's
+ * skip-fallthrough loop so all three agree on exactly what "this rule could
+ * fire for this path" means — a previous inline copy in the middleware
+ * drifted from this version once, hence the export.
+ */
+export function pathMatchesRule(match: RegExp | string, pathname: string): boolean {
+  return typeof match === 'string' ? pathname.startsWith(match) : match.test(pathname);
+}
+
+// =============================================================================
+// App-Extensible Policy Rules (fork-readiness seam 13)
+// =============================================================================
+
+/**
+ * Canonical namespace prefixes representing every Sunrise-owned protected
+ * surface. An app-registered rule is REJECTED if its matcher fires for any
+ * path under these prefixes — see {@link registerRateLimitRule}.
+ *
+ * Namespace prefixes (rather than specific endpoint paths) so this list stays
+ * stable as Sunrise adds new admin / auth / MCP endpoints under these roots —
+ * a new endpoint like `/api/v1/admin/billing/` is automatically covered
+ * because the prefix probe `/api/v1/admin/anything-goes-here` matches it
+ * against any app matcher broad enough to fire on the namespace. Previously
+ * each endpoint had its own probe entry which drifted from the policy each
+ * time a new admin surface landed.
+ *
+ * Each probe is a representative sub-path under the namespace — `*-probe-*`
+ * sentinels are deliberate gibberish that no real route uses, so a
+ * regex-style matcher that's overly precise (e.g. `/^\/api\/v1\/admin\/users$/`)
+ * still gets caught by the broader-namespace coverage we care about.
+ *
+ * Covers: `/api/v1/admin/**` · `/api/auth/**` · `/api/v1/auth/**` ·
+ * `/api/v1/mcp(\/|$)`.
+ */
+const PROTECTED_PATH_PROBES: readonly string[] = [
+  '/api/v1/admin/-probe-', // any path under /api/v1/admin/
+  '/api/auth/-probe-', // any path under /api/auth/
+  '/api/v1/auth/-probe-', // any path under /api/v1/auth/ (Sunrise app-layer auth)
+  '/api/v1/mcp', // MCP transport (bare)
+  '/api/v1/mcp/-probe-', // any path under /api/v1/mcp/
+];
+
+/** App-registered rules, in registration order. See {@link registerRateLimitRule}. */
+const appRules: RateLimitRule[] = [];
+
+/**
+ * Memoised effective policy — recomputed only when `appRules` changes. The
+ * middleware now defaults to `getEffectiveRateLimitPolicy()` (see
+ * {@link findRateLimitRule}), so this fires on every request; recomputing
+ * `[...head, ...appRules, CATCH_ALL_RULE]` every time would be a wasted
+ * allocation once any app rule is registered. `null` means "needs recompute"
+ * (initial state, after register, after reset).
+ */
+let effectivePolicyCache: readonly RateLimitRule[] | null = null;
+
+/**
+ * Register an app/fork rate-limit rule.
+ *
+ * The rule is inserted into the effective policy AFTER every built-in Sunrise
+ * rule (the admin/auth/mcp protected rules and the consumer-surface rules) and
+ * BEFORE the `/^\/api\/v1\//` catch-all — so an app can give its own namespace
+ * a distinct tier/keying without having to restate, or accidentally shadow, any
+ * Sunrise rule.
+ *
+ * **Security constraint.** App rules may only govern the app's own paths. A
+ * rule whose matcher could fire for a Sunrise-protected surface
+ * (`/api/v1/admin/**`, `/api/auth/**`, `/api/v1/auth/**`, `/api/v1/mcp/**`) is
+ * REJECTED at registration — otherwise a fork could loosen the 30/min admin cap
+ * or re-key the brute-force auth cap to IP, a privilege-escalation / DoS vector.
+ * The check probes the matcher against {@link PROTECTED_PATH_PROBES}; a broad
+ * regex like `/^\/api\/v1\//` is rejected because it matches the admin probe.
+ *
+ * Intended to run once at startup (before the first request).
+ *
+ * @throws if the rule's matcher could fire for a Sunrise-protected path.
+ */
+export function registerRateLimitRule(rule: RateLimitRule): void {
+  for (const probe of PROTECTED_PATH_PROBES) {
+    if (pathMatchesRule(rule.match, probe)) {
+      throw new Error(
+        `registerRateLimitRule: matcher ${String(rule.match)} would shadow the Sunrise-protected ` +
+          `path "${probe}". App rules must be scoped to the app's own /api/v1 namespace and may ` +
+          'not match admin, auth, or MCP surfaces.'
+      );
+    }
+  }
+  // Dedupe by reference — Next.js HMR re-evaluates the middleware module on
+  // file changes and re-runs `registerAppRateLimits()`. Without this, every
+  // hot-reload would append another copy of the same rule, growing the policy
+  // iteration on every request (functionally idempotent thanks to first-match-
+  // wins, but unbounded growth). A reference check is enough for HMR-of-
+  // middleware-only; if the fork edits `lib/app/rate-limit.ts` itself, the
+  // rule literal is a fresh reference and a duplicate would slip through —
+  // accepted, since changing your registrations should restart the dev server.
+  if (appRules.includes(rule)) return;
+  appRules.push(rule);
+  effectivePolicyCache = null; // invalidate — registration is a structural change
+}
+
+/**
+ * The effective policy the middleware evaluates: the base {@link RATE_LIMIT_POLICY}
+ * with any app-registered rules spliced in just ahead of the catch-all.
+ *
+ * Returns the base policy unchanged when no app rules are registered (the
+ * common case — Sunrise itself registers none), avoiding a per-request array
+ * allocation. When app rules ARE registered, the composed array is memoised
+ * in `effectivePolicyCache` so repeated calls (the middleware default now
+ * invokes this on every request) don't reallocate; the cache invalidates on
+ * `registerRateLimitRule` and `__resetAppRateLimitRules`.
+ *
+ * Runtime-asserts that {@link CATCH_ALL_RULE} is still the last element of
+ * `RATE_LIMIT_POLICY` — a future PR appending another rule after the catch-all
+ * would silently put app rules in the wrong slot (they'd never match), so we
+ * fail fast at first call instead of letting it ship as silent dead-rule debt.
+ */
+export function getEffectiveRateLimitPolicy(): readonly RateLimitRule[] {
+  // Identity check — structural match would let a copy slip past, so compare
+  // against the exported reference the policy literal embedded.
+  if (RATE_LIMIT_POLICY[RATE_LIMIT_POLICY.length - 1] !== CATCH_ALL_RULE) {
+    throw new Error(
+      'rate-limit policy invariant violated: CATCH_ALL_RULE is no longer the last element of ' +
+        'RATE_LIMIT_POLICY. App rules splice in just ahead of the catch-all; if something else ' +
+        'is at the tail, app rules would be inserted in the wrong slot and never match. ' +
+        'Move CATCH_ALL_RULE back to the end of the policy array.'
+    );
+  }
+  if (appRules.length === 0) return RATE_LIMIT_POLICY;
+  if (effectivePolicyCache !== null) return effectivePolicyCache;
+  // App rules go immediately before the catch-all: after all specific Sunrise
+  // rules, ahead of the fallback.
+  const head = RATE_LIMIT_POLICY.slice(0, -1);
+  effectivePolicyCache = [...head, ...appRules, CATCH_ALL_RULE];
+  return effectivePolicyCache;
+}
+
+/**
+ * Test-only: drop all app-registered rules. Production code never calls this —
+ * registration is a one-time startup action. Exposed so tests that register
+ * rules can isolate themselves.
+ */
+export function __resetAppRateLimitRules(): void {
+  appRules.length = 0;
+  effectivePolicyCache = null;
 }

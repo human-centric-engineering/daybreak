@@ -38,20 +38,40 @@ Every outcome is a `CapabilityResult` — the dispatcher never throws at its bou
 
 Everything is exported from `@/lib/orchestration/capabilities`:
 
-| Export                         | Kind      | Purpose                                                                                  |
-| ------------------------------ | --------- | ---------------------------------------------------------------------------------------- |
-| `capabilityDispatcher`         | singleton | `register`, `dispatch`, `loadFromDatabase`, `getRegistryEntry`, `has`, `clearCache`      |
-| `registerBuiltInCapabilities`  | function  | Idempotent wiring of the twelve built-in handlers                                        |
-| `getCapabilityDefinitions`     | function  | Returns the function definitions an LLM should see for a given agent (strict allow-list) |
-| `BaseCapability`               | class     | Abstract parent with `validate`, `success`, `error` helpers                              |
-| `CapabilityValidationError`    | class     | Thrown by `validate` on bad args; dispatcher maps to `invalid_args`                      |
-| `CapabilityResult`             | type      | `{ success, data?, error?, skipFollowup? }`                                              |
-| `CapabilityContext`            | type      | `{ userId, agentId, conversationId?, entityContext? }`                                   |
-| `CapabilityFunctionDefinition` | type      | OpenAI-compatible function schema stored in `AiCapability.functionDefinition`            |
-| `CapabilityRegistryEntry`      | type      | Merged view of the `AiCapability` row loaded by the dispatcher                           |
-| `AgentCapabilityBinding`       | type      | Per-agent override, merged `AiAgentCapability` + `AiCapability`                          |
+| Export                         | Kind      | Purpose                                                                                         |
+| ------------------------------ | --------- | ----------------------------------------------------------------------------------------------- |
+| `capabilityDispatcher`         | singleton | `register`, `dispatch`, `loadFromDatabase`, `getRegistryEntry`, `has`, `clearCache`             |
+| `registerBuiltInCapabilities`  | function  | Idempotent wiring of the built-in handlers; also runs the app auto-init + flush                 |
+| `registerAppCapability`        | function  | Add one app/fork capability (extends `BaseCapability`); idempotent by slug                      |
+| `registerAppCapabilities`      | function  | Flush app-registered capabilities into the dispatcher (called by `registerBuiltInCapabilities`) |
+| `getCapabilityDefinitions`     | function  | Returns the function definitions an LLM should see for a given agent (strict allow-list)        |
+| `BaseCapability`               | class     | Abstract parent with `validate`, `success`, `error` helpers                                     |
+| `CapabilityValidationError`    | class     | Thrown by `validate` on bad args; dispatcher maps to `invalid_args`                             |
+| `CapabilityResult`             | type      | `{ success, data?, error?, skipFollowup? }`                                                     |
+| `CapabilityContext`            | type      | `{ userId, agentId, conversationId?, entityContext? }`                                          |
+| `CapabilityFunctionDefinition` | type      | OpenAI-compatible function schema stored in `AiCapability.functionDefinition`                   |
+| `CapabilityRegistryEntry`      | type      | Merged view of the `AiCapability` row loaded by the dispatcher                                  |
+| `AgentCapabilityBinding`       | type      | Per-agent override, merged `AiAgentCapability` + `AiCapability`                                 |
 
 Built-in capability classes (`SearchKnowledgeCapability`, `GetPatternDetailCapability`, `EstimateCostCapability`, `ReadUserMemoryCapability`, `WriteUserMemoryCapability`, `EscalateToHumanCapability`, `ApplyAuditChangesCapability`, `AddProviderModelsCapability`, `DeactivateProviderModelsCapability`, `CallExternalApiCapability`, `RunWorkflowCapability`, `UploadToStorageCapability`) are **not** re-exported — callers go through the dispatcher.
+
+### App-contributed capabilities (forks)
+
+Apps/forks add their own tools without editing `registerBuiltInCapabilities()`. Put `registerAppCapability(new YourTool())` calls in the auto-wired **`lib/app/capabilities.ts`** → `initAppCapabilities()`:
+
+```typescript
+// lib/app/capabilities.ts — called once by registerBuiltInCapabilities() before the first dispatch
+import { registerAppCapability } from '@/lib/orchestration/capabilities';
+import { LookupOrderCapability } from '@/lib/app/capabilities/lookup-order'; // your BaseCapability subclass
+
+export function initAppCapabilities(): void {
+  registerAppCapability(new LookupOrderCapability());
+}
+```
+
+`registerBuiltInCapabilities()` (already on the lazy path the chat handler and agent-call executor hit) runs `initAppCapabilities()` once in the **server route-handler runtime**, then flushes — so your capability is in the dispatcher before any agent resolves its tools. Registration is idempotent by slug. `lib/app/capabilities.ts` is one of the `lib/app/` auto-wired bootstrap files; see [Building on Sunrise → §4](../../CUSTOMIZATION.md#4-configuration--environment--the-libapp-surface) for the full set and the per-runtime rationale.
+
+Like every built-in, an app capability still needs an active `AiCapability` row (and a per-agent `AiAgentCapability` binding) before an LLM will _see_ it — `getCapabilityDefinitions` cross-checks the DB against the in-memory dispatcher.
 
 ## Outbound HTTP: `call_external_api`
 

@@ -27,16 +27,66 @@ import { auth } from '@/lib/auth/config';
 import { logger } from '@/lib/logging';
 import { getClientIP } from '@/lib/security/ip';
 import {
-  RATE_LIMIT_TIERS,
   createRateLimitResponse,
+  resolveRateLimitTier,
   type RateLimiter,
 } from '@/lib/security/rate-limit';
 import {
   findRateLimitRule,
-  RATE_LIMIT_POLICY,
+  getEffectiveRateLimitPolicy,
+  pathMatchesRule,
   type RateLimitKey,
   type RateLimitRule,
 } from '@/lib/security/rate-limit-policy';
+import { registerAppRateLimits } from '@/lib/app/rate-limit';
+
+// Auto-wire the app's rate-limit registrations (fork-readiness — the `lib/app/`
+// bootstrap surface). Runs ONCE when this module loads, which is in the
+// middleware runtime — the same realm `proxy.ts` evaluates the policy in, so an
+// app-registered tier/rule is present before the first `applyRateLimit` call.
+// (Module-level registries don't cross Next.js's middleware/server/client
+// bundle boundaries, so each `lib/app/` file is imported by its realm's
+// consumer rather than a single shared bootstrap.) Default is a no-op; if a
+// fork's registration throws — e.g. a rule that would shadow a protected
+// surface — it aborts boot, which is the intended fail-fast.
+//
+// The try/catch wraps the call to annotate the failure with a pointer to the
+// offending file before re-throwing. Without it, the throw propagates out of
+// this module's top level → `proxy.ts` fails to load → every API request
+// returns a generic 500 with a stack that does NOT name `lib/app/rate-limit.ts`,
+// making the debugging trail hard to follow. We MUST re-throw — fail-fast is
+// the intended behaviour for a misconfigured rate-limit registration; logging
+// and continuing would let the misconfiguration ship.
+try {
+  registerAppRateLimits();
+  // Integrity check (fork-readiness finding #6): the rule shape widens `tier`
+  // to `RateLimitTier | (string & {})` so forks can name custom tiers as
+  // bare strings without TS module-augmentation gymnastics. The trade-off is
+  // that a typo (`tier: 'billling'`) type-checks cleanly — and would silently
+  // fail open at request time (no limiter resolves → no rate limit applied).
+  // Convert that runtime fail-open into a boot-time throw: every rule's tier
+  // MUST resolve once the auto-wire is done. If a fork's rule names a tier
+  // it never registered, refuse to boot rather than ship the request-time
+  // hole. Sunrise's built-in rules always resolve (covered by the type union),
+  // so this check is load-bearing only for the app-extended slice.
+  const unresolved = getEffectiveRateLimitPolicy().filter(
+    (rule) => resolveRateLimitTier(rule.tier) === undefined
+  );
+  if (unresolved.length > 0) {
+    const details = unresolved.map((r) => `${String(r.match)} → "${r.tier}"`).join(', ');
+    throw new Error(
+      `Rate-limit policy references ${unresolved.length} unknown tier(s): ${details}. ` +
+        'Either register the tier(s) via registerRateLimitTier(...) in lib/app/rate-limit.ts, ' +
+        'or fix the typo in the rule. Boot is aborted rather than shipping silent fail-open.'
+    );
+  }
+} catch (error) {
+  logger.error('Failed to register app rate limits from lib/app/rate-limit.ts', {
+    error: error instanceof Error ? error.message : String(error),
+    hint: 'A throw at module load aborts the middleware bundle. Check lib/app/rate-limit.ts for a registerRateLimitRule/registerRateLimitTier call that violates the registration contract (e.g. a matcher that shadows a Sunrise-protected path, or a tier name that collides with a built-in).',
+  });
+  throw error;
+}
 
 /**
  * Apply the rate-limit policy to an incoming request.
@@ -68,27 +118,28 @@ import {
 export async function applyRateLimit(request: NextRequest): Promise<Response | null> {
   if (isBypassEnabled()) return null;
 
+  // Evaluate against the effective policy: Sunrise's base rules plus any
+  // app-registered rules (spliced ahead of the catch-all). When no app rules
+  // are registered this is the base policy by identity — no per-request cost.
+  const policy = getEffectiveRateLimitPolicy();
+
   // First-match-wins, with fall-through on `skip`. A path with two
   // consecutive rules (e.g. the orchestration api-key + session-user pair
   // added in Phase 4) needs the second rule to apply when the first's
   // `skip` fires. `findRateLimitRule` returns the very first path match,
   // so we use it for the typical single-rule case and only iterate the
   // policy directly when that rule's `skip` is true.
-  let rule: RateLimitRule | null = findRateLimitRule(request.nextUrl.pathname);
+  const pathname = request.nextUrl.pathname;
+  let rule: RateLimitRule | null = findRateLimitRule(pathname, policy);
   if (rule?.skip?.(request)) {
     rule = null;
-    const startIndex = RATE_LIMIT_POLICY.findIndex(
-      (r) =>
-        (typeof r.match === 'string' && request.nextUrl.pathname.startsWith(r.match)) ||
-        (r.match instanceof RegExp && r.match.test(request.nextUrl.pathname))
-    );
-    for (let i = startIndex + 1; i < RATE_LIMIT_POLICY.length; i++) {
-      const candidate = RATE_LIMIT_POLICY[i];
-      const pathMatches =
-        typeof candidate.match === 'string'
-          ? request.nextUrl.pathname.startsWith(candidate.match)
-          : candidate.match.test(request.nextUrl.pathname);
-      if (!pathMatches) continue;
+    // Re-use the shared matcher so a third matcher shape (or a tweak to the
+    // existing string/RegExp semantics) can't silently diverge between
+    // `findRateLimitRule` and this fallthrough loop.
+    const startIndex = policy.findIndex((r) => pathMatchesRule(r.match, pathname));
+    for (let i = startIndex + 1; i < policy.length; i++) {
+      const candidate = policy[i];
+      if (!pathMatchesRule(candidate.match, pathname)) continue;
       if (candidate.skip?.(request)) continue;
       rule = candidate;
       break;
@@ -96,11 +147,13 @@ export async function applyRateLimit(request: NextRequest): Promise<Response | n
   }
   if (!rule) return null;
 
-  const limiter: RateLimiter | undefined = RATE_LIMIT_TIERS[rule.tier];
+  const limiter: RateLimiter | undefined = resolveRateLimitTier(rule.tier);
   if (!limiter) {
-    // Unreachable under normal type-checked code. If it fires, the policy
-    // table references a tier name not in RATE_LIMIT_TIERS — surface it loudly
-    // so operators can fix the config drift instead of silently failing open.
+    // Unreachable for built-in rules under normal type-checked code. If it
+    // fires, a rule names a tier that `resolveRateLimitTier` can't resolve —
+    // either core config drift, or an app rule referencing a tier it never
+    // registered via `registerRateLimitTier`. Surface it loudly so operators
+    // can fix the config instead of silently failing open.
     logger.warn('Rate-limit policy references an unknown tier; skipping limiter', {
       tier: rule.tier,
       pathname: request.nextUrl.pathname,

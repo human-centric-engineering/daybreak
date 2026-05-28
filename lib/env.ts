@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { appEnvSchema } from '@/lib/app/env';
 
 /**
  * Environment Variable Validation Schema
@@ -140,8 +141,35 @@ const clientEnvSchema = z.object({
     .describe('Plausible host URL (defaults to https://plausible.io)'),
 });
 
-// Combined schema for type inference
-const envSchema = serverEnvSchema.merge(clientEnvSchema);
+// Combined schema for type inference.
+//
+// `appEnvSchema` (fork-readiness seam 11) folds any app-declared server-side
+// vars into the same fail-fast parse below, so forks extend the environment
+// contract by editing `lib/app/env.ts` — never this core schema. It is merged
+// into the server side only; the browser path validates `clientEnvSchema`
+// alone, so app server vars are never required (or leaked) client-side.
+//
+// SECURITY: Zod `.merge()` is right-wins, so a fork that puts a colliding key
+// in `appEnvSchema` (e.g. `DATABASE_URL: z.string().optional()`) would silently
+// weaken the core requirement — `safeParse(process.env)` would succeed without
+// `DATABASE_URL`, breaking the fail-fast promise this module advertises and
+// surfacing the failure later as a Prisma crash. Reject collisions here at
+// module load so the boot output names the offending key(s).
+const coreServerKeys = new Set(Object.keys(serverEnvSchema.shape));
+const coreClientKeys = new Set(Object.keys(clientEnvSchema.shape));
+const appKeyCollisions = Object.keys(appEnvSchema.shape).filter(
+  (key) => coreServerKeys.has(key) || coreClientKeys.has(key)
+);
+if (appKeyCollisions.length > 0) {
+  throw new Error(
+    `lib/app/env.ts redeclares core Sunrise env key(s): ${appKeyCollisions.join(', ')}. ` +
+      'Forks may extend the schema but must not override core keys (right-wins merge would ' +
+      'silently weaken core validation). Rename the colliding key(s) in your appEnvSchema. ' +
+      'See .context/environment/overview.md.'
+  );
+}
+
+const envSchema = serverEnvSchema.merge(appEnvSchema).merge(clientEnvSchema);
 
 /**
  * Validated environment variables with type safety.

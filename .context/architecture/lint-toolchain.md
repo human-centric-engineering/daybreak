@@ -127,6 +127,48 @@ This replaced a blanket `explicit-function-return-type` that produced ~540 warni
 surfaces the blanket rule had missed (e.g. the `apiClient` methods in
 `lib/api/client.ts`), which now carry explicit return types.
 
+## App boundary — `lib/app/**`
+
+`lib/app/**` is the supported surface where forks/apps add their own platform-level
+code. Its inhabitants are the **auto-wired bootstrap files** — `lib/app/env.ts`
+(env schema), `lib/app/rate-limit.ts`, `lib/app/capabilities.ts`,
+`lib/app/admin-nav.ts` — each imported by the core consumer that runs in the
+matching Next.js bundle realm (server / middleware / client). A dedicated
+flat-config override keeps that surface **framework-agnostic** so it survives Next.js
+upgrades and can be reasoned about in isolation:
+
+- **No RUNTIME `next/*` imports** (including the `next/dist/**` deep-import escape
+  hatch). `import { NextResponse } from 'next/server'` is an error. **Type-only
+  imports are allowed** (`import type { NextRequest } from 'next/server'`) — they
+  erase at compile time and don't couple runtime code to the framework. This is
+  the one place we use `@typescript-eslint/no-restricted-imports` (not the base rule)
+  specifically for its `allowTypeImports` support.
+- **No `react-dom` / `react-dom/*` imports.** `ReactDOMServer.renderToString` and
+  hydration entry points are framework glue that belongs in `app/`, not the portable
+  extension surface — and they land in the client bundle on hydration if mis-imported.
+- **No Prisma imports** (`prisma`, `@prisma/*`). The portable core stays
+  storage-agnostic; DB access flows through `app/` route handlers or `lib/` services.
+  Type-only imports of `@prisma/*` are allowed (they're needed for entity types and
+  erase at compile time).
+- **No Node-only built-ins** (`fs`, `fs/*`, `path`, or any `node:*` specifier). These
+  crash in the edge and client realms a fork's `lib/app/` file may be bundled into.
+  IO belongs in a server-only module.
+- **The `@/`-alias relative-import ban is RESTATED here.** Flat-config
+  `no-restricted-imports` _replaces_ rather than merges across config objects, so the
+  `lib/app/**` block must re-declare the `./*` / `../*` ban or it would silently drop
+  alias enforcement for these files. The base `no-restricted-imports` is turned `off`
+  for `lib/app/**` so the two variants don't double-report relative imports.
+
+**Escape hatch.** Framework glue that genuinely needs runtime `next/*` APIs belongs in
+`app/` (route handlers, server actions) or a `lib/app/<name>/server/` module — not in
+the portable core of `lib/app/**`. There is intentionally no `lib/orchestration`-style
+boundary here; `lib/orchestration` imports `next/server` in several files and is out of
+scope for this rule.
+
+The rule's behaviour (runtime-`next` rejected, type-only allowed, relative imports
+rejected, `@/` allowed) is locked by `tests/unit/eslint-app-boundary.test.ts`, which
+runs the shipped rule from `eslint.config.mjs` through ESLint's `Linter`.
+
 ## Backlog (post-fork-readiness, not blockers)
 
 - **Enabling the React Compiler** — if/when adopted, re-enable `set-state-in-effect`
