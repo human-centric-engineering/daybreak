@@ -1277,6 +1277,7 @@ export type AiAgentListItem = AiAgent & {
   _count: { capabilities: number; conversations: number };
   _budget: BudgetSummary | null;
   creator?: { name: string | null };
+  profile: { id: string; name: string; slug: string; isSystem: boolean } | null;
 };
 
 /** Enriched workflow row returned by the list endpoint. */
