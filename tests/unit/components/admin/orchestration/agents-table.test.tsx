@@ -1028,6 +1028,61 @@ describe('AgentsTable', () => {
       });
     });
 
+    it('bulk delete confirmation posts to bulk endpoint with delete action', async () => {
+      const { apiClient } = await import('@/lib/api/client');
+      vi.mocked(apiClient.post).mockResolvedValue({ success: true });
+      mockFetch.mockImplementation(() => Promise.resolve(makeAgentsListResponse()));
+
+      const user = userEvent.setup();
+      render(<AgentsTable initialAgents={THREE_AGENTS} initialMeta={MOCK_META} />);
+
+      const checkboxes = screen.getAllByRole('checkbox');
+      await user.click(checkboxes[1]); // select agent-1
+
+      // Open the bulk-delete confirmation dialog.
+      const bulkDeleteBtn = screen
+        .getAllByRole('button', { name: /^delete \(/i })
+        .find((b) => b.textContent?.includes('Delete (1)'));
+      expect(bulkDeleteBtn).toBeDefined();
+      await user.click(bulkDeleteBtn!);
+
+      // Confirm — the AlertDialog action button posts the delete bulk request.
+      const confirmBtn = await screen.findByRole('button', { name: /^delete$/i, hidden: true });
+      await user.click(confirmBtn);
+
+      await waitFor(() => {
+        expect(apiClient.post).toHaveBeenCalledWith(
+          expect.stringContaining('/bulk'),
+          expect.objectContaining({
+            body: expect.objectContaining({ action: 'delete', agentIds: ['agent-1'] }),
+          })
+        );
+      });
+    });
+
+    it('bulk deactivate posts to bulk endpoint with deactivate action', async () => {
+      const { apiClient } = await import('@/lib/api/client');
+      vi.mocked(apiClient.post).mockResolvedValue({ success: true });
+      mockFetch.mockImplementation(() => Promise.resolve(makeAgentsListResponse()));
+
+      const user = userEvent.setup();
+      render(<AgentsTable initialAgents={THREE_AGENTS} initialMeta={MOCK_META} />);
+
+      const checkboxes = screen.getAllByRole('checkbox');
+      await user.click(checkboxes[1]); // select agent-1
+
+      await user.click(screen.getByRole('button', { name: /^deactivate$/i }));
+
+      await waitFor(() => {
+        expect(apiClient.post).toHaveBeenCalledWith(
+          expect.stringContaining('/bulk'),
+          expect.objectContaining({
+            body: expect.objectContaining({ action: 'deactivate', agentIds: ['agent-1'] }),
+          })
+        );
+      });
+    });
+
     it('shows error banner when bulk action fails with APIClientError', async () => {
       // Arrange
       const { apiClient, APIClientError } = await import('@/lib/api/client');
@@ -1238,6 +1293,49 @@ describe('AgentsTable', () => {
         expect(screen.getByText('Unassigned')).toBeInTheDocument();
       });
     });
+
+    it('renders a system-profile bucket header with the shield icon', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const agents = [
+        makeAgent({
+          id: 'a1',
+          name: 'Sys-Profiled',
+          profile: { id: 'sp', name: 'PlatformPersona', slug: 'pp', isSystem: true },
+        }),
+      ];
+      render(<AgentsTable initialAgents={agents} initialMeta={{ ...MOCK_META, total: 1 }} />);
+
+      await user.click(screen.getByRole('button', { name: /toggle group by profile/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('PlatformPersona')).toBeInTheDocument();
+      });
+    });
+
+    it('collapses a bucket when its header is clicked and hides member rows', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const agents = [
+        makeAgent({
+          id: 'a1',
+          name: 'Visible Agent',
+          profile: { id: 'prof-1', name: 'CollapsibleProfile', slug: 'cp', isSystem: false },
+        }),
+      ];
+      render(<AgentsTable initialAgents={agents} initialMeta={{ ...MOCK_META, total: 1 }} />);
+
+      // Toggle grouping on
+      await user.click(screen.getByRole('button', { name: /toggle group by profile/i }));
+      await waitFor(() => {
+        expect(screen.getByText('Visible Agent')).toBeInTheDocument();
+      });
+
+      // Click the bucket header — the row inside should disappear (only the
+      // header row remains).
+      await user.click(screen.getByRole('button', { name: /collapsibleprofile/i }));
+      await waitFor(() => {
+        expect(screen.queryByText('Visible Agent')).not.toBeInTheDocument();
+      });
+    });
   });
 
   // ── Sortable column headers ────────────────────────────────────────────────
@@ -1266,6 +1364,18 @@ describe('AgentsTable', () => {
       });
     });
 
+    it('triggers a refetch when Last active header is clicked', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      render(<AgentsTable initialAgents={THREE_AGENTS} initialMeta={MOCK_META} />);
+      mockFetch.mockClear();
+
+      await user.click(screen.getByRole('button', { name: /last active/i }));
+
+      await waitFor(() => {
+        expect(mockFetch).toHaveBeenCalled();
+      });
+    });
+
     it('triggers a refetch when Created header is clicked', async () => {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       render(<AgentsTable initialAgents={THREE_AGENTS} initialMeta={MOCK_META} />);
@@ -1275,6 +1385,78 @@ describe('AgentsTable', () => {
 
       await waitFor(() => {
         expect(mockFetch).toHaveBeenCalled();
+      });
+    });
+  });
+
+  // ── Pagination ─────────────────────────────────────────────────────────────
+  describe('pagination', () => {
+    it('renders Previous and Next buttons (Previous disabled on page 1)', () => {
+      // Two pages — Next becomes enabled, Previous stays disabled on page 1.
+      const META_MULTIPAGE: PaginationMeta = { page: 1, limit: 2, total: 5, totalPages: 3 };
+      render(<AgentsTable initialAgents={THREE_AGENTS.slice(0, 2)} initialMeta={META_MULTIPAGE} />);
+
+      const prev = screen.getByRole('button', { name: /previous/i });
+      const next = screen.getByRole('button', { name: /next/i });
+      expect(prev).toBeDisabled();
+      expect(next).not.toBeDisabled();
+      expect(screen.getByText(/Page 1 of 3/)).toBeInTheDocument();
+    });
+
+    it('calls fetch with the next page when Next is clicked', async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const META_MULTIPAGE: PaginationMeta = { page: 1, limit: 2, total: 5, totalPages: 3 };
+      render(<AgentsTable initialAgents={THREE_AGENTS.slice(0, 2)} initialMeta={META_MULTIPAGE} />);
+      mockFetch.mockClear();
+
+      await user.click(screen.getByRole('button', { name: /next/i }));
+
+      await waitFor(() => {
+        const calledUrls = mockFetch.mock.calls.map((c) => toUrlString(c[0]));
+        expect(calledUrls.some((u) => u.includes('page=2'))).toBe(true);
+      });
+    });
+
+    it('calls fetch with the previous page when Previous is clicked on page 2', async () => {
+      // The server response after Next() reports page 2; clicking Previous
+      // then fires a fetch for page 1. This hits both legs of the
+      // `disabled={meta.page <= 1}` branch.
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const META_PAGE1: PaginationMeta = { page: 1, limit: 2, total: 5, totalPages: 3 };
+      const META_PAGE2: PaginationMeta = { page: 2, limit: 2, total: 5, totalPages: 3 };
+
+      // URL-aware mock: profile-list fetch returns []; agents-list fetch
+      // returns META_PAGE2 so the table re-renders with Previous enabled.
+      mockFetch.mockImplementation((input: RequestInfo | URL) => {
+        const url = toUrlString(input);
+        if (url.includes('/agent-profiles')) {
+          return Promise.resolve(
+            createMockFetchResponse({ success: true, data: [], meta: META_PAGE1 })
+          );
+        }
+        return Promise.resolve(
+          createMockFetchResponse({
+            success: true,
+            data: THREE_AGENTS.slice(0, 2),
+            meta: META_PAGE2,
+          })
+        );
+      });
+
+      render(<AgentsTable initialAgents={THREE_AGENTS.slice(0, 2)} initialMeta={META_PAGE1} />);
+
+      await user.click(screen.getByRole('button', { name: /next/i }));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /previous/i })).not.toBeDisabled();
+      });
+
+      mockFetch.mockClear();
+      await user.click(screen.getByRole('button', { name: /previous/i }));
+
+      await waitFor(() => {
+        const calledUrls = mockFetch.mock.calls.map((c) => toUrlString(c[0]));
+        expect(calledUrls.some((u) => u.includes('page=1') && u.includes('/agents'))).toBe(true);
       });
     });
   });

@@ -99,6 +99,38 @@ describe('touchAgentLastActive', () => {
     );
   });
 
+  it('stringifies non-Error rejections in the async catch path', async () => {
+    // Exercises the `String(err)` leg of the ternary inside the inner
+    // `.catch(...)` block — the test above already covers the Error leg.
+    mockUpdate.mockRejectedValueOnce('plain string rejection');
+
+    expect(() => touchAgentLastActive('cmjbv4i3x00003wsloputgwul')).not.toThrow();
+
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(logger.debug).toHaveBeenCalledWith(
+      'touchAgentLastActive failed (non-fatal)',
+      expect.objectContaining({ error: 'plain string rejection' })
+    );
+  });
+
+  it('stringifies non-Error throws in the sync catch path', () => {
+    // Pairs with the sync-throw test below: exercises the `String(err)`
+    // leg of the ternary inside the outer try/catch.
+    mockUpdate.mockImplementationOnce(() => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- exercising the non-Error throw branch of the helper
+      throw 'sync string throw';
+    });
+
+    expect(() => touchAgentLastActive('cmjbv4i3x00003wsloputgwul')).not.toThrow();
+
+    expect(logger.debug).toHaveBeenCalledWith(
+      'touchAgentLastActive sync failure (non-fatal)',
+      expect.objectContaining({ error: 'sync string throw' })
+    );
+  });
+
   it('swallows synchronous throws from prisma access (defensive try/catch)', () => {
     // Simulates a partially-mocked prisma where `prisma.aiAgent.update`
     // throws synchronously (e.g. because `.aiAgent` is undefined or some
