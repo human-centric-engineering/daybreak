@@ -26,6 +26,9 @@ vi.mock('@/lib/db/client', () => ({
       findUniqueOrThrow: vi.fn(),
       findMany: vi.fn(),
     },
+    aiKnowledgeBase: {
+      upsert: vi.fn(),
+    },
     aiKnowledgeChunk: { deleteMany: vi.fn() },
     $executeRawUnsafe: vi.fn(),
     $queryRaw: vi.fn(),
@@ -70,11 +73,22 @@ vi.mock('@/lib/orchestration/knowledge/parsers', () => ({
   requiresPreview: vi.fn(() => false),
 }));
 
+// buildCoverageWarning runs live by default (returns null for high-coverage
+// content). Individual tests that need the warning to fire mock it explicitly.
+vi.mock('@/lib/orchestration/knowledge/coverage', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/orchestration/knowledge/coverage')>();
+  return {
+    ...actual,
+    buildCoverageWarning: vi.fn(actual.buildCoverageWarning),
+  };
+});
+
 // --- Imports after mocks ---
 
 import { prisma } from '@/lib/db/client';
 _prismaMock = prisma;
 import { chunkCsvDocument, chunkMarkdownDocument } from '@/lib/orchestration/knowledge/chunker';
+import { buildCoverageWarning } from '@/lib/orchestration/knowledge/coverage';
 import { embedBatch } from '@/lib/orchestration/knowledge/embedder';
 import type { EmbedBatchResult } from '@/lib/orchestration/knowledge/embedder';
 import { parseDocument, requiresPreview } from '@/lib/orchestration/knowledge/parsers';
@@ -86,6 +100,8 @@ import {
   deleteDocument,
   rechunkDocument,
   listDocuments,
+  DEFAULT_KNOWLEDGE_BASE_ID,
+  getOrCreateDefaultKnowledgeBase,
 } from '@/lib/orchestration/knowledge/document-manager';
 
 // --- Helpers ---
@@ -144,10 +160,25 @@ function makeDocument(overrides = {}) {
   };
 }
 
+/**
+ * Stub `aiKnowledgeBase.upsert` so the runtime self-healing helper inside
+ * uploadDocument / uploadDocumentFromBuffer / confirmPreview resolves to a
+ * usable id. Tests that exercise the helper itself override this stub
+ * explicitly inside their own `it` block.
+ */
+function stubKnowledgeBaseUpsert(returnId: string = DEFAULT_KNOWLEDGE_BASE_ID) {
+  vi.mocked(prisma.aiKnowledgeBase.upsert).mockResolvedValue({
+    id: returnId,
+  } as never);
+}
+
 // --- Tests ---
 
 describe('uploadDocument', () => {
-  beforeEach(() => vi.resetAllMocks());
+  beforeEach(() => {
+    vi.resetAllMocks();
+    stubKnowledgeBaseUpsert();
+  });
 
   it('creates document record with status processing, correct fileHash, and name without extension', async () => {
     const content = '# Hello World\n\nSome markdown content.';
@@ -187,9 +218,16 @@ describe('uploadDocument', () => {
         status: 'processing',
         uploadedBy: userId,
         scope: 'app',
-        knowledgeBaseId: 'kb_default',
+        knowledgeBaseId: DEFAULT_KNOWLEDGE_BASE_ID,
       },
     });
+
+    // Assert: getOrCreateDefaultKnowledgeBase (upsert) ran before the document create —
+    // verifying the KB id is resolved, not hard-coded, before inserting the row.
+    const upsertCallOrder = vi.mocked(prisma.aiKnowledgeBase.upsert).mock.invocationCallOrder[0];
+    const createCallOrder = vi.mocked(prisma.aiKnowledgeDocument.create).mock
+      .invocationCallOrder[0];
+    expect(upsertCallOrder).toBeLessThan(createCallOrder);
   });
 
   it('calls chunkMarkdownDocument with the raw content', async () => {
@@ -694,6 +732,45 @@ describe('rechunkDocument', () => {
     expect(chunkCsvDocument).not.toHaveBeenCalled();
     expect(chunkMarkdownDocument).not.toHaveBeenCalled();
   });
+
+  it('filters stale coverage warnings from existing metadata before appending the new one', async () => {
+    // Arrange: document has a prior stale coverage warning in its metadata.
+    // After rechunking the warning filter must strip the old one so a fresh
+    // warning (or no warning) appears — not a duplicate of the stale entry.
+    const staleWarning =
+      'Only 60% of the parsed text was captured in chunks (600 of 1,000 chars). Some content may have been dropped — review the chunks below.';
+    const existingDoc = {
+      ...makeDocument({
+        id: 'doc-stale-warning',
+        name: 'Doc',
+        status: 'ready',
+        metadata: {
+          rawContent: 'Some content here.',
+          warnings: [staleWarning, 'Page 2 of 3 produced no extractable text'],
+          coverage: { parsedChars: 1000, chunkChars: 600, coveragePct: 60 },
+        },
+      }),
+      chunks: [{ chunkKey: 'a', content: 'Some content here.' }],
+    };
+
+    vi.mocked(prisma.aiKnowledgeDocument.findUniqueOrThrow).mockResolvedValue(existingDoc as never);
+    vi.mocked(prisma.aiKnowledgeDocument.update).mockResolvedValue(makeDocument() as never);
+    vi.mocked(prisma.aiKnowledgeChunk.deleteMany).mockResolvedValue({ count: 1 });
+    vi.mocked(chunkMarkdownDocument).mockResolvedValue([makeChunk()]);
+    vi.mocked(embedBatch).mockResolvedValue(mockEmbedResult([[0.1]]));
+    vi.mocked(prisma.$executeRawUnsafe).mockResolvedValue(1);
+
+    // Act
+    await rechunkDocument('doc-stale-warning');
+
+    // Assert: the final update's metadata.warnings does not contain the stale coverage message.
+    // The non-coverage warning ('Page 2 of 3...') should be preserved.
+    const updateCalls = vi.mocked(prisma.aiKnowledgeDocument.update).mock.calls;
+    const finalUpdate = updateCalls[updateCalls.length - 1][0];
+    const updatedWarnings = (finalUpdate.data.metadata as { warnings: string[] }).warnings;
+    expect(updatedWarnings.filter((w) => w === staleWarning)).toHaveLength(0);
+    expect(updatedWarnings).toContain('Page 2 of 3 produced no extractable text');
+  });
 });
 
 describe('listDocuments', () => {
@@ -726,7 +803,10 @@ describe('listDocuments', () => {
 // ─── uploadDocumentFromBuffer ─────────────────────────────────────────────────
 
 describe('uploadDocumentFromBuffer', () => {
-  beforeEach(() => vi.resetAllMocks());
+  beforeEach(() => {
+    vi.resetAllMocks();
+    stubKnowledgeBaseUpsert();
+  });
 
   it('throws when the format requires a preview step (PDF)', async () => {
     vi.mocked(requiresPreview).mockReturnValue(true);
@@ -844,7 +924,10 @@ describe('uploadDocumentFromBuffer', () => {
 // ─── uploadDocumentFromBuffer (CSV path) ──────────────────────────────────────
 
 describe('uploadDocumentFromBuffer — CSV row-level chunking', () => {
-  beforeEach(() => vi.resetAllMocks());
+  beforeEach(() => {
+    vi.resetAllMocks();
+    stubKnowledgeBaseUpsert();
+  });
 
   function csvParsed(rowCount = 3) {
     return {
@@ -883,8 +966,26 @@ describe('uploadDocumentFromBuffer — CSV row-level chunking', () => {
 
     await uploadDocumentFromBuffer(Buffer.from('a,b\n1,2\n'), 'spending.csv', 'user-1');
 
-    expect(chunkCsvDocument).toHaveBeenCalled();
+    // Assert: verify chunkCsvDocument was called with the parsed sections and correct identifiers
+    expect(chunkCsvDocument).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sections: expect.arrayContaining([
+          expect.objectContaining({ title: 'Row 1' }),
+          expect.objectContaining({ title: 'Row 2' }),
+          expect.objectContaining({ title: 'Row 3' }),
+        ]),
+      }),
+      expect.any(String),
+      expect.any(String)
+    );
     expect(chunkMarkdownDocument).not.toHaveBeenCalled();
+
+    // Assert (Finding 11): getOrCreateDefaultKnowledgeBase (upsert) ran before the document
+    // create — the KB id is resolved from the DB before the row is inserted.
+    const upsertCallOrder = vi.mocked(prisma.aiKnowledgeBase.upsert).mock.invocationCallOrder[0];
+    const createCallOrder = vi.mocked(prisma.aiKnowledgeDocument.create).mock
+      .invocationCallOrder[0];
+    expect(upsertCallOrder).toBeLessThan(createCallOrder);
   });
 
   it('returns the existing document when the same CSV is re-uploaded (dedup)', async () => {
@@ -1065,14 +1166,17 @@ describe('uploadDocumentFromBuffer — CSV row-level chunking', () => {
 
     const updateCall = vi.mocked(prisma.aiKnowledgeDocument.update).mock.calls[0][0];
     const warnings = (updateCall.data.metadata as { warnings: string[] }).warnings;
-    expect(warnings.some((w) => w.startsWith('Skipped'))).toBe(false);
+    expect(warnings.filter((w) => w.startsWith('Skipped'))).toHaveLength(0);
   });
 });
 
 // ─── previewDocument ──────────────────────────────────────────────────────────
 
 describe('previewDocument', () => {
-  beforeEach(() => vi.resetAllMocks());
+  beforeEach(() => {
+    vi.resetAllMocks();
+    stubKnowledgeBaseUpsert();
+  });
 
   it('creates a pending_review document record and returns extracted text + metadata', async () => {
     vi.mocked(parseDocument as ReturnType<typeof vi.fn>).mockResolvedValue({
@@ -1204,6 +1308,44 @@ describe('previewDocument', () => {
       }),
     });
     expect(prisma.aiKnowledgeDocument.create).toHaveBeenCalled();
+  });
+
+  it('maps pageInfo entries into metadata.pages when pageInfo is present (create path)', async () => {
+    // Arrange: parse result includes pageInfo so the create-path `pages` mapping runs.
+    // findFirst returns null → we take the create path (not the update path).
+    vi.mocked(parseDocument as ReturnType<typeof vi.fn>).mockResolvedValue({
+      fullText: 'Annual report text',
+      title: 'Annual Report',
+      author: 'Finance',
+      sections: [{ title: 'Page 1', content: 'text', order: 0 }],
+      metadata: { format: 'pdf' },
+      warnings: [],
+      pageInfo: [
+        { num: 1, charCount: 500, hasText: true },
+        { num: 2, charCount: 0, hasText: false },
+      ],
+    });
+    vi.mocked(prisma.aiKnowledgeDocument.findFirst).mockResolvedValue(null);
+    vi.mocked(prisma.aiKnowledgeDocument.create).mockResolvedValue(
+      makeDocument({ id: 'doc-with-pages', status: 'pending_review' }) as never
+    );
+
+    // Act
+    await previewDocument(Buffer.from('fake pdf'), 'annual-report.pdf', 'user-1');
+
+    // Assert: the create call includes metadata.pages built from the pageInfo array
+    expect(prisma.aiKnowledgeDocument.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          metadata: expect.objectContaining({
+            pages: [
+              { num: 1, charCount: 500, hasText: true },
+              { num: 2, charCount: 0, hasText: false },
+            ],
+          }),
+        }),
+      })
+    );
   });
 });
 
@@ -1359,5 +1501,105 @@ describe('confirmPreview', () => {
     };
     expect(md.format).toBe('pdf');
     expect(md.pages).toEqual(pages);
+  });
+
+  it('includes a coverage warning in metadata.warnings when buildCoverageWarning returns non-null', async () => {
+    // Arrange: mock buildCoverageWarning to return a low-coverage warning so the
+    // `coverageWarning ? [...parserWarnings, coverageWarning] : parserWarnings` true-arm runs.
+    const coverageWarningText =
+      'Only 40% of the parsed text was captured in chunks (40 of 100 chars). Some content may have been dropped — review the chunks below.';
+    vi.mocked(buildCoverageWarning).mockReturnValue(coverageWarningText);
+
+    const doc = makeDocument({
+      id: 'doc-low-coverage',
+      name: 'sparse',
+      fileName: 'sparse.pdf',
+      status: 'pending_review',
+      metadata: {
+        extractedText: 'Source content that chunks poorly.',
+        warnings: ['Parser warning A'],
+      },
+    });
+    vi.mocked(prisma.aiKnowledgeDocument.findFirst).mockResolvedValue(doc as never);
+    vi.mocked(prisma.aiKnowledgeDocument.update).mockResolvedValue(makeDocument() as never);
+    vi.mocked(chunkMarkdownDocument).mockResolvedValue([makeChunk()]);
+    vi.mocked(embedBatch).mockResolvedValue(mockEmbedResult([[0.1]]));
+    vi.mocked(prisma.$executeRawUnsafe).mockResolvedValue(1);
+    stubKnowledgeBaseUpsert();
+
+    // Act
+    await confirmPreview('doc-low-coverage', 'user-1');
+
+    // Assert: the final ready-state update includes the coverage warning appended to parser warnings
+    const updateCalls = vi.mocked(prisma.aiKnowledgeDocument.update).mock.calls;
+    const readyUpdate = updateCalls.find((c) => c[0].data.status === 'ready');
+    expect(readyUpdate).toBeDefined();
+    const warnings = (readyUpdate![0].data.metadata as { warnings: string[] }).warnings;
+    expect(warnings).toContain(coverageWarningText);
+    expect(warnings).toContain('Parser warning A');
+  });
+});
+
+describe('getOrCreateDefaultKnowledgeBase', () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it('upserts the row keyed on slug (not id) so a fork with a pre-existing different id is reused', async () => {
+    vi.mocked(prisma.aiKnowledgeBase.upsert).mockResolvedValue({
+      id: DEFAULT_KNOWLEDGE_BASE_ID,
+    } as never);
+
+    await getOrCreateDefaultKnowledgeBase();
+
+    expect(prisma.aiKnowledgeBase.upsert).toHaveBeenCalledTimes(1);
+    const call = vi.mocked(prisma.aiKnowledgeBase.upsert).mock.calls[0][0];
+    expect(call.where).toEqual({ slug: 'default' });
+  });
+
+  it('passes the canonical id, slug, name, description, and isDefault on create', async () => {
+    vi.mocked(prisma.aiKnowledgeBase.upsert).mockResolvedValue({
+      id: DEFAULT_KNOWLEDGE_BASE_ID,
+    } as never);
+
+    await getOrCreateDefaultKnowledgeBase();
+
+    const call = vi.mocked(prisma.aiKnowledgeBase.upsert).mock.calls[0][0];
+    expect(call.create).toEqual({
+      id: DEFAULT_KNOWLEDGE_BASE_ID,
+      slug: 'default',
+      name: 'Default',
+      description: 'Default knowledge base for documents without an explicit corpus assignment',
+      isDefault: true,
+    });
+  });
+
+  it('passes an empty update payload so a pre-existing row is reused as-is (no field overwrite)', async () => {
+    vi.mocked(prisma.aiKnowledgeBase.upsert).mockResolvedValue({
+      id: DEFAULT_KNOWLEDGE_BASE_ID,
+    } as never);
+
+    await getOrCreateDefaultKnowledgeBase();
+
+    const call = vi.mocked(prisma.aiKnowledgeBase.upsert).mock.calls[0][0];
+    expect(call.update).toEqual({});
+  });
+
+  it('returns the upserted row id — the canonical id on a fresh DB', async () => {
+    vi.mocked(prisma.aiKnowledgeBase.upsert).mockResolvedValue({
+      id: DEFAULT_KNOWLEDGE_BASE_ID,
+    } as never);
+
+    const id = await getOrCreateDefaultKnowledgeBase();
+
+    expect(id).toBe(DEFAULT_KNOWLEDGE_BASE_ID);
+  });
+
+  it('returns the upserted row id — a foreign id when an existing row with slug="default" pre-dates the helper', async () => {
+    vi.mocked(prisma.aiKnowledgeBase.upsert).mockResolvedValue({
+      id: 'kb_legacy_fork_id',
+    } as never);
+
+    const id = await getOrCreateDefaultKnowledgeBase();
+
+    expect(id).toBe('kb_legacy_fork_id');
   });
 });
