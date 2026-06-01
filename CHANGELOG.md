@@ -51,6 +51,17 @@ release process.
 - **Orchestration seeds resolve the config owner deterministically** via
   `serviceAccountWhere` (the SERVICE account) rather than the first `ADMIN` row.
 
+### Fixed
+
+- **`AiConversation` inbound unique key no longer triggers a phantom
+  `ALTER INDEX ... RENAME` on every `prisma migrate dev`** (issue #283). The
+  `@@unique([agentId, channel, fromAddress])` now pins its DB name with
+  `map: "ai_conversation_inbound_key"`; Prisma 7's `migrate diff` ignored the
+  `name:` argument for the DB object and re-derived the default name, injecting
+  a spurious rename into every fork's generated migration. The Client-API
+  compound key (`name:`) is unchanged, and existing deployed databases diff
+  clean (no migration required).
+
 ### Security
 
 - **Removed the documented-but-nonfunctional default seed credentials.** The
