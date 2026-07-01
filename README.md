@@ -11,7 +11,8 @@ layer — and builds a purpose-built framework on top of it.
 > `upstream` remote. The platform is extended through Sunrise's designed seams
 > rather than edited in place, so upgrades stay clean merges. If you're working
 > in this repo, start with the fork banner in [`CLAUDE.md`](./CLAUDE.md) and the
-> full guide in [`CUSTOMIZATION.md`](./CUSTOMIZATION.md) / [`DAYBREAK.md`](./DAYBREAK.md).
+> full guide in [`CUSTOMIZATION.md`](./CUSTOMIZATION.md) /
+> [`.context/app/README.md`](./.context/app/README.md).
 
 ## Foundation (inherited from Sunrise)
 

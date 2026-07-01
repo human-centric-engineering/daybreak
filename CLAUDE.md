@@ -18,7 +18,7 @@
 > Every Sunrise-owned file you edit becomes a merge conflict the next time you
 > pull a Sunrise release. Prefer adding new files and using the designed seams.
 > Full playbook: [`CUSTOMIZATION.md`](./CUSTOMIZATION.md) (§0 app/platform model,
-> §9 upstream sync) and [`DAYBREAK.md`](./DAYBREAK.md).
+> §9 upstream sync) and [`.context/app/README.md`](./.context/app/README.md).
 >
 > **Freely yours (fork-owned — edit these):**
 >
@@ -32,16 +32,19 @@
 >   registrations here merge cleanly
 > - `app/brand-theme.css` (your theme); branding via env
 >   (`NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_LEGAL_NAME`) — not by editing `lib/brand.ts`
-> - `package.json`, `README.md`, `CUSTOMIZATION.md`, `DAYBREAK.md`, `.env*`
+> - **`.context/app/`** — the fork's own documentation tree (Daybreak's
+>   feature/domain docs); the platform's `.context/<domain>/` docs are Sunrise's
+> - `package.json`, `README.md`, `CUSTOMIZATION.md`, `.env*`
 >
 > **Platform-owned (Sunrise's — do NOT edit; extend instead):**
 >
 > - Core `lib/` utilities, core `app/api/v1` routes, core `components/`, the
 >   security / rate-limit middleware (`proxy.ts`, `lib/security/**`)
-> - `lib/sunrise-version.ts`, `VERSIONING.md`, `CHANGELOG.md`, `.context/**`
->   (Sunrise's docs), and the SQL of any **Sunrise** migration
+> - `lib/sunrise-version.ts`, `VERSIONING.md`, `CHANGELOG.md`, and `.context/**`
+>   **except `.context/app/`** (Sunrise's docs), plus the SQL of any **Sunrise** migration
 > - This `CLAUDE.md` **below the banner** — keep Daybreak-specific instructions
->   in this banner or in `DAYBREAK.md`, so upstream `CLAUDE.md` edits merge cleanly
+>   in this banner or in [`.context/app/README.md`](./.context/app/README.md), so
+>   upstream `CLAUDE.md` edits merge cleanly
 > - If you genuinely must change platform behaviour and no seam exists, keep the
 >   edit minimal and add a follow-up rather than rewriting Sunrise's file — a
 >   one-line "keep mine" is a cheap merge; a rewritten platform file is not

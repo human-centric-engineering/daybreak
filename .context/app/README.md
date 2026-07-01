@@ -1,12 +1,22 @@
-# Daybreak — fork playbook
+# Daybreak app docs (`.context/app/`)
 
-Daybreak is an AI-application framework built **on** the
-[Sunrise](https://github.com/human-centric-engineering/sunrise) platform. This
-document is the fork-author / AI-agent playbook: what Daybreak owns, what
-Sunrise owns, and how to keep pulling upstream releases clean. It complements
-[`CUSTOMIZATION.md`](./CUSTOMIZATION.md) (the canonical, in-depth guide shipped
-by Sunrise) — read that for the detail; read this for the Daybreak-specific
-framing and the quick rules.
+This folder is **Daybreak's own documentation** — the fork-owned counterpart to
+Sunrise's `.context/<domain>/` substrate. The rule is a clean binary:
+
+- `.context/<domain>/` (e.g. `.context/auth/`, `.context/orchestration/`) is
+  **Sunrise's** platform documentation — it merges from upstream; don't edit it.
+- **`.context/app/` is the fork's** — Daybreak's feature/domain docs live here.
+  Sunrise never creates this folder, so nothing here ever conflicts on an
+  upstream merge.
+
+Add Daybreak feature docs alongside this file (e.g. `.context/app/<feature>.md`)
+and link them from the index at the bottom.
+
+The rest of this file is the **fork playbook**: what Daybreak owns, what Sunrise
+owns, and how to pull upstream releases cleanly. It complements
+[`CUSTOMIZATION.md`](../../CUSTOMIZATION.md) (the canonical, in-depth guide
+shipped by Sunrise) — read that for the detail; read this for the
+Daybreak-specific framing and the quick rules.
 
 ## The relationship
 
@@ -33,16 +43,18 @@ histories").
   `admin-nav.ts`, `public-nav.ts`, `agent-fields.ts`, `surface.ts`, `emails.ts`,
   `db-drift.ts`. Sunrise ships these **empty for the fork**; your registrations
   here merge cleanly with no special handling.
+- **`.context/app/`** — this folder, the fork's documentation tree
 - `app/brand-theme.css`, and branding via env (`NEXT_PUBLIC_APP_NAME`,
   `NEXT_PUBLIC_LEGAL_NAME`) — **not** by editing `lib/brand.ts`
-- `package.json`, `README.md`, `CUSTOMIZATION.md`, this file, `.env*`
+- `package.json`, `README.md`, `CUSTOMIZATION.md`, `.env*`
 
 **Platform-owned — don't edit; extend through a seam instead:**
 
 - Core `lib/` utilities, core `app/api/v1` routes, core `components/`, the
   security / rate-limit middleware (`proxy.ts`, `lib/security/**`)
-- `lib/sunrise-version.ts`, `VERSIONING.md`, `CHANGELOG.md`, `.context/**`
-  (Sunrise's docs), and the SQL of any **Sunrise** migration
+- `lib/sunrise-version.ts`, `VERSIONING.md`, `CHANGELOG.md`, and `.context/**`
+  **except `.context/app/`** (Sunrise's docs), plus the SQL of any **Sunrise**
+  migration
 - `CLAUDE.md` below its Daybreak banner — keep Daybreak instructions in the
   banner or here, so upstream `CLAUDE.md` edits merge cleanly
 
@@ -59,7 +71,7 @@ future release.
 | `SUNRISE_VERSION` (`lib/sunrise-version.ts`)                  | The **Sunrise platform** version we forked from | Sunrise upstream — we merge it through, never edit it |
 
 Both surface on `/api/health` (`version` = Daybreak, `sunrise` = platform). See
-[`CUSTOMIZATION.md` §8](./CUSTOMIZATION.md).
+[`CUSTOMIZATION.md` §8](../../CUSTOMIZATION.md).
 
 ## Tracking Daybreak's own changes
 
@@ -83,11 +95,17 @@ npm run validate && npm run test
 The migration directory is the main moving part — Sunrise and Daybreak
 migrations share `prisma/migrations/` and interleave by timestamp. Never edit an
 applied Sunrise migration; add a follow-up. Full reconciliation recipe:
-[`CUSTOMIZATION.md` §9](./CUSTOMIZATION.md) and
-[`.context/database/migrations.md`](./.context/database/migrations.md).
+[`CUSTOMIZATION.md` §9](../../CUSTOMIZATION.md) and
+[`.context/database/migrations.md`](../database/migrations.md).
 
 ## Reference
 
-- [`CLAUDE.md`](./CLAUDE.md) — Daybreak fork banner + Sunrise's platform instructions
-- [`CUSTOMIZATION.md`](./CUSTOMIZATION.md) — the canonical build-on-Sunrise guide
-- [`.context/`](./.context/) — Sunrise's platform documentation substrate
+- [`CLAUDE.md`](../../CLAUDE.md) — Daybreak fork banner + Sunrise's platform instructions
+- [`CUSTOMIZATION.md`](../../CUSTOMIZATION.md) — the canonical build-on-Sunrise guide
+- [`.context/substrate.md`](../substrate.md) — Sunrise's platform documentation entry point
+
+## Daybreak feature docs
+
+_None yet — add `.context/app/<feature>.md` files here as Daybreak grows and link them:_
+
+<!-- - [Feature X](./feature-x.md) — one-line description -->
