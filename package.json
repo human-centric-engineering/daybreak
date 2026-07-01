@@ -1,7 +1,7 @@
 {
-  "name": "sunrise",
-  "version": "0.4.1",
-  "description": "A production-ready Next.js starter template designed for rapid application development with AI assistance.",
+  "name": "daybreak",
+  "version": "0.1.0",
+  "description": "Daybreak — an AI-application framework built on the Sunrise starter template.",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -43,15 +43,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/human-centric-engineering/sunrise.git"
+    "url": "git+https://github.com/human-centric-engineering/daybreak.git"
   },
   "keywords": [
     "nextjs",
     "typescript",
     "react",
-    "starter",
-    "template",
-    "boilerplate",
+    "framework",
+    "ai",
+    "orchestration",
     "prisma",
     "tailwind",
     "better-auth"
@@ -59,9 +59,9 @@
   "author": "Human-Centric Engineering",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/human-centric-engineering/sunrise/issues"
+    "url": "https://github.com/human-centric-engineering/daybreak/issues"
   },
-  "homepage": "https://github.com/human-centric-engineering/sunrise#readme",
+  "homepage": "https://github.com/human-centric-engineering/daybreak#readme",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.107.0",
     "@aws-sdk/client-s3": "^3.1075.0",
