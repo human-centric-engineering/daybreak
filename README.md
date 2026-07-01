@@ -1,14 +1,23 @@
-# Sunrise - build production apps faster
+# Daybreak
 
-A production-ready Next.js 16 starter template designed for rapid application development with AI assistance — now with a complete AI agent orchestration layer baked in.
+**Daybreak** is an AI-application framework built on the
+[Sunrise](https://github.com/human-centric-engineering/sunrise) starter
+template. It inherits Sunrise's production-ready foundation — auth, database,
+versioned APIs, security middleware, and a complete AI agent orchestration
+layer — and builds a purpose-built framework on top of it.
 
-## Why Sunrise?
+> **Built on Sunrise.** Daybreak tracks Sunrise as an upstream platform: it was
+> forked at Sunrise **v0.4.1** and pulls in later Sunrise releases via the
+> `upstream` remote. The platform is extended through Sunrise's designed seams
+> rather than edited in place, so upgrades stay clean merges. If you're working
+> in this repo, start with the fork banner in [`CLAUDE.md`](./CLAUDE.md) and the
+> full guide in [`CUSTOMIZATION.md`](./CUSTOMIZATION.md) / [`DAYBREAK.md`](./DAYBREAK.md).
+
+## Foundation (inherited from Sunrise)
 
 - **Production-ready from day one** — Auth, database, APIs, security headers, rate limiting all configured
 - **Agent-ready** — Production AI agent orchestration: agents, tools, workflows, knowledge bases (RAG), evaluations, observability
 - **Just ask Claude** — Documentation written as AI context; ask questions, get answers, start building
-- **Balanced** — Comprehensive yet customizable; not too minimal, not too opinionated
-- **Fork-friendly** — Take what you need, customize what you want
 - **API-first** — Actions accessible via versioned API endpoints, MCP server, and agent capabilities — ready for agents and integrations
 
 ## Tech Stack
@@ -61,8 +70,8 @@ Docs:
 
 ```bash
 # Clone and install
-git clone https://github.com/human-centric-engineering/sunrise.git
-cd sunrise
+git clone https://github.com/human-centric-engineering/daybreak.git
+cd daybreak
 
 # Create environment file
 cp .env.example .env.local
@@ -155,6 +164,10 @@ claude mcp add next-devtools npx next-devtools-mcp@latest
 See the [Next.js DevTools MCP docs](https://github.com/vercel/next-devtools-mcp) for details.
 
 ## Acknowledgements
+
+Daybreak is built on [Sunrise](https://github.com/human-centric-engineering/sunrise),
+the production-ready Next.js starter template — the auth, API, security, and
+orchestration foundation come from there and are kept in sync via upstream merges.
 
 The 21 design patterns referenced throughout the orchestration learning area are adapted from _Agentic Design Patterns_ by Antonio Gullí.
 

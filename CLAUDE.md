@@ -1,5 +1,66 @@
 # CLAUDE.md
 
+> ## ⚠️ This is Daybreak — a fork of Sunrise. Read this first.
+>
+> This repository is **Daybreak**, an AI-application framework built **on** the
+> Sunrise platform (`human-centric-engineering/sunrise`), forked at Sunrise
+> **v0.4.1**. You are **building on Sunrise, not developing Sunrise itself.**
+>
+> Everything below this banner is **Sunrise's own platform documentation**. Its
+> guidance about how the codebase works still applies — but the _maintainer_
+> workflows in it are **Sunrise's, not yours**: cutting Sunrise releases,
+> "CHANGELOG follows the public surface", the public-surface `/pre-pr` checks,
+> and `VERSIONING.md` all describe how the _platform_ is maintained upstream. In
+> Daybreak you consume the platform; you don't version or release it.
+>
+> ### The golden rule: extend through the seams; don't edit platform-owned files.
+>
+> Every Sunrise-owned file you edit becomes a merge conflict the next time you
+> pull a Sunrise release. Prefer adding new files and using the designed seams.
+> Full playbook: [`CUSTOMIZATION.md`](./CUSTOMIZATION.md) (§0 app/platform model,
+> §9 upstream sync) and [`DAYBREAK.md`](./DAYBREAK.md).
+>
+> **Freely yours (fork-owned — edit these):**
+>
+> - New files anywhere: your pages (`app/(public|protected)/…`), API routes
+>   (`app/api/v1/<resource>/`), `components/`, `lib/` modules
+> - `prisma/schema/app.prisma` (your models) + your own migrations
+>   (name them `app_…` so they're identifiable when they interleave upstream)
+> - The `lib/app/*` scaffold — `env.ts`, `rate-limit.ts`, `capabilities.ts`,
+>   `admin-nav.ts`, `public-nav.ts`, `agent-fields.ts`, `surface.ts`,
+>   `emails.ts`, `db-drift.ts` — Sunrise ships these empty **for you** to fill;
+>   registrations here merge cleanly
+> - `app/brand-theme.css` (your theme); branding via env
+>   (`NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_LEGAL_NAME`) — not by editing `lib/brand.ts`
+> - `package.json`, `README.md`, `CUSTOMIZATION.md`, `DAYBREAK.md`, `.env*`
+>
+> **Platform-owned (Sunrise's — do NOT edit; extend instead):**
+>
+> - Core `lib/` utilities, core `app/api/v1` routes, core `components/`, the
+>   security / rate-limit middleware (`proxy.ts`, `lib/security/**`)
+> - `lib/sunrise-version.ts`, `VERSIONING.md`, `CHANGELOG.md`, `.context/**`
+>   (Sunrise's docs), and the SQL of any **Sunrise** migration
+> - This `CLAUDE.md` **below the banner** — keep Daybreak-specific instructions
+>   in this banner or in `DAYBREAK.md`, so upstream `CLAUDE.md` edits merge cleanly
+> - If you genuinely must change platform behaviour and no seam exists, keep the
+>   edit minimal and add a follow-up rather than rewriting Sunrise's file — a
+>   one-line "keep mine" is a cheap merge; a rewritten platform file is not
+>
+> ### Version model
+>
+> `package.json.version` is **Daybreak's** app version (surfaced via
+> `lib/app-version.ts` → `/api/health` `version`). `lib/sunrise-version.ts` is
+> the **Sunrise platform** version you forked from — you merge it through on
+> upstream syncs; never edit it directly.
+>
+> ### Pulling upstream Sunrise
+>
+> Sunrise is the `upstream` remote. To adopt a release:
+> `git fetch upstream --tags && git merge vX.Y.Z`. Resolve conflicts by keeping
+> your version and adding follow-ups; then run `npm run db:migrate:status` →
+> `db:migrate:dev` to apply newly-merged Sunrise migrations. See
+> [`CUSTOMIZATION.md` §9](./CUSTOMIZATION.md).
+
 Instructions for Claude Code when working in this repository.
 
 ## Project Overview
