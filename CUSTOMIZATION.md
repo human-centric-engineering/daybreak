@@ -54,6 +54,18 @@ Two principles keep an upgrade from upstream a clean merge instead of a fight:
 | Environment variables      | `lib/app/env.ts` (`appEnvSchema`) — see [§4](#4-configuration--environment--the-libapp-surface)                     |
 | App rate-limit tier / rule | `registerRateLimitTier()` / `registerRateLimitRule()` — see [§4](#4-configuration--environment--the-libapp-surface) |
 | Dependencies & scripts     | `package.json` — see [§7](#7-adding-dependencies--scripts)                                                          |
+| Your own documentation     | `.context/app/` — the fork-owned docs folder (see below)                                                            |
+
+**Where your documentation goes — the `.context/app/` convention.** Sunrise's
+platform docs live under `.context/<domain>/` (e.g. `.context/auth/`,
+`.context/orchestration/`); those are Sunrise-owned and merge from upstream, so
+don't edit them. Put **your fork's own documentation in `.context/app/`** —
+Sunrise never creates or writes to that folder, so, like your other new files,
+nothing you add there ever conflicts on an upstream merge. Treat `.context/app/`
+as the fork-owned mirror of the platform substrate: add
+`.context/app/<feature>.md` files and, if you like, a `.context/app/README.md`
+index. (This convention is used across Sunrise forks; adopting it keeps app docs
+findable in the same place in every fork.)
 
 ---
 
@@ -224,15 +236,16 @@ the body, which is yours. Keep the export name and signature;
 everything inside is free to change. (Detailed examples live here in this guide,
 not in the files, precisely so the files stay small and conflict-free.)
 
-| Edit this file            | To register                      | Auto-wired by (runtime)                        |
-| ------------------------- | -------------------------------- | ---------------------------------------------- |
-| `lib/app/env.ts`          | server env vars (`appEnvSchema`) | `lib/env.ts` startup parse (server)            |
-| `lib/app/rate-limit.ts`   | rate-limit tiers / rules         | rate-limit middleware (middleware runtime)     |
-| `lib/app/capabilities.ts` | agent capabilities (tools)       | the capability registry (server route-handler) |
-| `lib/app/admin-nav.ts`    | admin sidebar sections           | `admin-sidebar.tsx` (client)                   |
-| `lib/app/db-drift.ts`     | Prisma-unmodelled DB objects     | `scripts/db/check-drift.ts` (CI / `/pre-pr`)   |
-| `lib/app/public-nav.ts`   | public nav / footer link lists   | `public-nav.tsx`, `public-footer.tsx` (client) |
-| `lib/app/emails.ts`       | auth email template overrides    | `lib/email/registry.ts` (server)               |
+| Edit this file                    | To register                                   | Auto-wired by (runtime)                         |
+| --------------------------------- | --------------------------------------------- | ----------------------------------------------- |
+| `lib/app/env.ts`                  | server env vars (`appEnvSchema`)              | `lib/env.ts` startup parse (server)             |
+| `lib/app/rate-limit.ts`           | rate-limit tiers / rules                      | rate-limit middleware (middleware runtime)      |
+| `lib/app/capabilities.ts`         | agent capabilities (tools)                    | the capability registry (server route-handler)  |
+| `lib/app/context-contributors.ts` | prompt-context loaders (`buildContext` types) | the chat context builder (server route-handler) |
+| `lib/app/admin-nav.ts`            | admin sidebar sections                        | `admin-sidebar.tsx` (client)                    |
+| `lib/app/db-drift.ts`             | Prisma-unmodelled DB objects                  | `scripts/db/check-drift.ts` (CI / `/pre-pr`)    |
+| `lib/app/public-nav.ts`           | public nav / footer link lists                | `public-nav.tsx`, `public-footer.tsx` (client)  |
+| `lib/app/emails.ts`               | auth email template overrides                 | `lib/email/registry.ts` (server)                |
 
 **Why four files and not one bootstrap call?** Next.js bundles middleware,
 server route-handlers, and the client as three separate module realms — a
@@ -300,6 +313,14 @@ also env-tunable via `RATE_LIMIT_*` overrides. Full reference:
 tools extend `BaseCapability`). The capability registry runs it once before the
 first agent dispatch. See
 [`.context/orchestration/capabilities.md`](./.context/orchestration/capabilities.md).
+
+**Prompt-context loaders — `lib/app/context-contributors.ts`.** Fill in the
+auto-wired `initAppContextContributors()` with
+`registerContextContributor(type, loader)` calls to inject your own
+`LOCKED CONTEXT` block per chat turn for a given `contextType`, without editing
+the core `buildContext` switch. The chat context builder runs it once before its
+first lookup; built-in types (e.g. `pattern`) take precedence. See
+[`.context/orchestration/chat.md`](./.context/orchestration/chat.md).
 
 **Admin sidebar sections — `lib/app/admin-nav.ts`.** Fill in the auto-wired
 `initAppNav()` with `registerNavSection({ … })` calls; the admin sidebar renders
@@ -642,8 +663,8 @@ the database migration history — your app's migrations and Sunrise's share one
 directory.
 
 **What does _not_ conflict.** Your own new files (routes, components, `lib/`
-modules, `prisma/schema/app.prisma`) are invisible to upstream, so they never
-conflict. The `lib/app/` bootstrap files ([§4](#4-configuration--environment--the-libapp-surface))
+modules, `prisma/schema/app.prisma`, and your docs under `.context/app/`) are
+invisible to upstream, so they never conflict. The `lib/app/` bootstrap files ([§4](#4-configuration--environment--the-libapp-surface))
 are **fork-owned scaffold**: Sunrise ships them empty and doesn't re-edit them,
 so the registrations you add there merge cleanly too — no special handling. The
 files that _can_ conflict are the ones both you and upstream edit (the migration

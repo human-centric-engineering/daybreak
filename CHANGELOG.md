@@ -16,6 +16,46 @@ release process.
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-07-01
+
+> **Alpha release.** Seventh tagged Sunrise release. **MINOR bump** — adds new
+> public surface: two generic core seams a downstream framework layer needs, both
+> inert in vanilla Sunrise. The per-dispatch **scope carrier**
+> (`CapabilityContext.scope`, threaded verbatim from a new `ChatRequest.scope`;
+> core names no keys and no built-in capability reads it) lets a consumer make a
+> capability refuse to run outside its intended scope. The **context-contributor
+> registry** (`registerContextContributor()` + the fork-owned empty scaffold
+> `lib/app/context-contributors.ts` → `initAppContextContributors()`, a new named
+> seam in [`VERSIONING.md`](./VERSIONING.md#covered)) lets a fork inject its own
+> `LOCKED CONTEXT` block per turn without editing the core `buildContext` switch —
+> with fork loader and one-time-init errors caught so they never fail a chat turn.
+> Both were added so a fork can attach per-dispatch scope and pluggable
+> prompt-context loaders without patching platform code. Ships in `0.x` per
+> [`VERSIONING.md`](./VERSIONING.md#0x-alpha-semantics--loose-by-design) — forks
+> adopting this release should expect real merge work between any two `0.x`
+> releases.
+
+### Added
+
+- **`CapabilityContext.scope?: Record<string, string>`** — an optional, free-form
+  scope map the dispatcher's caller can populate; the dispatcher threads it
+  verbatim into `execute()`. Generic by design: core names no keys and no
+  built-in capability reads it. The chat handler threads it from a new
+  `ChatRequest.scope`. Lets a downstream consumer make a capability refuse to run
+  outside its intended scope. Inert (`undefined`) when unused. (#372)
+- **`registerContextContributor(type, loader)`** (exported from
+  `@/lib/orchestration/chat`) — registers a prompt-context loader for a new
+  `buildContext` `contextType`, so a fork can inject its own `LOCKED CONTEXT`
+  block per turn without editing the core switch. Built-in cases take precedence;
+  the 60 s per-`(type, id)` cache and invalidation behaviour are preserved. A
+  contributor (or the fork's one-time init) that throws is caught and degraded
+  so a loader error never fails the chat turn; the errored-contributor
+  placeholder alone is returned uncached, so a transient loader failure
+  self-heals on the next turn. Auto-wired once via the new fork-owned empty
+  scaffold
+  `lib/app/context-contributors.ts` → `initAppContextContributors()` (mirrors
+  `lib/app/capabilities.ts`). (#372)
+
 ## [0.4.1] — 2026-07-01
 
 > **Alpha release.** Sixth tagged Sunrise release. **PATCH bump** — no change to
