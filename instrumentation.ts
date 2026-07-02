@@ -31,8 +31,19 @@ export async function register(): Promise<void> {
   // (1) Generic app boot seam — runs in ALL environments, before the dev-only
   // ticker. A fork fills lib/app/bootstrap.ts; Sunrise ships it empty. Kept as a
   // bare seam call so core never references the fork's framework code.
-  const { initApp } = await import('@/lib/app/bootstrap');
-  await initApp();
+  //
+  // Isolated in try/catch: a fork's boot step must not crash instrumentation or
+  // prevent the dev ticker below from arming. The seam call is defensive by
+  // construction — core does not rely on the fork's initApp being well-behaved.
+  try {
+    const { initApp } = await import('@/lib/app/bootstrap');
+    await initApp();
+  } catch (err) {
+    const { logger } = await import('@/lib/logging');
+    logger.error('instrumentation: app boot seam (initApp) failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 
   // (2) Dev-only maintenance ticker (production runs the tick via external cron).
   if (process.env.NODE_ENV !== 'development') return;

@@ -183,22 +183,38 @@ established the three-tier convention — so this task no longer creates it.)_
   is the single sanctioned core→framework import; **t-2's boundary rule must whitelist it** or t-3
   red-flags CI. Ship the exception in t-2, don't discover it in t-3.
 
-**Shipped (PR #9).** `lib/framework/index.ts` exports `initFramework()`, which registers one empty
-scaffold contributor — the `"module"` prompt-context loader (`lib/framework/modules/context.ts`,
-returns no body until `f-module-core`) — via the `f-seams` `registerContextContributor()`, from
-**within `lib/framework/`** (the leaf `lib/app/context-contributors.ts` stays empty). Boot seam,
-built as the final generic shape: core's `instrumentation.ts` calls `initApp()` from
-`lib/app/bootstrap.ts` **before** the dev-only ticker guards (so it runs in prod too, nodejs
-runtime); Daybreak's _filled_ `bootstrap.ts` **dynamically** `import('@/lib/framework')` →
-`initFramework()`, then awaits a reserved-empty `lib/app/leaf-bootstrap.ts` (`initLeafApp()`). Core
-holds **no** `@/lib/framework` reference — `instrumentation.ts` imports only `@/lib/app/bootstrap`;
-the framework specifier lives solely in the fork-owned bridge, dynamic so `next build` never resolves
-it in a framework-less fork. A framework boot error is logged, not thrown (boot continues; core
-degrades gracefully). Tests: `initFramework` registers/strips the contributor (registry-shaped, not
-welded) + `initApp` boots the whole chain; boundary CI green — `instrumentation.ts` provably does not
-leak `@/lib/framework`. **Upstream:** the boot-seam + `/framework`-namespace issue is built fork-first
-and ready to file against Sunrise (owned by the Sunrise-side agent, per the split of duties) — the
-generic `initApp()` shape and reserved empty `bootstrap.ts` are the reference.
+**Shipped (PR #9).** `lib/framework/index.ts` exports `initFramework()`, which registers one scaffold
+contributor — the `"module"` prompt-context loader (`lib/framework/modules/context.ts`; returns a
+clear "not available yet" body until `f-module-core`, like core's `pattern`-not-found case) — via the
+`f-seams` `registerContextContributor()`, from **within `lib/framework/`** (the leaf
+`lib/app/context-contributors.ts` stays empty). Boot seam, built as the final generic shape: core's
+`instrumentation.ts` calls `initApp()` from `lib/app/bootstrap.ts` **before** the dev-only ticker
+guards (so it runs in prod too, nodejs runtime); Daybreak's _filled_ `bootstrap.ts` **dynamically**
+`import('@/lib/framework')` → `initFramework()`, then awaits a reserved-empty
+`lib/app/leaf-bootstrap.ts` (`initLeafApp()`). Core holds **no** `@/lib/framework` reference —
+`instrumentation.ts` imports only `@/lib/app/bootstrap`; the framework specifier lives solely in the
+fork-owned bridge, dynamic so `next build` never resolves it in a framework-less fork.
+
+**Resilience (two isolation layers, from code review):** `initApp()` is wrapped in try/catch in
+`instrumentation.ts` so any fork boot failure is logged and can't stop the dev ticker arming; and
+inside `bootstrap.ts`, framework init is try/caught so a framework failure still lets the leaf hook
+run and core degrade gracefully. Tests (3 files): unit `initFramework` (asserts it registers exactly
+the module contributor), unit `initApp` orchestration + the resilience path (framework throw →
+logged, not rethrown, leaf still runs), and an **integration** boot test (real
+initApp→framework→`buildContext` chain). Boundary CI green — `instrumentation.ts` provably does not
+leak `@/lib/framework`.
+
+**Altitude note (reviewed & accepted).** The eager boot seam is built slightly ahead of need — today's
+only registration (a chat context contributor) is lazy-compatible — but it is the right call: the
+core→fork boot seam is the hard-to-retrofit inverted seam (retrofitting means editing a Sunrise-owned
+file = merge conflict), and the near-term trajectory (`f-module-core`'s modules bind agents / workflows
+/ capabilities — surfaces consulted by **non-chat** entrypoints: admin capability lists, the workflow
+step registry, the scheduler tick) needs eager boot-time registration a lazy-on-first-chat hook can't
+serve. Same "establish the seam in Phase 1, not later" charter as the boundary.
+
+**Upstream:** the boot-seam + `/framework`-namespace issue is built fork-first and ready to file
+against Sunrise (owned by the Sunrise-side agent) — the generic `initApp()` shape and reserved empty
+`bootstrap.ts` are the reference. See also the new lightweight-registration follow-up below.
 
 - **Done when:** `initFramework()` runs at boot via the generic `initApp()` seam registering its
   (empty) contributor, with the leaf surface left empty; the contributor-count test passes; the
@@ -277,6 +293,17 @@ the generic part). Tracked here so they don't get lost in prose.
     code + tests + green boundary CI. Left unchecked here as a reminder that the cross-repo filing is
     still owed. _(Bundled with the `/framework`-namespace reservation, whose collision risk is mildly
     time-sensitive — flag that to the Sunrise agent.)_
+
+- [ ] **Propose a lightweight context-contributor registration entry in Sunrise** (surfaced by t-3
+      code review, low priority). `initFramework()` imports `registerContextContributor` from
+      `@/lib/orchestration/chat/context-builder`, whose module graph transitively pulls
+      `knowledge/search → @/lib/db/client` (which constructs `Pool` + `PrismaClient` at module scope).
+      So the boot seam eagerly loads the prisma/pg graph on every cold start — origin/main's prod
+      `register()` was a no-op and avoided it. Magnitude is **negligible** (construction, not
+      connection; any DB-touching request loads the same graph anyway — it only front-loads module eval
+      by ms), so **no fork-side change**. But a small Sunrise seam — expose `registerContextContributor`
+      (and peers) from a tiny module that doesn't drag `knowledge/search` — would let a fork register at
+      boot without the heavy import. For the Sunrise agent to weigh alongside the boot-seam issue.
 
 - [x] **Extension seams for fork-added ESLint rules + CI checks — [Sunrise #382](https://github.com/human-centric-engineering/sunrise/issues/382)** (filed 2026-07-02, surfaced by t-2; **built fork-first in t-2**).
       Proposes two seams, both now **implemented in Daybreak as the final generic shape** (per

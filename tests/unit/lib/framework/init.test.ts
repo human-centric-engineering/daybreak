@@ -1,54 +1,44 @@
 /**
- * initFramework() registers the framework's context contributor into core's
- * seam. Proves the boot path is registry-shaped — a contributor resolves the
- * framework's context type after init, and is gone when the registry is stripped
- * — not welded into core's `buildContext` switch.
+ * initFramework() unit test — asserts its exact contract: it registers the
+ * framework's one context contributor (the "module" type → `loadModuleContext`)
+ * into core's seam. Mocks the core module so the assertion is on the
+ * registration call itself, not on `buildContext`'s framing (which is core-owned
+ * and would make the test brittle / tautological). The real end-to-end chain is
+ * covered by tests/integration/lib/framework/boot.test.ts.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock only context-builder's own dependencies, so the REAL context-builder
-// (and its shared contributors map) loads — the same instance initFramework
-// registers into. Mirrors tests/unit/lib/orchestration/chat/context-builder.test.ts.
-vi.mock('@/lib/logging', () => ({
-  logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
-}));
-vi.mock('@/lib/orchestration/knowledge/search', () => ({
-  getPatternDetail: vi.fn(),
-}));
-vi.mock('@/lib/app/context-contributors', () => ({
-  initAppContextContributors: vi.fn(),
+vi.mock('@/lib/orchestration/chat/context-builder', () => ({
+  registerContextContributor: vi.fn(),
 }));
 
+const { registerContextContributor } = await import('@/lib/orchestration/chat/context-builder');
 const { initFramework } = await import('@/lib/framework');
-const { MODULE_CONTEXT_TYPE } = await import('@/lib/framework/modules/context');
-const { buildContext, clearContextCache, __resetContextContributorsForTests } =
-  await import('@/lib/orchestration/chat/context-builder');
+const { loadModuleContext, MODULE_CONTEXT_TYPE, MODULE_CONTEXT_UNAVAILABLE } =
+  await import('@/lib/framework/modules/context');
+
+const registerMock = registerContextContributor as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
-  __resetContextContributorsForTests();
-  clearContextCache();
+  registerMock.mockClear();
 });
 
 describe('initFramework', () => {
-  it('leaves the module context type unresolved before init', async () => {
-    const out = await buildContext(MODULE_CONTEXT_TYPE, 'demo');
-    expect(out).toContain("No context loader for type 'module'");
+  it('registers exactly the module context contributor', () => {
+    initFramework();
+    expect(registerMock).toHaveBeenCalledTimes(1);
+    expect(registerMock).toHaveBeenCalledWith(MODULE_CONTEXT_TYPE, loadModuleContext);
   });
 
-  it('registers the module context contributor on init', async () => {
+  it('registers only one contributor (nothing else) per boot', () => {
     initFramework();
-    clearContextCache();
-    const out = await buildContext(MODULE_CONTEXT_TYPE, 'demo');
-    expect(out).not.toContain('No context loader');
-    expect(out).toContain('LOCKED CONTEXT');
+    expect(registerMock).toHaveBeenCalledTimes(1);
   });
+});
 
-  it('is idempotent — a double boot keeps a single working contributor', async () => {
-    initFramework();
-    initFramework();
-    clearContextCache();
-    const out = await buildContext(MODULE_CONTEXT_TYPE, 'demo');
-    expect(out).not.toContain('No context loader');
+describe('loadModuleContext (scaffold)', () => {
+  it('resolves to the "not available yet" body until f-module-core supplies a real loader', async () => {
+    await expect(loadModuleContext('any-slug')).resolves.toBe(MODULE_CONTEXT_UNAVAILABLE);
   });
 });
