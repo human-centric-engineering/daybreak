@@ -334,7 +334,7 @@ Per the Hub's `parked` Phase status — carried so they're not lost, kept out of
 ### Status vocabulary
 
 - **Features:** `not started | in flight | blocked | shipped`. Owner + `depends on`; `blocked` lists what's blocking.
-- **Tasks (when promoted):** `backlog | available | claimed | in-pr | merged`.
+- **Tasks (when promoted):** `backlog | available | claimed | done`. **No `in-pr` state** — a promoted task flips straight to `done` when its PR merges. Tracking an "in-PR" step in a Markdown board wastes a second commit to flip it and, more often, gets forgotten (the status goes stale). One transition, nothing to forget.
 
 ### Task sizing — one PR, not one commit
 

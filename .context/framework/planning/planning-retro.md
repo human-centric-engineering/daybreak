@@ -89,6 +89,19 @@ both levels; each is filed at its primary home with a cross-reference. Mark an e
   the working model is its natural home. The feature agent mirrors it per-task — see [B4].)
   _Status: open._
 
+### A5 · Don't track an "in-PR" task status — go straight to `done` on merge
+
+- **Discovery.** t-1's task was flagged `in-pr` while PR #6 was open, then **stayed `in-pr`
+  after the PR merged** — nobody flipped it to done (forgotten): the exact failure mode of a
+  two-step terminal status.
+- **Impact.** Wastes a second doc commit to flip `in-pr → done`, and — more often — the status
+  goes stale because the flip is forgotten. A downside of tracking progress via GitHub PRs on a
+  Markdown board, accepted for now.
+- **Feedback.** The overall-plan agent owns the task status vocabulary in the working model. It
+  should **omit any "PR open" state**: a promoted task goes `backlog | available | claimed → done`,
+  flipped to `done` when the PR merges. One transition, nothing to forget. _Status: folded-in for
+  plan.md's vocab; still open for the Hub's plan-authoring instructions._
+
 ---
 
 ## §B — Feature-plan authoring
