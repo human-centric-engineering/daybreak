@@ -5,6 +5,13 @@ import reactHooksPlugin from 'eslint-plugin-react-hooks';
 import jsxA11yPlugin from 'eslint-plugin-jsx-a11y';
 import tseslint from 'typescript-eslint';
 
+// Fork extension seams — tier ESLint blocks live in their own files and are
+// spread at the end of this config (see there for rationale). Fork-first shape
+// of Sunrise #382. `frameworkConfig` is Daybreak's; `appConfig` is the reserved
+// leaf seam (empty here).
+import frameworkConfig from './lib/framework/eslint.config.mjs';
+import appConfig from './lib/app/eslint.config.mjs';
+
 export default tseslint.config(
   // Global ignores
   {
@@ -25,11 +32,6 @@ export default tseslint.config(
       // Throwaway scripts (one-shot codemods, scratch utilities). Gitignored
       // but visible to eslint without this exclusion.
       '.claude/tmp/**',
-      // Deliberate boundary-violation fixtures. These intentionally break the
-      // framework-tier import rule so `scripts/boundary/check.ts` can prove the
-      // rule still bites (it lints them with `--no-ignore`). They must NOT fail
-      // the normal `npm run lint`, so they are ignored here. See f-bootstrap t-2.
-      'scripts/boundary/fixtures/**',
     ],
   },
 
@@ -165,33 +167,6 @@ export default tseslint.config(
               group: ['./*', '../*'],
               message: 'Use the @/ path alias instead of relative imports (CLAUDE.md).',
             },
-            // ── Core → framework tier boundary (Daybreak three-tier model) ──
-            // Sunrise-core and app-shell code must never import `@/lib/framework`.
-            // The framework tier (Daybreak) is built ON core; core cannot depend
-            // back on it. This is not just hygiene: a static `@/lib/framework`
-            // specifier is resolved at BUILD time, so an upstream Sunrise (or a
-            // sibling fork like ConQuest) that has no `lib/framework/` folder
-            // would fail `next build` on it. The reference must be ABSENT from
-            // core, not runtime-guarded.
-            //
-            // Two tiers are exempt from this ban and so RESTATE the rule without
-            // it:
-            //   - `lib/framework/**` (+ the reserved framework admin surfaces) —
-            //     it *is* the framework; see the framework-tier block below.
-            //   - `lib/app/**` (the leaf surface) — the leaf app is built ON the
-            //     framework and legitimately imports it; the `lib/app/**` block
-            //     turns the base rule off entirely, so this ban never reaches it.
-            //     The sanctioned boot bridge (`instrumentation.ts` →
-            //     `lib/app/bootstrap.ts` → `@/lib/framework`) threads through the
-            //     leaf surface for exactly this reason (f-bootstrap t-2 ↔ t-3).
-            {
-              group: ['@/lib/framework', '@/lib/framework/*'],
-              message:
-                'Core / app-shell code must not import @/lib/framework — the framework ' +
-                'tier is built on core, not the reverse, and a build-time import would ' +
-                'break forks without a lib/framework/ folder. Register through a Sunrise ' +
-                'seam instead (see .context/framework/README.md).',
-            },
           ],
         },
       ],
@@ -278,64 +253,6 @@ export default tseslint.config(
     },
   },
 
-  // ── Framework tier boundary (Daybreak three-tier model) ──────────────────
-  // The framework tier (Daybreak) owns `lib/framework/**` and its reserved
-  // admin surfaces. Two directions of the boundary meet here:
-  //
-  //   - Framework → core: allowed, but the framework must NOT reach UP into the
-  //     leaf surface (`lib/app/**`). The leaf app is the framework's consumer
-  //     (Sunrise → Daybreak → app); a framework that imported its own consumer
-  //     would invert the tier order. ("Import core only through public seams" is
-  //     a review-time convention the boundary can't express mechanically.)
-  //   - Core → framework: banned in the base rule above. These files are the
-  //     framework itself, so that ban must NOT apply to them — hence the RESTATE.
-  //
-  // CRITICAL: flat-config `no-restricted-imports` REPLACES (does not merge) the
-  // base rule from the React block. We therefore RESTATE the @/-alias ban here —
-  // omitting it would silently drop relative-import enforcement on framework
-  // files — and deliberately drop the `@/lib/framework` self-ban (a framework
-  // module importing a sibling framework module is correct).
-  //
-  // `app/admin/framework/**` and `app/api/v1/admin/framework/**` are reserved
-  // now (empty until later features) so the framework's future admin UI/routes
-  // are governed as framework tier from day one, not retrofitted.
-  //
-  // The framework's OWN test files (`tests/**/lib/framework/**`) are included so
-  // they are treated as framework tier too: a framework test must import the
-  // framework it exercises (`@/lib/framework/...`), which the base core → framework
-  // ban would otherwise flag. Scoping the exemption here — rather than loosening
-  // the global test-override block — keeps it precise and avoids re-enabling the
-  // base rule for `lib/app/**` tests (which would double-report relative imports).
-  {
-    files: [
-      'lib/framework/**/*.{ts,tsx}',
-      'app/admin/framework/**/*.{ts,tsx}',
-      'app/api/v1/admin/framework/**/*.{ts,tsx}',
-      'tests/**/lib/framework/**/*.{ts,tsx}',
-    ],
-    rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          patterns: [
-            {
-              group: ['./*', '../*'],
-              message: 'Use the @/ path alias instead of relative imports (CLAUDE.md).',
-            },
-            {
-              group: ['@/lib/app', '@/lib/app/*'],
-              message:
-                'Framework code must not import the leaf surface @/lib/app/** — the leaf ' +
-                'app is the framework tier’s consumer (Sunrise → Daybreak → app), ' +
-                'so this would invert the tier order. Expose a seam from lib/framework ' +
-                'instead and let the leaf call it.',
-            },
-          ],
-        },
-      ],
-    },
-  },
-
   // CLI-style verification + maintenance scripts. They print to stdout
   // for interactive use; logger's structured-JSON output would be
   // unreadable for an operator running them by hand.
@@ -396,5 +313,10 @@ export default tseslint.config(
       'react-hooks/preserve-manual-memoization': 'off',
       'react-hooks/exhaustive-deps': 'off',
     },
-  }
+  },
+
+  // Fork extension seams — spread LAST so a fork block can override a rule for
+  // its own paths (framework tier, then the reserved leaf seam).
+  ...frameworkConfig,
+  ...appConfig
 );
