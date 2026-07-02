@@ -153,6 +153,14 @@ jobs:
       - name: ESLint (code changes only)
         if: needs.config.outputs.code == 'true'
         run: npm run lint
+      # Fork-defined CI checks — generic seam (fork-first shape of Sunrise #382).
+      # A fork adds an `app:ci-checks` script; `--if-present` no-ops when none is
+      # defined, so this line carries upstream unchanged. Daybreak maps it to the
+      # framework boundary check (eslint-rule-bites assertion + migration-hygiene
+      # + zero-framework-vocab). No DB needed → lives in the lint job.
+      - name: Fork CI checks (if present)
+        if: needs.config.outputs.code == 'true'
+        run: npm run app:ci-checks --if-present
       - run: npm run format:check
 
   build:

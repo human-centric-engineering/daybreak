@@ -89,12 +89,12 @@ Concrete reuse anchors found in-tree:
 
 ## Tasks (promoted)
 
-| ID  | Task                                                         | Files                                                                                         | Deps | Status   | PR  |
-| --- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------- | ---- | -------- | --- |
-| t-0 | Fork + branding + upstream-merge procedure                   | _(history: fork, brand env, `.context/framework/README.md`, PR #4)_                           | —    | **done** | #4  |
-| t-1 | `lib/framework/` skeleton + `shared/scope.ts` + empty schema | `lib/framework/{modules,facilitation,data-slots,shared}/`, `prisma/schema/framework-*.prisma` | t-0  | done     | #6  |
-| t-2 | Boundary enforcement (X6): ESLint + CI, provably failing     | `eslint.config.mjs`, `.github/workflows/ci.yml`, `scripts/`, a deliberate-violation fixture   | t-1  | backlog  | —   |
-| t-3 | `initFramework()` wiring + boot seam + test scaffolding      | `lib/framework/index.ts`, `instrumentation.ts`, `lib/app/bootstrap.ts` (filled), `tests/`     | t-1  | backlog  | —   |
+| ID  | Task                                                         | Files                                                                                                                       | Deps | Status   | PR  |
+| --- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- | ---- | -------- | --- |
+| t-0 | Fork + branding + upstream-merge procedure                   | _(history: fork, brand env, `.context/framework/README.md`, PR #4)_                                                         | —    | **done** | #4  |
+| t-1 | `lib/framework/` skeleton + `shared/scope.ts` + empty schema | `lib/framework/{modules,facilitation,data-slots,shared}/`, `prisma/schema/framework-*.prisma`                               | t-0  | done     | #6  |
+| t-2 | Boundary enforcement (X6): ESLint + CI, provably failing     | `lib/{framework,app}/eslint.config.mjs` (seams), `eslint.config.mjs`/`ci.yml` (spread + hook), `scripts/boundary/`, fixture | t-1  | done     | #8  |
+| t-3 | `initFramework()` wiring + boot seam + test scaffolding      | `lib/framework/index.ts`, `instrumentation.ts`, `lib/app/bootstrap.ts` (filled), `tests/`                                   | t-1  | backlog  | —   |
 
 t-2 and t-3 parallelise once t-1 lands. Three real PRs (t-0 already merged) — inside the
 parent plan's `~4 PRs` estimate.
@@ -135,6 +135,29 @@ Appendix B's three mechanisms, all shipped here, all CI-verified:
   build, or asserted via an expected-error test), so a green main means the boundary genuinely bites.
 - **Done when:** all three checks run in `ci.yml` and green on a clean tree; the deliberate
   violation is provably caught.
+
+**Shipped (PR #8) — via fork-first seams, not direct edits to platform files.** The boundary is
+wired through the same extension-seam shape we're proposing upstream ([Sunrise #382](https://github.com/human-centric-engineering/sunrise/issues/382)),
+so the eventual upstream fix merges cleanly instead of forcing rework:
+
+- **ESLint.** The framework-tier blocks live in fork-owned **`lib/framework/eslint.config.mjs`**
+  (core→framework ban; framework-tier block with the leaf-surface ban `@/lib/app/**`; the
+  fixture global-ignore). A reserved, empty **`lib/app/eslint.config.mjs`** is the leaf seam. Root
+  `eslint.config.mjs` only **spreads** both (`...frameworkConfig, ...appConfig`) after Sunrise's
+  blocks — its diff-from-Sunrise is ~5 functional lines (import + spread), so the ~100 lines of
+  rules never sit in a platform-owned file. `lib/app/**` stays exempt (leaf tier + boot bridge);
+  framework tests are exempt (they must import what they exercise; tests ship in no build). Every
+  block RESTATES the @/-alias ban (flat-config replaces, not merges — the footgun is documented once
+  in the seam file).
+- **CI.** Root `ci.yml` runs the generic hook **`npm run app:ci-checks --if-present`** (no-ops
+  where unset, so it carries upstream unchanged); Daybreak maps `app:ci-checks` → `framework:boundary`.
+  Zero growing `ci.yml` edits for future framework checks.
+- **Checks.** `scripts/boundary/lib.ts` (pure, unit-tested incl. FK `ON DELETE` / comment / dollar-quote
+  false-positive guards) behind `scripts/boundary/check.ts`, which also lints the ignored fixture with
+  `--no-ignore` and asserts the rule fires. Migration hygiene keys on structural DDL ownership
+  (CREATE/ALTER/DROP/INDEX), _not_ FK targets — a framework→core FK (`framework_module.userId → User`)
+  is legitimate. All four import directions verified by probe: core→fw FLAGGED, fw→leaf FLAGGED,
+  leaf→fw allowed, fw→core allowed; both tiers keep the relative-import ban.
 
 ### t-3 · `initFramework()` wiring + test scaffolding
 
@@ -234,3 +257,18 @@ the generic part). Tracked here so they don't get lost in prose.
     Done-when.** Owner: the t-3 owner. _(Accepted tradeoff: the `/framework` reservation alone isn't
     gated on t-3 and its collision risk is mildly time-sensitive; bundling trades a small delay for
     a single clean filing.)_
+
+- [x] **Extension seams for fork-added ESLint rules + CI checks — [Sunrise #382](https://github.com/human-centric-engineering/sunrise/issues/382)** (filed 2026-07-02, surfaced by t-2; **built fork-first in t-2**).
+      Proposes two seams, both now **implemented in Daybreak as the final generic shape** (per
+      [[plan#Decisions log|fork-first-informs-upstream]], the same approach as the boot seam): (1) an **ESLint
+      config seam** — root spreads a reserved, empty-by-default `lib/app/eslint.config.mjs` (+ Daybreak's own
+      `lib/framework/eslint.config.mjs`); contract: fork blocks spread _after_ core, restate-not-merge documented;
+      (2) a **CI fork-checks hook** — `npm run app:ci-checks --if-present` in the lint job, so a fork adds a check
+      as a pure package.json addition with zero `ci.yml` edit.
+  - **Compatibility — resolved by building it fork-first (not deferred).** Because t-2 wires the boundary
+    _through_ these seams rather than by editing Sunrise-owned files, root `eslint.config.mjs` carries only a
+    ~5-line import+spread and `ci.yml` only the generic `--if-present` line — both the exact shapes #382 would
+    ship. When Sunrise adopts #382, those merge as identical (the `frameworkConfig` spread is a one-line
+    Daybreak keep-mine), and the ~100 lines of framework rules never lived in a platform file. So the
+    pull-down is a **clean merge, not a migration**. _(Distinct from the boot-seam issue above: that's runtime
+    init + namespace reservation; this is build-tooling extension points.)_

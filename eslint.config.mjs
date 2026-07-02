@@ -5,6 +5,13 @@ import reactHooksPlugin from 'eslint-plugin-react-hooks';
 import jsxA11yPlugin from 'eslint-plugin-jsx-a11y';
 import tseslint from 'typescript-eslint';
 
+// Fork extension seams — tier ESLint blocks live in their own files and are
+// spread at the end of this config (see there for rationale). Fork-first shape
+// of Sunrise #382. `frameworkConfig` is Daybreak's; `appConfig` is the reserved
+// leaf seam (empty here).
+import frameworkConfig from './lib/framework/eslint.config.mjs';
+import appConfig from './lib/app/eslint.config.mjs';
+
 export default tseslint.config(
   // Global ignores
   {
@@ -306,5 +313,10 @@ export default tseslint.config(
       'react-hooks/preserve-manual-memoization': 'off',
       'react-hooks/exhaustive-deps': 'off',
     },
-  }
+  },
+
+  // Fork extension seams — spread LAST so a fork block can override a rule for
+  // its own paths (framework tier, then the reserved leaf seam).
+  ...frameworkConfig,
+  ...appConfig
 );
