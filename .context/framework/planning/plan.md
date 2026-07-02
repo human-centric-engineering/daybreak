@@ -387,6 +387,7 @@ Append-only. Newest at the top.
 
 Append-only. Newest at the top.
 
+- **2026-07-02 — `f-bootstrap` started; t-1 (framework skeleton) merged.** `lib/framework/{modules,facilitation,data-slots,shared}/` stood up, with `shared/scope.ts` (the one scoping vocabulary) as the only real logic; three empty `framework-*.prisma` files; a scope test. Merged via **PR #6** (all gates green: pre-pr + code-review clean). Sizing note: t-1 landed commit-sized rather than PR-sized — captured as process feedback in [[planning-retro]].
 - **2026-07-02 — `f-seams` shipped, and Sunrise v0.5.0 merged into the fork.** The two generic core seams were filed as Sunrise **#372**, implemented upstream in **PR #373** (`CapabilityContext.scope?: Record<string,string>` + the `registerContextContributor()` registry on `buildContext()` + the empty fork-owned `lib/app/context-contributors.ts` scaffold), and released in **Sunrise v0.5.0**. Merged into this Daybreak fork via **PR #4** — `SUNRISE_VERSION → 0.5.0` while Daybreak's app version stays `0.1.0`; three trivial conflicts (`package.json`, `package-lock.json`, `CLAUDE.md`) resolved keeping the fork's identity + banner; no new migrations. Type-check / lint / format green, 64 seam tests pass. `f-seams` is **shipped**; `f-bootstrap` is unblocked and next.
   - _Note on ownership:_ scoped in the plan as "2 PRs, owner Simon (Sunrise)"; delivered as us filing the Sunrise issue and upstream implementing it as a single PR — the seams are generic, so they belong to Sunrise, exactly as intended.
 
@@ -394,6 +395,7 @@ Append-only. Newest at the top.
 
 ## References
 
+- [[planning-retro]] — feedback about the **plan-authoring process itself**, discovered while executing this plan; to fold back into the agent instructions that generate plans like this one.
 - [[framework-architecture]] — the authoritative design spec (rev 16). Binding decisions in Appendix A.
 - [[placement-decision-memo]] — why the framework lives on a separate fork.
 - [[v1-requirements|HCE Hub v1 requirements]] — the Project → Phase(epic) → Feature → Task model this plan mirrors.
