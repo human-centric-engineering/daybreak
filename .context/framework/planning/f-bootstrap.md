@@ -66,7 +66,8 @@ each a deliberate choice to record:
    checks). → Framework schema uses **`prisma/schema/framework-*.prisma`** with `framework_`
    table names and `framework_`-prefixed migrations, exactly as §3.1/Appendix B specify. The
    `app_…` convention remains available for genuinely app-level (non-framework) additions, but
-   the framework's own DDL follows `framework_`. _(Decision to confirm — see Open questions.)_
+   the framework's own DDL follows `framework_`. _(Decided 2026-07-02: `framework_` tables with
+   clean Prisma model names — see [[plan#Decisions log|decisions log]].)_
 
 Concrete reuse anchors found in-tree:
 
@@ -163,10 +164,12 @@ contributor from within `lib/framework/` via a Daybreak-owned boot hook, with th
 
 ## Open questions / decisions to confirm
 
-- **Schema prefix (reconciliation #3).** Confirm `framework_` (spec/Appendix B) over the generic
-  `app_` (README) for the framework's own DDL. Recommended: `framework_`, because Appendix B's CI
-  checks depend on it and the whole spec is written around it. _Blocks t-1's schema-file naming and
-  t-2's migration-hygiene regex._
+- **Schema prefix (reconciliation #3) — RESOLVED 2026-07-02.** `framework_` table prefix +
+  **clean** Prisma model names (`model Module { @@map("framework_module") }`, `prisma.module.…`).
+  The three-tier model settles it against `app_`, which is the _leaf app's_ namespace and would
+  tangle Daybreak's DDL with Lelanea's. Model names stay unprefixed for client ergonomics —
+  accepted low risk: if a future Sunrise model name ever collides, rename the framework-side model.
+  Unblocks t-1 schema naming + t-2 migration-hygiene regex.
 - **`initFramework()` boot hook (the real open one).** Daybreak must invoke `initFramework()` at
   boot **without** occupying a leaf `lib/app/*` scaffold (those are reserved for the app). Sunrise
   offers no framework-tier init seam today. Options: (a) a small generic upstream Sunrise seam — an
