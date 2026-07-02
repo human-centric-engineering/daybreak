@@ -18,32 +18,42 @@
 > Every Sunrise-owned file you edit becomes a merge conflict the next time you
 > pull a Sunrise release. Prefer adding new files and using the designed seams.
 > Full playbook: [`CUSTOMIZATION.md`](./CUSTOMIZATION.md) (§0 app/platform model,
-> §9 upstream sync) and [`.context/app/README.md`](./.context/app/README.md).
+> §9 upstream sync) and [`.context/framework/README.md`](./.context/framework/README.md)
+> (the three-tier model + ownership table).
 >
-> **Freely yours (fork-owned — edit these):**
+> **Three tiers: Sunrise → Daybreak → app.** Apps are built by forking **Daybreak**,
+> not Sunrise. So Daybreak applies Sunrise's fork discipline _one level up_: it owns the
+> framework layer and **reserves the leaf-app surface empty** for its own forks. Working in
+> **this** repo you are building **Daybreak** — edit the framework layer, never the reserved
+> leaf surface.
 >
-> - New files anywhere: your pages (`app/(public|protected)/…`), API routes
->   (`app/api/v1/<resource>/`), `components/`, `lib/` modules
-> - `prisma/schema/app.prisma` (your models) + your own migrations
->   (name them `app_…` so they're identifiable when they interleave upstream)
-> - The `lib/app/*` scaffold — `env.ts`, `rate-limit.ts`, `capabilities.ts`,
->   `admin-nav.ts`, `public-nav.ts`, `agent-fields.ts`, `surface.ts`,
->   `emails.ts`, `db-drift.ts` — Sunrise ships these empty **for you** to fill;
->   registrations here merge cleanly
-> - `app/brand-theme.css` (your theme); branding via env
->   (`NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_LEGAL_NAME`) — not by editing `lib/brand.ts`
-> - **`.context/app/`** — the fork's own documentation tree (Daybreak's
->   feature/domain docs); the platform's `.context/<domain>/` docs are Sunrise's
-> - `package.json`, `README.md`, `CUSTOMIZATION.md`, `.env*`
+> **Daybreak-owned (the framework — edit these):**
 >
-> **Platform-owned (Sunrise's — do NOT edit; extend instead):**
+> - `lib/framework/` — the framework code and its registration seams
+>   (`registerModule()`, the map, slots, guidance, …); register into Sunrise's seams
+>   **from here**, driven by `initFramework()`
+> - `prisma/schema/framework-*.prisma` (your models) + `framework_…` migrations touching
+>   only `framework_*` tables (the boundary CI keys on this prefix)
+> - **`.context/framework/`** — Daybreak's own documentation tree
+> - Daybreak identity: `package.json`, `README.md`, `CUSTOMIZATION.md`, `.env*`, and brand
+>   env (`NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_LEGAL_NAME`) — not by editing `lib/brand.ts`
+> - New framework files anywhere (admin pages/routes under a `framework` segment, `components/`)
+>
+> **Reserved for leaf apps (Daybreak keeps these EMPTY — do NOT fill):**
+>
+> - The `lib/app/*` scaffolds (`env.ts`, `capabilities.ts`, `context-contributors.ts`,
+>   `admin-nav.ts`, …) — Sunrise ships them empty; Daybreak keeps them empty for the app.
+>   Filling one collides with a leaf's registrations on a Daybreak upgrade.
+> - `prisma/schema/app.prisma` + `app_…` migrations, `app/brand-theme.css`, and **`.context/app/`**
+>
+> **Sunrise-owned (do NOT edit; extend through a seam instead):**
 >
 > - Core `lib/` utilities, core `app/api/v1` routes, core `components/`, the
 >   security / rate-limit middleware (`proxy.ts`, `lib/security/**`)
 > - `lib/sunrise-version.ts`, `VERSIONING.md`, `CHANGELOG.md`, and `.context/**`
->   **except `.context/app/`** (Sunrise's docs), plus the SQL of any **Sunrise** migration
+>   **except `.context/framework/` and `.context/app/`**, plus the SQL of any **Sunrise** migration
 > - This `CLAUDE.md` **below the banner** — keep Daybreak-specific instructions
->   in this banner or in [`.context/app/README.md`](./.context/app/README.md), so
+>   in this banner or in [`.context/framework/README.md`](./.context/framework/README.md), so
 >   upstream `CLAUDE.md` edits merge cleanly
 > - If you genuinely must change platform behaviour and no seam exists, keep the
 >   edit minimal and add a follow-up rather than rewriting Sunrise's file — a
