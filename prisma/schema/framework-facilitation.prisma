@@ -1,0 +1,11 @@
+// Framework — Facilitation domain: the map (graph + versions), per-user journey
+// state, journey events, policies, and structure-change proposals.
+//
+// Fork-owned (Daybreak), not Sunrise. Per the boundary convention in
+// `.context/framework/planning/framework-architecture.md` Appendix B (X6):
+// every table here uses the `framework_` prefix via `@@map`, and its DDL lands
+// only in `framework_`-named migrations touching only `framework_*` tables.
+//
+// Empty skeleton (f-bootstrap t-1) — no models yet. The first tables arrive in
+// `f-map` / `f-journey-state`. See `.context/framework/planning/plan.md`
+// features 04 & 09 and spec §5.

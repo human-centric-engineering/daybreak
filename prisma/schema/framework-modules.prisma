@@ -1,0 +1,10 @@
+// Framework — Modules domain: module config, bindings, engagement stats.
+//
+// Fork-owned (Daybreak), not Sunrise. Per the boundary convention in
+// `.context/framework/planning/framework-architecture.md` Appendix B (X6):
+// every table here uses the `framework_` prefix via `@@map`, and its DDL lands
+// only in `framework_`-named migrations touching only `framework_*` tables.
+// Prisma model names stay clean/unprefixed (e.g. `model Module { @@map("framework_module") }`).
+//
+// Empty skeleton (f-bootstrap t-1) — no models yet. The first tables arrive in
+// `f-module-core`. See `.context/framework/planning/plan.md` feature 03 and spec §4.

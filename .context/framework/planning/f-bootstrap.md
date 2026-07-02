@@ -89,12 +89,12 @@ Concrete reuse anchors found in-tree:
 
 ## Tasks (promoted)
 
-| ID  | Task                                                         | Files                                                                                         | Deps | Status    | PR  |
-| --- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------- | ---- | --------- | --- |
-| t-0 | Fork + branding + upstream-merge procedure                   | _(history: fork, brand env, `.context/framework/README.md`, PR #4)_                           | —    | **done**  | #4  |
-| t-1 | `lib/framework/` skeleton + `shared/scope.ts` + empty schema | `lib/framework/{modules,facilitation,data-slots,shared}/`, `prisma/schema/framework-*.prisma` | t-0  | available | —   |
-| t-2 | Boundary enforcement (X6): ESLint + CI, provably failing     | `eslint.config.mjs`, `.github/workflows/ci.yml`, `scripts/`, a deliberate-violation fixture   | t-1  | backlog   | —   |
-| t-3 | `initFramework()` wiring + boot seam + test scaffolding      | `lib/framework/index.ts`, `instrumentation.ts`, `lib/app/bootstrap.ts` (filled), `tests/`     | t-1  | backlog   | —   |
+| ID  | Task                                                         | Files                                                                                         | Deps | Status   | PR  |
+| --- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------- | ---- | -------- | --- |
+| t-0 | Fork + branding + upstream-merge procedure                   | _(history: fork, brand env, `.context/framework/README.md`, PR #4)_                           | —    | **done** | #4  |
+| t-1 | `lib/framework/` skeleton + `shared/scope.ts` + empty schema | `lib/framework/{modules,facilitation,data-slots,shared}/`, `prisma/schema/framework-*.prisma` | t-0  | in-pr    | #6  |
+| t-2 | Boundary enforcement (X6): ESLint + CI, provably failing     | `eslint.config.mjs`, `.github/workflows/ci.yml`, `scripts/`, a deliberate-violation fixture   | t-1  | backlog  | —   |
+| t-3 | `initFramework()` wiring + boot seam + test scaffolding      | `lib/framework/index.ts`, `instrumentation.ts`, `lib/app/bootstrap.ts` (filled), `tests/`     | t-1  | backlog  | —   |
 
 t-2 and t-3 parallelise once t-1 lands. Three real PRs (t-0 already merged) — inside the
 parent plan's `~4 PRs` estimate.
