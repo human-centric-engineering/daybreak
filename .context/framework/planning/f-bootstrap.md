@@ -83,9 +83,9 @@ Concrete reuse anchors found in-tree:
   `lib/app/context-contributors.ts` scaffold. Daybreak registers its framework context
   contributor by **calling `registerContextContributor()` from within `lib/framework/`**
   (driven by `initFramework()`) — _not_ by editing `lib/app/context-contributors.ts`, which is
-  the leaf's scaffold and must stay empty. How `initFramework()` itself gets invoked at boot
-  without occupying a leaf `lib/app/*` file is the one genuinely open wiring question (see Open
-  questions).
+  the leaf's scaffold and must stay empty. `initFramework()` itself is invoked at boot via a generic
+  `initApp()` seam in `instrumentation.ts` → reserved-empty `lib/app/bootstrap.ts` (resolved — see
+  Open questions).
 
 ## Tasks (promoted)
 
@@ -94,7 +94,7 @@ Concrete reuse anchors found in-tree:
 | t-0 | Fork + branding + upstream-merge procedure                   | _(history: fork, brand env, `.context/framework/README.md`, PR #4)_                           | —    | **done**  | #4  |
 | t-1 | `lib/framework/` skeleton + `shared/scope.ts` + empty schema | `lib/framework/{modules,facilitation,data-slots,shared}/`, `prisma/schema/framework-*.prisma` | t-0  | available | —   |
 | t-2 | Boundary enforcement (X6): ESLint + CI, provably failing     | `eslint.config.mjs`, `.github/workflows/ci.yml`, `scripts/`, a deliberate-violation fixture   | t-1  | backlog   | —   |
-| t-3 | `initFramework()` wiring + test scaffolding                  | `lib/framework/index.ts`, `lib/framework/**` (self-registration), `tests/`                    | t-1  | backlog   | —   |
+| t-3 | `initFramework()` wiring + boot seam + test scaffolding      | `lib/framework/index.ts`, `instrumentation.ts`, `lib/app/bootstrap.ts` (filled), `tests/`     | t-1  | backlog   | —   |
 
 t-2 and t-3 parallelise once t-1 lands. Three real PRs (t-0 already merged) — inside the
 parent plan's `~4 PRs` estimate.
@@ -142,17 +142,26 @@ _(The `.context/framework/` doc namespace already exists — created in the reor
 established the three-tier convention — so this task no longer creates it.)_
 
 - **`initFramework()`** (e.g. `lib/framework/index.ts`) is the framework's single aggregate init.
-  For now it registers an **empty** framework context contributor by calling the `f-seams`
+  It registers an **empty** framework context contributor by calling the `f-seams`
   `registerContextContributor()` from **within `lib/framework/`** — never by editing the leaf's
-  `lib/app/context-contributors.ts`, which stays empty. The remaining question is _what invokes
-  `initFramework()` at boot_ without Daybreak occupying a leaf `lib/app/*` file (see Open
-  questions); t-3 can't complete until that's chosen.
+  `lib/app/context-contributors.ts`, which stays empty.
+- **Generic boot seam (built as the final upstream shape):** add `initApp()` to Sunrise's
+  `instrumentation.ts` `register()`, calling a reserved **empty-by-default** `lib/app/bootstrap.ts`.
+  Daybreak's _filled_ `lib/app/bootstrap.ts` `await import('@/lib/framework')` → `initFramework()`,
+  then delegates to a fresh empty leaf hook. Core carries no `@/lib/framework` reference (build-time
+  constraint — see Open questions). Sits outside `instrumentation.ts`'s existing dev-only
+  early-returns (framework init must run in prod too, nodejs runtime). File the upstream Sunrise
+  issue as/after this task, referencing the working impl.
 - **Test scaffolding**: unit + integration test folders for `lib/framework/`, plus one boundary
   test asserting `buildContext()` gains exactly one contributor when the framework is initialised
   (and, mirroring the `f-guidance` boundary test later, one fewer when stripped) — proving the seam
   is registry-shaped, not welded.
-- **Done when:** `initFramework()` runs at boot registering its (empty) contributor via a
-  Daybreak-owned hook (no leaf scaffold occupied); the contributor-count test passes.
+- **t-2 ↔ t-3 coupling:** the `instrumentation.ts` → `lib/app/bootstrap.ts` → `lib/framework` path
+  is the single sanctioned core→framework import; **t-2's boundary rule must whitelist it** or t-3
+  red-flags CI. Ship the exception in t-2, don't discover it in t-3.
+- **Done when:** `initFramework()` runs at boot via the generic `initApp()` seam registering its
+  (empty) contributor, with the leaf surface left empty; the contributor-count test passes; the
+  boundary CI is green (boot file whitelisted).
 
 ## Done when (feature)
 
@@ -170,13 +179,23 @@ contributor from within `lib/framework/` via a Daybreak-owned boot hook, with th
   tangle Daybreak's DDL with Lelanea's. Model names stay unprefixed for client ergonomics —
   accepted low risk: if a future Sunrise model name ever collides, rename the framework-side model.
   Unblocks t-1 schema naming + t-2 migration-hygiene regex.
-- **`initFramework()` boot hook (the real open one).** Daybreak must invoke `initFramework()` at
-  boot **without** occupying a leaf `lib/app/*` scaffold (those are reserved for the app). Sunrise
-  offers no framework-tier init seam today. Options: (a) a small generic upstream Sunrise seam — an
-  `initApp()`/boot-registry both tiers register into (fits "promote generic upstream"; likely
-  best); (b) Daybreak owns the aggregator and re-exposes fresh leaf seams below it; (c) accept one
-  Daybreak-occupied `lib/app/*` entry and document it as the framework's single reserved slot
-  (weakest — dents the symmetry). Needs a decision before t-3; lean (a). _Shapes t-3._
+- **`initFramework()`
+
+   boot hook — RESOLVED 2026-07-02.** A **generic boot seam, built correctly
+    in the fork as its final shape** (per [[plan#Decisions log|the fork-first-informs-upstream
+    approach]] — not a stopgap): Sunrise's `instrumentation.ts` `register()` calls a generic
+  `initApp()` from a reserved, **empty-by-default** `lib/app/bootstrap.ts`; Daybreak's _filled_ copy
+    of that scaffold does `await import('@/lib/framework')` → `initFramework()`, then delegates to a
+    fresh empty leaf hook. **Core never references `@/lib/framework`** — the specifier lives only in
+    the fork-owned filled scaffold, so Sunrise/ConQuest (no `lib/framework/`) never resolve it. This
+    is a hard constraint, not a preference: a static dynamic-import specifier is resolved at **build**
+    time, so `next build` in Sunrise/ConQuest would fail on it — a runtime guard wouldn't help; the
+    reference must be _absent_, not caught. It's the `lib/app/capabilities.ts` pattern applied to
+    boot. Because Daybreak writes the `instrumentation.ts` → `initApp()` change as the final generic
+    shape, the eventual upstream adoption merges cleanly and Daybreak keeps only its filled scaffold.
+  **File the upstream Sunrise issue as/after t-3, referencing the working in-fork impl** (upstream
+    may refine for its own guardrails — propose, adopt what lands). **t-2 whitelists the boot file as
+    the single sanctioned core→framework path** (see t-2 ↔ t-3 coupling below).
 - **Not blocking f-bootstrap, but confirm before `f-module-core`:** that Sunrise #368
   (`executeTransaction` tx options) is present in v0.5.0 — the plan assumes it for boot-time bulk
   upserts (module/slot/map sync). Out of scope here; flagged so it isn't discovered late.
