@@ -25,6 +25,11 @@ export default tseslint.config(
       // Throwaway scripts (one-shot codemods, scratch utilities). Gitignored
       // but visible to eslint without this exclusion.
       '.claude/tmp/**',
+      // Deliberate boundary-violation fixtures. These intentionally break the
+      // framework-tier import rule so `scripts/boundary/check.ts` can prove the
+      // rule still bites (it lints them with `--no-ignore`). They must NOT fail
+      // the normal `npm run lint`, so they are ignored here. See f-bootstrap t-2.
+      'scripts/boundary/fixtures/**',
     ],
   },
 
@@ -160,6 +165,33 @@ export default tseslint.config(
               group: ['./*', '../*'],
               message: 'Use the @/ path alias instead of relative imports (CLAUDE.md).',
             },
+            // ── Core → framework tier boundary (Daybreak three-tier model) ──
+            // Sunrise-core and app-shell code must never import `@/lib/framework`.
+            // The framework tier (Daybreak) is built ON core; core cannot depend
+            // back on it. This is not just hygiene: a static `@/lib/framework`
+            // specifier is resolved at BUILD time, so an upstream Sunrise (or a
+            // sibling fork like ConQuest) that has no `lib/framework/` folder
+            // would fail `next build` on it. The reference must be ABSENT from
+            // core, not runtime-guarded.
+            //
+            // Two tiers are exempt from this ban and so RESTATE the rule without
+            // it:
+            //   - `lib/framework/**` (+ the reserved framework admin surfaces) —
+            //     it *is* the framework; see the framework-tier block below.
+            //   - `lib/app/**` (the leaf surface) — the leaf app is built ON the
+            //     framework and legitimately imports it; the `lib/app/**` block
+            //     turns the base rule off entirely, so this ban never reaches it.
+            //     The sanctioned boot bridge (`instrumentation.ts` →
+            //     `lib/app/bootstrap.ts` → `@/lib/framework`) threads through the
+            //     leaf surface for exactly this reason (f-bootstrap t-2 ↔ t-3).
+            {
+              group: ['@/lib/framework', '@/lib/framework/*'],
+              message:
+                'Core / app-shell code must not import @/lib/framework — the framework ' +
+                'tier is built on core, not the reverse, and a build-time import would ' +
+                'break forks without a lib/framework/ folder. Register through a Sunrise ' +
+                'seam instead (see .context/framework/README.md).',
+            },
           ],
         },
       ],
@@ -246,6 +278,56 @@ export default tseslint.config(
     },
   },
 
+  // ── Framework tier boundary (Daybreak three-tier model) ──────────────────
+  // The framework tier (Daybreak) owns `lib/framework/**` and its reserved
+  // admin surfaces. Two directions of the boundary meet here:
+  //
+  //   - Framework → core: allowed, but the framework must NOT reach UP into the
+  //     leaf surface (`lib/app/**`). The leaf app is the framework's consumer
+  //     (Sunrise → Daybreak → app); a framework that imported its own consumer
+  //     would invert the tier order. ("Import core only through public seams" is
+  //     a review-time convention the boundary can't express mechanically.)
+  //   - Core → framework: banned in the base rule above. These files are the
+  //     framework itself, so that ban must NOT apply to them — hence the RESTATE.
+  //
+  // CRITICAL: flat-config `no-restricted-imports` REPLACES (does not merge) the
+  // base rule from the React block. We therefore RESTATE the @/-alias ban here —
+  // omitting it would silently drop relative-import enforcement on framework
+  // files — and deliberately drop the `@/lib/framework` self-ban (a framework
+  // module importing a sibling framework module is correct).
+  //
+  // `app/admin/framework/**` and `app/api/v1/admin/framework/**` are reserved
+  // now (empty until later features) so the framework's future admin UI/routes
+  // are governed as framework tier from day one, not retrofitted.
+  {
+    files: [
+      'lib/framework/**/*.{ts,tsx}',
+      'app/admin/framework/**/*.{ts,tsx}',
+      'app/api/v1/admin/framework/**/*.{ts,tsx}',
+    ],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['./*', '../*'],
+              message: 'Use the @/ path alias instead of relative imports (CLAUDE.md).',
+            },
+            {
+              group: ['@/lib/app', '@/lib/app/*'],
+              message:
+                'Framework code must not import the leaf surface @/lib/app/** — the leaf ' +
+                'app is the framework tier’s consumer (Sunrise → Daybreak → app), ' +
+                'so this would invert the tier order. Expose a seam from lib/framework ' +
+                'instead and let the leaf call it.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   // CLI-style verification + maintenance scripts. They print to stdout
   // for interactive use; logger's structured-JSON output would be
   // unreadable for an operator running them by hand.
@@ -284,6 +366,25 @@ export default tseslint.config(
 
       // Allow console in tests (for debugging)
       'no-console': 'off',
+
+      // Test files are exempt from the core → framework import ban. The ban
+      // exists to keep `@/lib/framework` out of the *production build graph*
+      // (a build-time specifier that would break forks without a lib/framework/
+      // folder) — test files ship in no build, and a framework's own tests must
+      // import the framework they exercise. We RESTATE the @/-alias ban (flat
+      // config replaces, not merges) so relative-import discipline survives, and
+      // drop only the framework group.
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['./*', '../*'],
+              message: 'Use the @/ path alias instead of relative imports (CLAUDE.md).',
+            },
+          ],
+        },
+      ],
 
       // Allow object literal type assertions in tests (partial mocks)
       // Reason: Tests commonly use `{} as MockType` for partial mocks of complex interfaces

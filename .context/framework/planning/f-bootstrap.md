@@ -89,12 +89,12 @@ Concrete reuse anchors found in-tree:
 
 ## Tasks (promoted)
 
-| ID  | Task                                                         | Files                                                                                         | Deps | Status   | PR  |
-| --- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------------- | ---- | -------- | --- |
-| t-0 | Fork + branding + upstream-merge procedure                   | _(history: fork, brand env, `.context/framework/README.md`, PR #4)_                           | —    | **done** | #4  |
-| t-1 | `lib/framework/` skeleton + `shared/scope.ts` + empty schema | `lib/framework/{modules,facilitation,data-slots,shared}/`, `prisma/schema/framework-*.prisma` | t-0  | done     | #6  |
-| t-2 | Boundary enforcement (X6): ESLint + CI, provably failing     | `eslint.config.mjs`, `.github/workflows/ci.yml`, `scripts/`, a deliberate-violation fixture   | t-1  | backlog  | —   |
-| t-3 | `initFramework()` wiring + boot seam + test scaffolding      | `lib/framework/index.ts`, `instrumentation.ts`, `lib/app/bootstrap.ts` (filled), `tests/`     | t-1  | backlog  | —   |
+| ID  | Task                                                         | Files                                                                                                | Deps | Status   | PR  |
+| --- | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------- | ---- | -------- | --- |
+| t-0 | Fork + branding + upstream-merge procedure                   | _(history: fork, brand env, `.context/framework/README.md`, PR #4)_                                  | —    | **done** | #4  |
+| t-1 | `lib/framework/` skeleton + `shared/scope.ts` + empty schema | `lib/framework/{modules,facilitation,data-slots,shared}/`, `prisma/schema/framework-*.prisma`        | t-0  | done     | #6  |
+| t-2 | Boundary enforcement (X6): ESLint + CI, provably failing     | `eslint.config.mjs`, `.github/workflows/ci.yml`, `scripts/boundary/`, a deliberate-violation fixture | t-1  | done     | #8  |
+| t-3 | `initFramework()` wiring + boot seam + test scaffolding      | `lib/framework/index.ts`, `instrumentation.ts`, `lib/app/bootstrap.ts` (filled), `tests/`            | t-1  | backlog  | —   |
 
 t-2 and t-3 parallelise once t-1 lands. Three real PRs (t-0 already merged) — inside the
 parent plan's `~4 PRs` estimate.
@@ -135,6 +135,18 @@ Appendix B's three mechanisms, all shipped here, all CI-verified:
   build, or asserted via an expected-error test), so a green main means the boundary genuinely bites.
 - **Done when:** all three checks run in `ci.yml` and green on a clean tree; the deliberate
   violation is provably caught.
+
+**Shipped (PR #8).** ESLint: the base `no-restricted-imports` gains a `@/lib/framework` group
+(core → framework ban); a new framework-tier block (`lib/framework/**` + reserved
+`app/**/framework/**`) restates the @/-alias ban, drops the self-ban, and adds a leaf-surface ban
+(`@/lib/app/**`) — the framework can't import its own consumer. `lib/app/**` stays exempt (leaf
+tier, the sanctioned boot bridge). **Test files are exempt from the framework-ban** (restated
+relative-only): tests ship in no build, so the build-time constraint doesn't apply, and a
+framework's own tests must import it. The two SQL-blind checks live as pure functions in
+`scripts/boundary/lib.ts` (14 unit tests on known-good/bad samples) behind `scripts/boundary/check.ts`
+(`npm run check:boundary`), which also lints the ignored fixture with `--no-ignore` and asserts the
+rule fires. Wired into the CI `lint` job (no DB needed). All four import directions verified by
+probe: core→fw FLAGGED, fw→leaf FLAGGED, leaf→fw allowed, fw→core allowed.
 
 ### t-3 · `initFramework()` wiring + test scaffolding
 
