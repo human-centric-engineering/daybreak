@@ -217,8 +217,18 @@ contributor from within `lib/framework/` via a Daybreak-owned boot hook, with th
 
 Cross-repo actions this feature owes Sunrise (per the
 [[plan#Decisions log|fork-first-informs-upstream]] model — build it correctly here, then promote
-the generic half). Tracked here so they don't get lost in prose.
+the generic part). Tracked here so they don't get lost in prose.
 
+- [ ] **Reserve the `/framework` namespaces in Sunrise** — document `lib/framework/`,
+      `.context/framework/`, and the `framework-*.prisma` / `framework_` schema+table prefix as
+      reserved for a **framework-layer fork** (like Daybreak), exactly as Sunrise #371 reserved
+      `lib/app/` + `.context/app/` for leaf forks: **Sunrise core must never create files or tables
+      there.** Generalises the convention to two reserved tiers — `/app` (leaf forks) + `/framework`
+      (framework forks) — in the same docs #371 touched (`CLAUDE.md`, `.context/substrate.md`,
+      `CUSTOMIZATION.md`). **Not gated on t-3:** it's a pure doc/convention reservation with no
+      Daybreak-code dependency, and the collision risk (a future Sunrise release squatting
+      `lib/framework/` or a `framework_` table) grows the longer Sunrise is unaware — so **file it
+      early**, ideally now. Can be its own issue or share the boot-seam issue below.
 - [ ] **File a Sunrise issue for the generic `initApp()` boot seam** — a `register()` call in
       `instrumentation.ts` invoking a reserved, empty-by-default `lib/app/bootstrap.ts`, zero
       framework vocabulary. **Trigger:** once t-3's seam is working in Daybreak, so the issue links
