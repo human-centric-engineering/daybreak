@@ -1,9 +1,9 @@
 ---
 name: Daybreak
 category: expert-led-apps framework
-status: planning
+status: in flight
 host_platform: sunrise (separate fork)
-sunrise_baseline: post-seams + open-issues cleared
+sunrise_baseline: Sunrise v0.5.0 (f-seams landed via #373)
 opened: 2026-06-23
 restructured: 2026-06-24
 renamed: 2026-06-30 (→ Daybreak)
@@ -31,17 +31,17 @@ This plan uses the Hub's levels, with each level meaning exactly what it means i
 
 ## Project
 
-| Field                   | Value                                                                                                      |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------- |
-| Name                    | **Daybreak** (the expert-led-apps framework)                                                               |
-| Active epic             | **Framework v1** (the whole build below)                                                                   |
-| Spec                    | [[framework-architecture]] rev 16 (Binding decisions in Appendix A)                                        |
-| Repo                    | _(to be created — a fork of `human-centric-engineering/sunrise`, taken after `f-seams` lands upstream)_    |
-| Placement               | Separate fork of Sunrise, **not** core ([[placement-decision-memo                                          | decision 2026-06-23]]) |
-| Relationship to Sunrise | [[building-on-sunrise]], one level up: fix-in-place → classify → promote generic upstream; Hub-coordinated |
-| First app               | Lelanea (transcendental coaching) — forks this framework repo                                              |
-| Lead                    | Simon Holmes                                                                                               |
-| Status                  | `planning` (awaiting `f-seams`)                                                                            |
+| Field                   | Value                                                                                                                       |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Name                    | **Daybreak** (the expert-led-apps framework)                                                                                |
+| Active epic             | **Framework v1** (the whole build below)                                                                                    |
+| Spec                    | [[framework-architecture]] rev 16 (Binding decisions in Appendix A)                                                         |
+| Repo                    | `human-centric-engineering/daybreak` — fork of `human-centric-engineering/sunrise` (tracking `upstream`, at Sunrise v0.5.0) |
+| Placement               | Separate fork of Sunrise, **not** core ([[placement-decision-memo                                                           | decision 2026-06-23]]) |
+| Relationship to Sunrise | [[building-on-sunrise]], one level up: fix-in-place → classify → promote generic upstream; Hub-coordinated                  |
+| First app               | Lelanea (transcendental coaching) — forks this framework repo                                                               |
+| Lead                    | Simon Holmes                                                                                                                |
+| Status                  | `in flight` — `f-seams` shipped (Sunrise v0.5.0); `f-bootstrap` next                                                        |
 
 ---
 
@@ -383,7 +383,8 @@ Append-only. Newest at the top.
 
 Append-only. Newest at the top.
 
-_Nothing shipped yet — project in `planning`. First entries will be the two `f-seams` Sunrise PRs, then the fork (`f-bootstrap`)._
+- **2026-07-02 — `f-seams` shipped, and Sunrise v0.5.0 merged into the fork.** The two generic core seams were filed as Sunrise **#372**, implemented upstream in **PR #373** (`CapabilityContext.scope?: Record<string,string>` + the `registerContextContributor()` registry on `buildContext()` + the empty fork-owned `lib/app/context-contributors.ts` scaffold), and released in **Sunrise v0.5.0**. Merged into this Daybreak fork via **PR #4** — `SUNRISE_VERSION → 0.5.0` while Daybreak's app version stays `0.1.0`; three trivial conflicts (`package.json`, `package-lock.json`, `CLAUDE.md`) resolved keeping the fork's identity + banner; no new migrations. Type-check / lint / format green, 64 seam tests pass. `f-seams` is **shipped**; `f-bootstrap` is unblocked and next.
+  - _Note on ownership:_ scoped in the plan as "2 PRs, owner Simon (Sunrise)"; delivered as us filing the Sunrise issue and upstream implementing it as a single PR — the seams are generic, so they belong to Sunrise, exactly as intended.
 
 ---
 
