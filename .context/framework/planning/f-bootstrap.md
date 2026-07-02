@@ -161,9 +161,9 @@ established the three-tier convention — so this task no longer creates it.)_
   red-flags CI. Ship the exception in t-2, don't discover it in t-3.
 - **Done when:** `initFramework()` runs at boot via the generic `initApp()` seam registering its
   (empty) contributor, with the leaf surface left empty; the contributor-count test passes; the
-  boundary CI is green (boot file whitelisted); **and the upstream Sunrise issue for the generic
-  `initApp()` boot seam is filed** (see [Upstream follow-ups](#upstream-follow-ups)) — t-3 is not
-  done until it's raised.
+  boundary CI is green (boot file whitelisted); **and the combined upstream Sunrise issue (boot seam
+  - `/framework` namespace reservation) is filed** (see [Upstream follow-ups](#upstream-follow-ups))
+    — t-3 is not done until it's raised.
 
 ## Done when (feature)
 
@@ -219,18 +219,18 @@ Cross-repo actions this feature owes Sunrise (per the
 [[plan#Decisions log|fork-first-informs-upstream]] model — build it correctly here, then promote
 the generic part). Tracked here so they don't get lost in prose.
 
-- [ ] **Reserve the `/framework` namespaces in Sunrise** — document `lib/framework/`,
-      `.context/framework/`, and the `framework-*.prisma` / `framework_` schema+table prefix as
-      reserved for a **framework-layer fork** (like Daybreak), exactly as Sunrise #371 reserved
-      `lib/app/` + `.context/app/` for leaf forks: **Sunrise core must never create files or tables
-      there.** Generalises the convention to two reserved tiers — `/app` (leaf forks) + `/framework`
-      (framework forks) — in the same docs #371 touched (`CLAUDE.md`, `.context/substrate.md`,
-      `CUSTOMIZATION.md`). **Not gated on t-3:** it's a pure doc/convention reservation with no
-      Daybreak-code dependency, and the collision risk (a future Sunrise release squatting
-      `lib/framework/` or a `framework_` table) grows the longer Sunrise is unaware — so **file it
-      early**, ideally now. Can be its own issue or share the boot-seam issue below.
-- [ ] **File a Sunrise issue for the generic `initApp()` boot seam** — a `register()` call in
-      `instrumentation.ts` invoking a reserved, empty-by-default `lib/app/bootstrap.ts`, zero
-      framework vocabulary. **Trigger:** once t-3's seam is working in Daybreak, so the issue links
-      the proven in-fork implementation (mirrors how f-seams was raised as Sunrise #372 before the
-      fork). This item **gates t-3's Done-when.** Owner: the t-3 owner.
+- [ ] **File one Sunrise issue covering both framework-tier concerns, together** (decided: bundle,
+      don't stagger). It covers:
+  1. **Reserve the `/framework` namespaces** — `lib/framework/`, `.context/framework/`, and the
+     `framework-*.prisma` / `framework_` schema+table prefix, reserved for a **framework-layer fork**
+     exactly as Sunrise #371 reserved `/app` for leaf forks: **Sunrise core must never create files
+     or tables there.** Generalises the convention to two reserved tiers — `/app` (leaf forks) +
+     `/framework` (framework forks) — in the same docs #371 touched (`CLAUDE.md`,
+     `.context/substrate.md`, `CUSTOMIZATION.md`).
+  2. **The generic `initApp()` boot seam** — a `register()` call in `instrumentation.ts` invoking a
+     reserved, empty-by-default `lib/app/bootstrap.ts`, zero framework vocabulary.
+  - **Trigger:** once t-3's boot seam is working in Daybreak, so the issue links the proven in-fork
+    implementation (as f-seams was raised as Sunrise #372). Filing the combined issue **gates t-3's
+    Done-when.** Owner: the t-3 owner. _(Accepted tradeoff: the `/framework` reservation alone isn't
+    gated on t-3 and its collision risk is mildly time-sensitive; bundling trades a small delay for
+    a single clean filing.)_
