@@ -63,18 +63,7 @@ both levels; each is filed at its primary home with a cross-reference. Mark an e
   owns/reserves what" step. **Directly relevant to the Hub**, which is itself built on Sunrise.
   _Status: open._
 
-### A3 · Indicative PR estimates must exclude already-satisfied work and be sanity-checked
-
-- **Discovery.** `f-bootstrap` was sized at ~4 PRs, but t-0 ("fork the repo + branding")
-  was **already done** — history, not work — and the remaining tasks were smaller than the
-  count implied.
-- **Impact.** Inflated the effort estimate; the `~PRs` column read as more work than existed.
-- **Feedback.** The overall-plan agent's `~PRs` / feature sizing should **exclude work already
-  satisfied by current repo state** and sanity-check counts against real changed surface, not
-  conceptual step count. Cross-ref [B1] (the feature agent must then not promote done work as
-  a task). _Status: open._
-
-### A4 · Enumerate cross-boundary seams and classify each by direction; flag core→fork ones
+### A3 · Enumerate cross-boundary seams and classify each by direction; flag core→fork ones
 
 - **Discovery.** The `f-seams` seams are **fork→core** (the fork calls _into_ a core registry —
   trivially fork-owned). The boot hook is **core→fork** (core must call _out_ to the fork) — a
@@ -88,7 +77,7 @@ both levels; each is filed at its primary home with a cross-reference. Mark an e
   upstream→downstream flow needs surfaced early, not discovered at implementation. Cross-ref
   [B3] (the feature agent then designs the mechanism). _Status: open._
 
-### A5 · Encode "gates before PR" into the working model's definition-of-done
+### A4 · Encode "gates before PR" into the working model's definition-of-done
 
 - **Discovery.** t-1's PR was opened **before** running `/pre-pr` and `/code-review`; the human
   had to prompt for them. Some gates (full test suite, DB migration-drift) belong _before_
@@ -104,17 +93,16 @@ both levels; each is filed at its primary home with a cross-reference. Mark an e
 
 ## §B — Feature-plan authoring
 
-### B1 · Sizing self-check when promoting tasks: fold slivers, drop done work
+### B1 · Sizing self-check when promoting tasks: fold commit-sized slivers
 
-- **Discovery.** `f-bootstrap.md` promoted t-0 (already done) as a task and t-1 as a
-  **commit-sized sliver** (one small file + placeholders); t-1's natural PR companion was t-2
-  (the boundary that _enforces_ the skeleton).
-- **Impact.** One PR landed too small — violating the plan's _own_ "PR not commit" rule — and a
-  non-task was tracked on the board.
+- **Discovery.** `f-bootstrap.md` promoted t-1 as its own task, but t-1 turned out
+  **commit-sized** (one small real file + placeholders + empty schema); its natural PR companion
+  was t-2 (the boundary that _enforces_ the skeleton it creates).
+- **Impact.** One PR landed too small — below the plan's _own_ "PR not commit" resolution.
+  _(Not about "done work" — the other tasks were correctly sized; this is purely the sliver.)_
 - **Feedback.** When promoting indicative tasks to real ones, the feature-plan agent must run a
-  **sizing self-check**: mark already-satisfied work `done (history)`, and if a task's only real
-  content is scaffolding + one small file, **fold it into its dependent task**. Size by real
-  changed surface. Cross-ref [A3]. _Status: open._
+  **sizing self-check**: if a task's only real content is scaffolding + one small file, **fold it
+  into its dependent task** and size by real changed surface. _Status: open._
 
 ### B2 · Start every feature plan with a "reconcile spec vs current repo reality" section — it worked
 
@@ -133,13 +121,13 @@ both levels; each is filed at its primary home with a cross-reference. Mark an e
   discovering the build-time constraint (core can't even _name_ `@/lib/framework`, or Sunrise/
   ConQuest fail to build).
 - **Impact.** Real design depth that only emerged during feature planning.
-- **Feedback.** When a feature implements a seam the overall plan flagged **core→fork** ([A4]),
+- **Feedback.** When a feature implements a seam the overall plan flagged **core→fork** ([A3]),
   the feature-plan agent must **design the generic mechanism and record its build-time/merge
   constraints as open questions** to resolve before coding — not leave "how does core reach the
   fork" implicit. _Status: open._
 
 ### B4 · Put the gates in each task's Done-when
 
-- **Feedback.** Mirror [A5] at task granularity: each promoted task's **"Done when"** should list
+- **Feedback.** Mirror [A4] at task granularity: each promoted task's **"Done when"** should list
   the standard gates (`/pre-pr`, then `/code-review`, green) as explicit completion criteria, so
   "task complete" provably includes them. _Status: open._
