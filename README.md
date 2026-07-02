@@ -12,7 +12,8 @@ layer — and builds a purpose-built framework on top of it.
 > rather than edited in place, so upgrades stay clean merges. If you're working
 > in this repo, start with the fork banner in [`CLAUDE.md`](./CLAUDE.md) and the
 > full guide in [`CUSTOMIZATION.md`](./CUSTOMIZATION.md) /
-> [`.context/app/README.md`](./.context/app/README.md).
+> [`.context/framework/README.md`](./.context/framework/README.md) (the three-tier
+> model — apps fork Daybreak, so `.context/app/` and `lib/app/*` are reserved for them).
 
 ## Foundation (inherited from Sunrise)
 
