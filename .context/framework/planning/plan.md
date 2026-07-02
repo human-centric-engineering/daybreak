@@ -395,7 +395,7 @@ Append-only. Newest at the top.
 
 ## References
 
-- [[planning-retro]] — feedback about the **plan-authoring process itself**, discovered while executing this plan; to fold back into the agent instructions that generate plans like this one.
+- [[planning-retro]] — feedback about the **plan-authoring process itself**, discovered while executing this plan, split by target: **§A overall-plan authoring** (the priority — it feeds the HCE Hub's plan-authoring process) and **§B feature-plan authoring**. To fold back into the agent instructions that generate plans like this one.
 - [[framework-architecture]] — the authoritative design spec (rev 16). Binding decisions in Appendix A.
 - [[placement-decision-memo]] — why the framework lives on a separate fork.
 - [[v1-requirements|HCE Hub v1 requirements]] — the Project → Phase(epic) → Feature → Task model this plan mirrors.
