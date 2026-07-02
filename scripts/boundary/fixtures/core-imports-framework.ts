@@ -15,9 +15,8 @@
  * is the point.
  */
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars -- import presence is the test
 import { encodeScope } from '@/lib/framework/shared/scope';
 
-// Reference the symbol so the sole reported problem is the boundary violation,
-// not an unused import (belt-and-suspenders alongside the disable above).
+// Re-export the symbol so the import is used — the sole reported problem is then
+// the boundary violation, not an unused import.
 export const _deliberateViolation = encodeScope;

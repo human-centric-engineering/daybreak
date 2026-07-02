@@ -19,7 +19,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 import { logger } from '@/lib/logging';
@@ -143,7 +143,8 @@ function readMigrations(): MigrationFile[] {
     if (!e.isDirectory()) continue;
     const sqlPath = path.join(ROOT, migrationsDir, e.name, 'migration.sql');
     try {
-      if (!statSync(sqlPath).isFile()) continue;
+      // readFileSync throws (and is caught below) if there is no migration.sql
+      // or it's a directory — no separate statSync guard needed.
       files.push({ name: e.name, sql: readFileSync(sqlPath, 'utf8') });
     } catch {
       // no migration.sql in this folder — skip

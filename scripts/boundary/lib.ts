@@ -56,17 +56,33 @@ export function isFrameworkMigration(name: string): boolean {
  * core". Hygiene is about DDL ownership, not the FK graph.
  *
  * Handles: optional `IF [NOT] EXISTS`, `ALTER TABLE ONLY`, an optional
- * (quoted or bare) `schema.` qualifier, and optional double-quotes. SQL comments
- * are stripped first so DDL-looking text inside them can't manufacture phantom
- * tables. The index match is anchored to `CREATE … INDEX … ON` so it can never
- * mistake an `ON DELETE` / `ON UPDATE` / `ON CONFLICT` action clause for a table.
+ * (quoted or bare) `schema.` qualifier, and optional double-quotes. Comments,
+ * string literals, and `$tag$…$tag$` dollar-quoted bodies are stripped first so
+ * DDL-looking text inside them (a `'CREATE TABLE …'` default, an RLS `DO $$…$$`
+ * block) can neither manufacture a phantom table nor hide a real one. The index
+ * match is anchored to `CREATE … INDEX … ON` and cannot cross a `;`, so it never
+ * mistakes an `ON DELETE` / `ON UPDATE` / `ON CONFLICT` action clause for a table.
  * Lower-cased, de-duplicated.
+ *
+ * Static analysis has one documented blind spot: DDL executed *dynamically*
+ * inside a stripped `DO $$…$$` block is invisible here (as it is to any static
+ * scanner) — acceptable, since the alternative is false positives on quoted text.
  */
 export function extractTables(sql: string): string[] {
   const tables = new Set<string>();
 
-  // Strip `-- line` and `/* block */` comments first.
-  const cleaned = sql.replace(/--[^\n]*/g, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ');
+  // Strip, in a single left-to-right pass, every span whose contents must not be
+  // read as SQL: block comments, line comments, single-quoted string literals
+  // (with `''` escaping), and dollar-quoted bodies (`$$…$$` or `$tag$…$tag$`).
+  // One alternation (not sequential replaces) is essential: sequential `--` then
+  // `/* */` stripping lets a `/* … -- … */` comment eat its own terminator and
+  // swallow the DDL that follows. The engine scans by position, so whichever
+  // construct opens first wins — e.g. a `--` inside a block comment is consumed
+  // as part of the block, never as a separate line comment.
+  const cleaned = sql.replace(
+    /\/\*[\s\S]*?\*\/|--[^\n]*|'(?:[^']|'')*'|\$([A-Za-z_]*)\$[\s\S]*?\$\1\$/g,
+    ' '
+  );
 
   // An (optionally schema-qualified) table identifier — quoted or bare, on the
   // qualifier as well as the name. Captures the final name segment.
@@ -78,9 +94,10 @@ export function extractTables(sql: string): string[] {
       `(?:CREATE|ALTER|DROP)\\s+TABLE\\s+(?:ONLY\\s+)?(?:IF\\s+(?:NOT\\s+)?EXISTS\\s+)?${ident}`,
       'gi'
     ),
-    // CREATE [UNIQUE] INDEX … ON <table> — anchored to the index statement so
-    // `ON DELETE` / `ON UPDATE` / `ON CONFLICT` action clauses never match.
-    new RegExp(`CREATE\\s+(?:UNIQUE\\s+)?INDEX\\b[\\s\\S]*?\\sON\\s+${ident}`, 'gi'),
+    // CREATE [UNIQUE] INDEX … ON <table> — anchored to the index statement, and
+    // `[^;]*?` (not `[\s\S]*?`) so a malformed ON-less index can't skip across a
+    // `;` into a later `ON DELETE` clause and capture the action keyword.
+    new RegExp(`CREATE\\s+(?:UNIQUE\\s+)?INDEX\\b[^;]*?\\sON\\s+${ident}`, 'gi'),
   ];
 
   for (const re of patterns) {
@@ -150,9 +167,21 @@ export interface SourceFile {
 }
 
 /**
- * Scan core source files for any framework-coined identifier. Matches on a
- * word boundary so `moduleId` does not match `submoduleIdentifier`, and returns
- * one hit per (file, token, line).
+ * Blank out `//` line comments and C-style block comments, replacing every
+ * non-newline character with a space so line numbers are preserved. Prose that
+ * merely *mentions* a framework term (`// maps to the framework moduleId`) must
+ * not read as a leak — this makes the vocab scan consistent with `extractTables`,
+ * which also ignores comments. String literals are left in place: a framework
+ * identifier appearing in a core string is itself worth flagging.
+ */
+function blankComments(content: string): string {
+  return content.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, (m) => m.replace(/[^\n]/g, ' '));
+}
+
+/**
+ * Scan core source files for any framework-coined identifier. Comments are
+ * blanked first (see `blankComments`). Matches on a word boundary so `moduleId`
+ * does not match `submoduleIdentifier`, and returns one hit per (file, token, line).
  */
 export function scanForFrameworkVocab(
   files: SourceFile[],
@@ -165,7 +194,7 @@ export function scanForFrameworkVocab(
   }));
 
   for (const { path, content } of files) {
-    const lines = content.split('\n');
+    const lines = blankComments(content).split('\n');
     lines.forEach((text, i) => {
       for (const { token, re } of matchers) {
         if (re.test(text)) hits.push({ path, token, line: i + 1 });

@@ -68,6 +68,32 @@ describe('extractTables', () => {
     expect(extractTables(sql)).toEqual(['ai_agent']);
   });
 
+  it('does not let a block comment containing "--" swallow following DDL', () => {
+    // Sequential --then-/* stripping would eat the `*/` and drop the CREATE.
+    const sql = `/* note -- todo */ CREATE TABLE "framework_real" ("id" TEXT);`;
+    expect(extractTables(sql)).toEqual(['framework_real']);
+  });
+
+  it('ignores DDL-looking text inside string literals', () => {
+    const sql = `INSERT INTO "framework_flags" ("v") VALUES ('CREATE TABLE "User"');`;
+    // No phantom "user" from the string literal (and INSERT is not DDL ownership).
+    expect(extractTables(sql)).toEqual([]);
+  });
+
+  it('ignores DDL inside a dollar-quoted body (RLS DO block)', () => {
+    const sql = `DO $$ BEGIN CREATE TABLE ghost (); END $$;
+      ALTER TABLE "framework_slot" ENABLE ROW LEVEL SECURITY;`;
+    expect(extractTables(sql)).toEqual(['framework_slot']);
+  });
+
+  it('does not cross a statement boundary from an ON-less CREATE INDEX', () => {
+    const sql = `CREATE INDEX "idx";
+      ALTER TABLE "framework_slot" ADD CONSTRAINT c
+        FOREIGN KEY ("userId") REFERENCES "user"("id") ON DELETE CASCADE;`;
+    // Never captures "delete" from the ALTER's ON DELETE clause.
+    expect(extractTables(sql)).toEqual(['framework_slot']);
+  });
+
   it('handles ALTER TABLE ONLY', () => {
     expect(
       extractTables(`ALTER TABLE ONLY "framework_slot" ADD CONSTRAINT c CHECK (true);`)
@@ -155,6 +181,23 @@ describe('scanForFrameworkVocab', () => {
       { path: 'lib/orchestration/capability.ts', content: 'scope?: Record<string, string>;' },
     ]);
     expect(hits).toEqual([]);
+  });
+
+  it('does NOT flag a framework term that only appears in a comment', () => {
+    // Prose mentioning a framework term must not read as a leak (consistent with
+    // extractTables ignoring comments).
+    const hits = scanForFrameworkVocab([
+      { path: 'lib/a.ts', content: '// this maps to the framework moduleId\nconst x = 1;' },
+      { path: 'lib/b.ts', content: '/* nodeKey lives on the framework side */\nexport {};' },
+    ]);
+    expect(hits).toEqual([]);
+  });
+
+  it('still flags a framework term used in code even with a nearby comment', () => {
+    const hits = scanForFrameworkVocab([
+      { path: 'lib/c.ts', content: '// ok\ninterface Ctx {\n  moduleId: string;\n}' },
+    ]);
+    expect(hits).toEqual([{ path: 'lib/c.ts', token: 'moduleId', line: 3 }]);
   });
 
   it('respects word boundaries (no partial-token matches)', () => {
