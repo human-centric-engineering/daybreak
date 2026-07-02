@@ -1,10 +1,16 @@
 /**
  * Next.js instrumentation hook.
  *
- * Runs once per server process on startup. We use it to drive an
- * in-process maintenance ticker in **development only**.
+ * Runs once per server process on startup. Two responsibilities:
  *
- * Why dev-only:
+ *   1. The generic **app boot seam**: call `initApp()` from `lib/app/bootstrap.ts`
+ *      in every environment (production + development, nodejs runtime). Sunrise
+ *      ships that file empty; a fork fills it (Daybreak boots its framework tier
+ *      there). Core carries no reference to the fork's internals — the seam is a
+ *      plain call, so an upstream that has no framework folder still builds.
+ *   2. An in-process maintenance ticker in **development only** (below).
+ *
+ * Why the ticker is dev-only:
  *   - Production deployments run the maintenance tick via an external
  *     cron (see `.context/orchestration/scheduling.md`). The cron is
  *     authoritative and survives serverless cold starts.
@@ -21,6 +27,25 @@
 
 export async function register(): Promise<void> {
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
+
+  // (1) Generic app boot seam — runs in ALL environments, before the dev-only
+  // ticker. A fork fills lib/app/bootstrap.ts; Sunrise ships it empty. Kept as a
+  // bare seam call so core never references the fork's framework code.
+  //
+  // Isolated in try/catch: a fork's boot step must not crash instrumentation or
+  // prevent the dev ticker below from arming. The seam call is defensive by
+  // construction — core does not rely on the fork's initApp being well-behaved.
+  try {
+    const { initApp } = await import('@/lib/app/bootstrap');
+    await initApp();
+  } catch (err) {
+    const { logger } = await import('@/lib/logging');
+    logger.error('instrumentation: app boot seam (initApp) failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  // (2) Dev-only maintenance ticker (production runs the tick via external cron).
   if (process.env.NODE_ENV !== 'development') return;
   if (process.env.SUNRISE_DISABLE_DEV_TICK === '1') return;
 

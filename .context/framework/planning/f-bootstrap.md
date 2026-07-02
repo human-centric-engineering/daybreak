@@ -94,7 +94,7 @@ Concrete reuse anchors found in-tree:
 | t-0 | Fork + branding + upstream-merge procedure                   | _(history: fork, brand env, `.context/framework/README.md`, PR #4)_                                                         | —    | **done** | #4  |
 | t-1 | `lib/framework/` skeleton + `shared/scope.ts` + empty schema | `lib/framework/{modules,facilitation,data-slots,shared}/`, `prisma/schema/framework-*.prisma`                               | t-0  | done     | #6  |
 | t-2 | Boundary enforcement (X6): ESLint + CI, provably failing     | `lib/{framework,app}/eslint.config.mjs` (seams), `eslint.config.mjs`/`ci.yml` (spread + hook), `scripts/boundary/`, fixture | t-1  | done     | #8  |
-| t-3 | `initFramework()` wiring + boot seam + test scaffolding      | `lib/framework/index.ts`, `instrumentation.ts`, `lib/app/bootstrap.ts` (filled), `tests/`                                   | t-1  | backlog  | —   |
+| t-3 | `initFramework()` wiring + boot seam + test scaffolding      | `lib/framework/{index,modules/context}.ts`, `instrumentation.ts`, `lib/app/{bootstrap,leaf-bootstrap}.ts`, `tests/`         | t-1  | done     | #9  |
 
 t-2 and t-3 parallelise once t-1 lands. Three real PRs (t-0 already merged) — inside the
 parent plan's `~4 PRs` estimate.
@@ -182,6 +182,42 @@ established the three-tier convention — so this task no longer creates it.)_
 - **t-2 ↔ t-3 coupling:** the `instrumentation.ts` → `lib/app/bootstrap.ts` → `lib/framework` path
   is the single sanctioned core→framework import; **t-2's boundary rule must whitelist it** or t-3
   red-flags CI. Ship the exception in t-2, don't discover it in t-3.
+
+**Shipped (PR #9).** `lib/framework/index.ts` exports `initFramework()`, which registers one scaffold
+contributor — the `"module"` prompt-context loader (`lib/framework/modules/context.ts`; returns a
+clear "not available yet" body until `f-module-core`, like core's `pattern`-not-found case) — via the
+`f-seams` `registerContextContributor()`, from **within `lib/framework/`** (the leaf
+`lib/app/context-contributors.ts` stays empty). Boot seam, built as the final generic shape: core's
+`instrumentation.ts` calls `initApp()` from `lib/app/bootstrap.ts` **before** the dev-only ticker
+guards (so it runs in prod too, nodejs runtime); Daybreak's _filled_ `bootstrap.ts` **dynamically**
+`import('@/lib/framework')` → `initFramework()`, then awaits a reserved-empty
+`lib/app/leaf-bootstrap.ts` (`initLeafApp()`). Core holds **no** `@/lib/framework` reference —
+`instrumentation.ts` imports only `@/lib/app/bootstrap`; the framework specifier lives solely in the
+fork-owned bridge, dynamic so `next build` never resolves it in a framework-less fork.
+
+**Resilience (two isolation layers, from code review):** `initApp()` is wrapped in try/catch in
+`instrumentation.ts` so any fork boot failure is logged and can't stop the dev ticker arming; and
+inside `bootstrap.ts`, framework init is try/caught so a framework failure still lets the leaf hook
+run and core degrade gracefully. Tests (3 files): unit `initFramework` (asserts it registers exactly
+the module contributor), unit `initApp` orchestration + the resilience path (framework throw →
+logged, not rethrown, leaf still runs), and an **integration** boot test (real
+initApp→framework→`buildContext` chain). Boundary CI green — `instrumentation.ts` provably does not
+leak `@/lib/framework`.
+
+**Altitude note (reviewed & accepted).** The eager boot seam is built slightly ahead of need — today's
+only registration (a chat context contributor) is lazy-compatible — but it is the right call: the
+core→fork boot seam is the hard-to-retrofit inverted seam (retrofitting means editing a Sunrise-owned
+file = merge conflict), and the near-term trajectory (`f-module-core`'s modules bind agents / workflows
+/ capabilities — surfaces consulted by **non-chat** entrypoints: admin capability lists, the workflow
+step registry, the scheduler tick) needs eager boot-time registration a lazy-on-first-chat hook can't
+serve. Same "establish the seam in Phase 1, not later" charter as the boundary.
+
+**Upstream:** the boot-seam + `/framework`-namespace issue is filed as
+[Sunrise #385](https://github.com/human-centric-engineering/sunrise/issues/385) (the completing act of
+t-3) — it carries the fork-perspective learnings (placement, build-time constraint, resilience guard,
+three-tier delegation) and links PR #9 as the reference. The Sunrise-side agent implements the upstream
+PR. See also the lightweight-registration follow-up below (referenced as Related in #385).
+
 - **Done when:** `initFramework()` runs at boot via the generic `initApp()` seam registering its
   (empty) contributor, with the leaf surface left empty; the contributor-count test passes; the
   boundary CI is green (boot file whitelisted); **and the combined upstream Sunrise issue (boot seam
@@ -242,8 +278,7 @@ Cross-repo actions this feature owes Sunrise (per the
 [[plan#Decisions log|fork-first-informs-upstream]] model — build it correctly here, then promote
 the generic part). Tracked here so they don't get lost in prose.
 
-- [ ] **File one Sunrise issue covering both framework-tier concerns, together** (decided: bundle,
-      don't stagger). It covers:
+- [x] **File one Sunrise issue covering both framework-tier concerns — [Sunrise #385](https://github.com/human-centric-engineering/sunrise/issues/385)** (filed 2026-07-02 as the completing act of t-3, per the design: raise it _during_ t-3 so it's informed by the fork build). It covers:
   1. **Reserve the `/framework` namespaces** — `lib/framework/`, `.context/framework/`, and the
      `framework-*.prisma` / `framework_` schema+table prefix, reserved for a **framework-layer fork**
      exactly as Sunrise #371 reserved `/app` for leaf forks: **Sunrise core must never create files
@@ -252,11 +287,24 @@ the generic part). Tracked here so they don't get lost in prose.
      `.context/substrate.md`, `CUSTOMIZATION.md`).
   2. **The generic `initApp()` boot seam** — a `register()` call in `instrumentation.ts` invoking a
      reserved, empty-by-default `lib/app/bootstrap.ts`, zero framework vocabulary.
-  - **Trigger:** once t-3's boot seam is working in Daybreak, so the issue links the proven in-fork
-    implementation (as f-seams was raised as Sunrise #372). Filing the combined issue **gates t-3's
-    Done-when.** Owner: the t-3 owner. _(Accepted tradeoff: the `/framework` reservation alone isn't
-    gated on t-3 and its collision risk is mildly time-sensitive; bundling trades a small delay for
-    a single clean filing.)_
+  - **Fork-perspective learnings captured in the issue** (the reason to file _after_ building, not
+    before): seam placement outside the dev-only guards; the build-time constraint (core carries no
+    `@/lib/framework` reference — dynamic import only, in the fork-filled bridge); the resilience guard
+    (`try/catch` around `initApp()` so a fork boot failure can't crash instrumentation or the ticker);
+    the empty default; and the three-tier delegation to a reserved leaf hook. Reference: PR #9.
+  - **Division of labour:** _we_ (the fork) file the issue with the proven reference — done. The
+    **Sunrise-side agent implements** the upstream PR. Filing does not gate implementation.
+
+- [ ] **Propose a lightweight context-contributor registration entry in Sunrise** (surfaced by t-3
+      code review, low priority). `initFramework()` imports `registerContextContributor` from
+      `@/lib/orchestration/chat/context-builder`, whose module graph transitively pulls
+      `knowledge/search → @/lib/db/client` (which constructs `Pool` + `PrismaClient` at module scope).
+      So the boot seam eagerly loads the prisma/pg graph on every cold start — origin/main's prod
+      `register()` was a no-op and avoided it. Magnitude is **negligible** (construction, not
+      connection; any DB-touching request loads the same graph anyway — it only front-loads module eval
+      by ms), so **no fork-side change**. But a small Sunrise seam — expose `registerContextContributor`
+      (and peers) from a tiny module that doesn't drag `knowledge/search` — would let a fork register at
+      boot without the heavy import. For the Sunrise agent to weigh alongside the boot-seam issue.
 
 - [x] **Extension seams for fork-added ESLint rules + CI checks — [Sunrise #382](https://github.com/human-centric-engineering/sunrise/issues/382)** (filed 2026-07-02, surfaced by t-2; **built fork-first in t-2**).
       Proposes two seams, both now **implemented in Daybreak as the final generic shape** (per
