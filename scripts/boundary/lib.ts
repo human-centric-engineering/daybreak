@@ -44,24 +44,48 @@ export function isFrameworkMigration(name: string): boolean {
 }
 
 /**
- * Extract every table identifier a migration's SQL touches via DDL. Heuristic
- * but deliberately broad: CREATE/ALTER/DROP TABLE and CREATE [UNIQUE] INDEX …
- * ON …, with optional `IF [NOT] EXISTS`, optional `"schema".` qualifier, and
- * optional double-quotes. Lower-cased, de-duplicated.
+ * Extract every table a migration's SQL structurally OWNS or MODIFIES — the
+ * targets of CREATE / ALTER / DROP TABLE and CREATE [UNIQUE] INDEX … ON …. This
+ * is the ownership signal migration hygiene keys on: which tables' *structure*
+ * this migration touches.
+ *
+ * Deliberately NOT extracted: foreign-key `REFERENCES <table>` targets. A
+ * framework table legitimately references a core table (e.g.
+ * `framework_module.userId → "User"`) — the framework tier is built ON core, so
+ * a framework→core FK is allowed and must not read as "this migration modifies
+ * core". Hygiene is about DDL ownership, not the FK graph.
+ *
+ * Handles: optional `IF [NOT] EXISTS`, `ALTER TABLE ONLY`, an optional
+ * (quoted or bare) `schema.` qualifier, and optional double-quotes. SQL comments
+ * are stripped first so DDL-looking text inside them can't manufacture phantom
+ * tables. The index match is anchored to `CREATE … INDEX … ON` so it can never
+ * mistake an `ON DELETE` / `ON UPDATE` / `ON CONFLICT` action clause for a table.
+ * Lower-cased, de-duplicated.
  */
 export function extractTables(sql: string): string[] {
   const tables = new Set<string>();
-  const ident = '(?:"[^"]+"\\.)?"?([a-zA-Z_][a-zA-Z0-9_]*)"?';
 
-  const tableDdl = new RegExp(
-    `(?:CREATE|ALTER|DROP)\\s+TABLE\\s+(?:IF\\s+(?:NOT\\s+)?EXISTS\\s+)?${ident}`,
-    'gi'
-  );
-  const indexDdl = new RegExp(`\\bON\\s+${ident}`, 'gi');
+  // Strip `-- line` and `/* block */` comments first.
+  const cleaned = sql.replace(/--[^\n]*/g, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ');
 
-  for (const re of [tableDdl, indexDdl]) {
+  // An (optionally schema-qualified) table identifier — quoted or bare, on the
+  // qualifier as well as the name. Captures the final name segment.
+  const ident = '(?:(?:"[^"]+"|[A-Za-z_][A-Za-z0-9_]*)\\.)?"?([A-Za-z_][A-Za-z0-9_]*)"?';
+
+  const patterns = [
+    // CREATE / ALTER / DROP TABLE [ONLY] [IF [NOT] EXISTS] <table>
+    new RegExp(
+      `(?:CREATE|ALTER|DROP)\\s+TABLE\\s+(?:ONLY\\s+)?(?:IF\\s+(?:NOT\\s+)?EXISTS\\s+)?${ident}`,
+      'gi'
+    ),
+    // CREATE [UNIQUE] INDEX … ON <table> — anchored to the index statement so
+    // `ON DELETE` / `ON UPDATE` / `ON CONFLICT` action clauses never match.
+    new RegExp(`CREATE\\s+(?:UNIQUE\\s+)?INDEX\\b[\\s\\S]*?\\sON\\s+${ident}`, 'gi'),
+  ];
+
+  for (const re of patterns) {
     let m: RegExpExecArray | null;
-    while ((m = re.exec(sql)) !== null) {
+    while ((m = re.exec(cleaned)) !== null) {
       if (m[1]) tables.add(m[1].toLowerCase());
     }
   }

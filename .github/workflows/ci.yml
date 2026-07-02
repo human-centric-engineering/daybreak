@@ -159,7 +159,7 @@ jobs:
       # No DB needed — pure file + eslint scan, so it lives in the lint job.
       - name: Framework boundary (code changes only)
         if: needs.config.outputs.code == 'true'
-        run: npm run check:boundary
+        run: npm run framework:boundary
       - run: npm run format:check
 
   build:

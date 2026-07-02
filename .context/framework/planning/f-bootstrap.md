@@ -143,10 +143,13 @@ Appendix B's three mechanisms, all shipped here, all CI-verified:
 tier, the sanctioned boot bridge). **Test files are exempt from the framework-ban** (restated
 relative-only): tests ship in no build, so the build-time constraint doesn't apply, and a
 framework's own tests must import it. The two SQL-blind checks live as pure functions in
-`scripts/boundary/lib.ts` (14 unit tests on known-good/bad samples) behind `scripts/boundary/check.ts`
-(`npm run check:boundary`), which also lints the ignored fixture with `--no-ignore` and asserts the
-rule fires. Wired into the CI `lint` job (no DB needed). All four import directions verified by
-probe: core→fw FLAGGED, fw→leaf FLAGGED, leaf→fw allowed, fw→core allowed.
+`scripts/boundary/lib.ts` (unit-tested on known-good/bad samples, incl. FK `ON DELETE`/comment
+false-positive guards) behind `scripts/boundary/check.ts` (`npm run framework:boundary` — namespaced
+per CUSTOMIZATION.md §7), which also lints the ignored fixture with `--no-ignore` and asserts the rule
+fires. Wired into the CI `lint` job (no DB needed). All four import directions verified by probe:
+core→fw FLAGGED, fw→leaf FLAGGED, leaf→fw allowed, fw→core allowed. Migration hygiene keys on
+structural DDL ownership (CREATE/ALTER/DROP/INDEX), _not_ FK targets — a framework→core FK
+(`framework_module.userId → User`) is legitimate and must not flag.
 
 ### t-3 · `initFramework()` wiring + test scaffolding
 

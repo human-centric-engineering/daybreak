@@ -13,7 +13,9 @@
  * the filesystem + ESLint I/O. It needs no database, so CI runs it in the lint
  * job. Exits 0 when all three hold.
  *
- * Usage: `npm run check:boundary`
+ * Usage: `npm run framework:boundary` (namespaced under the framework tier, per
+ * CUSTOMIZATION.md §7 — the leaf `app:*` and platform-unprefixed script names are
+ * reserved for other tiers).
  */
 
 import { execFileSync } from 'node:child_process';
@@ -30,6 +32,8 @@ import {
 
 const ROOT = process.cwd();
 const FIXTURE = 'scripts/boundary/fixtures/core-imports-framework.ts';
+// `npx` is `npx.cmd` on Windows; execFileSync (no shell) needs the exact name.
+const NPX = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 
 // ── 1. ESLint import-boundary assertion ─────────────────────────────────────
 
@@ -50,7 +54,7 @@ function assertEslintBoundary(): boolean {
   let raw: string;
   try {
     // Exits 0 when clean — which for this fixture means the boundary is BROKEN.
-    raw = execFileSync('npx', ['eslint', '--no-ignore', '-f', 'json', FIXTURE], {
+    raw = execFileSync(NPX, ['eslint', '--no-ignore', '-f', 'json', FIXTURE], {
       cwd: ROOT,
       encoding: 'utf8',
     });
@@ -75,9 +79,15 @@ function assertEslintBoundary(): boolean {
     return false;
   }
 
+  // Match either ruleId variant: the ban lives on base `no-restricted-imports`
+  // today, but `lib/app/**` uses the `@typescript-eslint/` variant, so a future
+  // unification of the framework ban onto that variant must not read as decay.
   const caught = results.some((r) =>
     r.messages.some(
-      (m) => m.ruleId === 'no-restricted-imports' && m.message.includes('@/lib/framework')
+      (m) =>
+        (m.ruleId === 'no-restricted-imports' ||
+          m.ruleId === '@typescript-eslint/no-restricted-imports') &&
+        m.message.includes('@/lib/framework')
     )
   );
 
@@ -105,7 +115,9 @@ function walk(dir: string, exts: string[]): string[] {
     return out; // directory doesn't exist (e.g. reserved-but-empty surface)
   }
   for (const e of entries) {
-    const rel = path.join(dir, e.name);
+    // Always forward-slash: `isCoreSource` and its callers match on `/`-joined
+    // prefixes, but path.join yields `\` on Windows.
+    const rel = `${dir}/${e.name}`;
     if (e.isDirectory()) {
       if (IGNORED_DIRS.has(e.name)) continue;
       out.push(...walk(rel, exts));

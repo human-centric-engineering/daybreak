@@ -38,9 +38,40 @@ describe('extractTables', () => {
     expect(extractTables(sql)).toContain('framework_slot');
   });
 
-  it('handles schema-qualified identifiers', () => {
-    const sql = `CREATE TABLE "public"."framework_map" ("id" TEXT);`;
-    expect(extractTables(sql)).toEqual(['framework_map']);
+  it('handles schema-qualified identifiers (quoted and bare)', () => {
+    expect(extractTables(`CREATE TABLE "public"."framework_map" ("id" TEXT);`)).toEqual([
+      'framework_map',
+    ]);
+    expect(extractTables(`CREATE TABLE public.framework_map ("id" TEXT);`)).toEqual([
+      'framework_map',
+    ]);
+  });
+
+  it('does NOT capture ON DELETE / ON UPDATE / ON CONFLICT action clauses as tables', () => {
+    // Prisma emits this for every FK; CLAUDE.md mandates an onDelete policy.
+    const sql = `ALTER TABLE "framework_module"
+      ADD CONSTRAINT "fk" FOREIGN KEY ("userId") REFERENCES "user"("id")
+      ON DELETE CASCADE ON UPDATE CASCADE;`;
+    // Only the altered table — never "user" (a REFERENCES target), "delete", or "cascade".
+    expect(extractTables(sql)).toEqual(['framework_module']);
+  });
+
+  it('anchors index extraction to CREATE INDEX (ON <table>), ignoring FK ON clauses', () => {
+    const sql = `CREATE INDEX "idx_m" ON "framework_module" ("moduleSlug");`;
+    expect(extractTables(sql)).toEqual(['framework_module']);
+  });
+
+  it('strips SQL comments before extracting', () => {
+    const sql = `-- DROP TABLE framework_legacy (done in a previous migration)
+      /* CREATE TABLE framework_ghost (...) */
+      ALTER TABLE "ai_agent" ADD COLUMN "x" TEXT;`;
+    expect(extractTables(sql)).toEqual(['ai_agent']);
+  });
+
+  it('handles ALTER TABLE ONLY', () => {
+    expect(
+      extractTables(`ALTER TABLE ONLY "framework_slot" ADD CONSTRAINT c CHECK (true);`)
+    ).toEqual(['framework_slot']);
   });
 });
 
@@ -84,6 +115,26 @@ describe('checkMigrationHygiene', () => {
     expect(violations).toHaveLength(1);
     expect(violations[0]?.tables).toEqual(['framework_slot']);
     expect(violations[0]?.reason).toMatch(/framework_ tables/);
+  });
+
+  it('does NOT flag a framework migration whose table has an FK to a core table', () => {
+    // framework → core FKs are legitimate (framework is built on core). Hygiene
+    // keys on structural DDL ownership, not FK targets.
+    const violations = checkMigrationHygiene([
+      {
+        name: '20260702120000_framework_add_modules',
+        sql: `CREATE TABLE "framework_module" (
+                "id" TEXT NOT NULL,
+                "userId" TEXT NOT NULL,
+                CONSTRAINT "framework_module_pkey" PRIMARY KEY ("id")
+              );
+              ALTER TABLE "framework_module"
+                ADD CONSTRAINT "framework_module_userId_fkey"
+                FOREIGN KEY ("userId") REFERENCES "User"("id")
+                ON DELETE CASCADE ON UPDATE CASCADE;`,
+      },
+    ]);
+    expect(violations).toEqual([]);
   });
 
   it('returns no violations for an empty migration set', () => {

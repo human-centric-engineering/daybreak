@@ -299,11 +299,19 @@ export default tseslint.config(
   // `app/admin/framework/**` and `app/api/v1/admin/framework/**` are reserved
   // now (empty until later features) so the framework's future admin UI/routes
   // are governed as framework tier from day one, not retrofitted.
+  //
+  // The framework's OWN test files (`tests/**/lib/framework/**`) are included so
+  // they are treated as framework tier too: a framework test must import the
+  // framework it exercises (`@/lib/framework/...`), which the base core → framework
+  // ban would otherwise flag. Scoping the exemption here — rather than loosening
+  // the global test-override block — keeps it precise and avoids re-enabling the
+  // base rule for `lib/app/**` tests (which would double-report relative imports).
   {
     files: [
       'lib/framework/**/*.{ts,tsx}',
       'app/admin/framework/**/*.{ts,tsx}',
       'app/api/v1/admin/framework/**/*.{ts,tsx}',
+      'tests/**/lib/framework/**/*.{ts,tsx}',
     ],
     rules: {
       'no-restricted-imports': [
@@ -366,25 +374,6 @@ export default tseslint.config(
 
       // Allow console in tests (for debugging)
       'no-console': 'off',
-
-      // Test files are exempt from the core → framework import ban. The ban
-      // exists to keep `@/lib/framework` out of the *production build graph*
-      // (a build-time specifier that would break forks without a lib/framework/
-      // folder) — test files ship in no build, and a framework's own tests must
-      // import the framework they exercise. We RESTATE the @/-alias ban (flat
-      // config replaces, not merges) so relative-import discipline survives, and
-      // drop only the framework group.
-      'no-restricted-imports': [
-        'error',
-        {
-          patterns: [
-            {
-              group: ['./*', '../*'],
-              message: 'Use the @/ path alias instead of relative imports (CLAUDE.md).',
-            },
-          ],
-        },
-      ],
 
       // Allow object literal type assertions in tests (partial mocks)
       // Reason: Tests commonly use `{} as MockType` for partial mocks of complex interfaces
