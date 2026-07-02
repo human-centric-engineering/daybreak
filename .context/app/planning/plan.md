@@ -125,7 +125,7 @@ _Done when:_ both merged to Sunrise `main`; vanilla behaviour unchanged.
 
 ### 02 · `f-bootstrap` — fork + skeleton + boundary
 
-_Owner:_ TBD · _Depends on:_ f-seams · _~4 PRs_
+_Owner:_ TBD · _Depends on:_ f-seams · _~4 PRs_ · **detailed plan: [[f-bootstrap]]**
 
 The framework repo's home and its enforced boundary.
 
