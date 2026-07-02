@@ -249,3 +249,19 @@ the generic part). Tracked here so they don't get lost in prose.
     Done-when.** Owner: the t-3 owner. _(Accepted tradeoff: the `/framework` reservation alone isn't
     gated on t-3 and its collision risk is mildly time-sensitive; bundling trades a small delay for
     a single clean filing.)_
+
+- [x] **Extension seams for fork-added ESLint rules + CI checks — [Sunrise #382](https://github.com/human-centric-engineering/sunrise/issues/382)** (filed 2026-07-02, surfaced by t-2).
+      t-2 wired its boundary by editing Sunrise-owned central files (`eslint.config.mjs`, `.github/workflows/ci.yml`)
+      because no seam exists. Proposes two: (1) an **ESLint config seam** — root config spreads a reserved,
+      empty-by-default `lib/app/eslint.config.mjs` (contract: fork blocks spread _after_ core; restate-not-merge
+      documented); (2) a **CI fork-checks hook** — `npm run app:ci-checks --if-present` in the lint job, so a fork
+      adds a check as a pure package.json addition with zero `ci.yml` edit.
+  - **Compatibility note (why this matters for _our_ pull-down).** t-2's boundary **logic**
+    (`scripts/boundary/*`, the `framework:boundary` script, its tests) is seam-agnostic and survives an
+    upstream merge untouched. The **wiring** (root `eslint.config.mjs` edits + the `ci.yml` step) touches the
+    exact files #382 restructures, so adopting the upstream seam is a **small mechanical migration** (move the
+    tier blocks into the seam file; drop the `ci.yml` step for the `--if-present` hook), **not** a conflict-free
+    merge. **Decision to make:** either build the seam _fork-first_ now (the [[plan#Decisions log|fork-first-informs-upstream]]
+    approach we use for the boot seam — clean future merge, extra work now) or accept the one-time migration when
+    #382 lands. Leaning fast-follow, not scope for the open t-2 PR (#8). _(Distinct from the boot-seam issue
+    above: that's runtime init + namespace reservation; this is build-tooling extension points.)_
