@@ -1,0 +1,10 @@
+// Framework — Data-slots domain: slot definitions (authored) and slot values
+// (insert-only, versioned, with confidence / source type / provenance).
+//
+// Fork-owned (Daybreak), not Sunrise. Per the boundary convention in
+// `.context/framework/planning/framework-architecture.md` Appendix B (X6):
+// every table here uses the `framework_` prefix via `@@map`, and its DDL lands
+// only in `framework_`-named migrations touching only `framework_*` tables.
+//
+// Empty skeleton (f-bootstrap t-1) — no models yet. The first tables arrive in
+// `f-slots`. See `.context/framework/planning/plan.md` feature 05 and spec §6.
