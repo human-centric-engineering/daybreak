@@ -212,9 +212,11 @@ file = merge conflict), and the near-term trajectory (`f-module-core`'s modules 
 step registry, the scheduler tick) needs eager boot-time registration a lazy-on-first-chat hook can't
 serve. Same "establish the seam in Phase 1, not later" charter as the boundary.
 
-**Upstream:** the boot-seam + `/framework`-namespace issue is built fork-first and ready to file
-against Sunrise (owned by the Sunrise-side agent) — the generic `initApp()` shape and reserved empty
-`bootstrap.ts` are the reference. See also the new lightweight-registration follow-up below.
+**Upstream:** the boot-seam + `/framework`-namespace issue is filed as
+[Sunrise #385](https://github.com/human-centric-engineering/sunrise/issues/385) (the completing act of
+t-3) — it carries the fork-perspective learnings (placement, build-time constraint, resilience guard,
+three-tier delegation) and links PR #9 as the reference. The Sunrise-side agent implements the upstream
+PR. See also the lightweight-registration follow-up below (referenced as Related in #385).
 
 - **Done when:** `initFramework()` runs at boot via the generic `initApp()` seam registering its
   (empty) contributor, with the leaf surface left empty; the contributor-count test passes; the
@@ -276,8 +278,7 @@ Cross-repo actions this feature owes Sunrise (per the
 [[plan#Decisions log|fork-first-informs-upstream]] model — build it correctly here, then promote
 the generic part). Tracked here so they don't get lost in prose.
 
-- [ ] **File one Sunrise issue covering both framework-tier concerns, together** (decided: bundle,
-      don't stagger). It covers:
+- [x] **File one Sunrise issue covering both framework-tier concerns — [Sunrise #385](https://github.com/human-centric-engineering/sunrise/issues/385)** (filed 2026-07-02 as the completing act of t-3, per the design: raise it _during_ t-3 so it's informed by the fork build). It covers:
   1. **Reserve the `/framework` namespaces** — `lib/framework/`, `.context/framework/`, and the
      `framework-*.prisma` / `framework_` schema+table prefix, reserved for a **framework-layer fork**
      exactly as Sunrise #371 reserved `/app` for leaf forks: **Sunrise core must never create files
@@ -286,13 +287,13 @@ the generic part). Tracked here so they don't get lost in prose.
      `.context/substrate.md`, `CUSTOMIZATION.md`).
   2. **The generic `initApp()` boot seam** — a `register()` call in `instrumentation.ts` invoking a
      reserved, empty-by-default `lib/app/bootstrap.ts`, zero framework vocabulary.
-  - **Status:** the boot seam is **built fork-first and working in Daybreak** (t-3, PR #9) — the
-    generic `initApp()` in `instrumentation.ts` + reserved-empty `lib/app/bootstrap.ts` are the
-    reference the issue should link. **Filing is delegated to the Sunrise-side agent** (owner of the
-    Sunrise repo's issues/PRs), so it no longer gates the Daybreak-local t-3 done-when — t-3 ships on
-    code + tests + green boundary CI. Left unchecked here as a reminder that the cross-repo filing is
-    still owed. _(Bundled with the `/framework`-namespace reservation, whose collision risk is mildly
-    time-sensitive — flag that to the Sunrise agent.)_
+  - **Fork-perspective learnings captured in the issue** (the reason to file _after_ building, not
+    before): seam placement outside the dev-only guards; the build-time constraint (core carries no
+    `@/lib/framework` reference — dynamic import only, in the fork-filled bridge); the resilience guard
+    (`try/catch` around `initApp()` so a fork boot failure can't crash instrumentation or the ticker);
+    the empty default; and the three-tier delegation to a reserved leaf hook. Reference: PR #9.
+  - **Division of labour:** _we_ (the fork) file the issue with the proven reference — done. The
+    **Sunrise-side agent implements** the upstream PR. Filing does not gate implementation.
 
 - [ ] **Propose a lightweight context-contributor registration entry in Sunrise** (surfaced by t-3
       code review, low priority). `initFramework()` imports `registerContextContributor` from
