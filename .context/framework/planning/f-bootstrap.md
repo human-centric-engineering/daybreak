@@ -161,7 +161,9 @@ established the three-tier convention — so this task no longer creates it.)_
   red-flags CI. Ship the exception in t-2, don't discover it in t-3.
 - **Done when:** `initFramework()` runs at boot via the generic `initApp()` seam registering its
   (empty) contributor, with the leaf surface left empty; the contributor-count test passes; the
-  boundary CI is green (boot file whitelisted).
+  boundary CI is green (boot file whitelisted); **and the upstream Sunrise issue for the generic
+  `initApp()` boot seam is filed** (see [Upstream follow-ups](#upstream-follow-ups)) — t-3 is not
+  done until it's raised.
 
 ## Done when (feature)
 
@@ -210,3 +212,15 @@ contributor from within `lib/framework/` via a Daybreak-owned boot hook, with th
 - **Spec drift.** Three reconciliations already (one a mid-plan correction); more may surface as
   later features meet v0.5.0 reality and the three-tier model. Mitigation: record each as a decision
   in [[plan#Decisions log|plan.md's decisions log]] rather than silently diverging from the spec.
+
+## Upstream follow-ups
+
+Cross-repo actions this feature owes Sunrise (per the
+[[plan#Decisions log|fork-first-informs-upstream]] model — build it correctly here, then promote
+the generic half). Tracked here so they don't get lost in prose.
+
+- [ ] **File a Sunrise issue for the generic `initApp()` boot seam** — a `register()` call in
+      `instrumentation.ts` invoking a reserved, empty-by-default `lib/app/bootstrap.ts`, zero
+      framework vocabulary. **Trigger:** once t-3's seam is working in Daybreak, so the issue links
+      the proven in-fork implementation (mirrors how f-seams was raised as Sunrise #372 before the
+      fork). This item **gates t-3's Done-when.** Owner: the t-3 owner.
