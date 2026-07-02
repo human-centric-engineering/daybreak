@@ -3,7 +3,7 @@ name: f-bootstrap
 feature: 02 · f-bootstrap
 epic: Framework v1
 status: in flight (planning)
-owner: TBD
+owner: Simon Holmes
 depends_on: f-seams (shipped — Sunrise v0.5.0)
 spec: framework-architecture.md §3.1, §9.x, Appendix B (X6)
 parent: plan.md
@@ -179,23 +179,22 @@ contributor from within `lib/framework/` via a Daybreak-owned boot hook, with th
   tangle Daybreak's DDL with Lelanea's. Model names stay unprefixed for client ergonomics —
   accepted low risk: if a future Sunrise model name ever collides, rename the framework-side model.
   Unblocks t-1 schema naming + t-2 migration-hygiene regex.
-- **`initFramework()`
+- **`initFramework()` boot hook — RESOLVED 2026-07-02.** A generic boot seam, built correctly in
+  the fork as its final shape (per [[plan#Decisions log|the fork-first-informs-upstream approach]] —
+  not a stopgap): Sunrise's `instrumentation.ts` `register()` calls a generic `initApp()` from a
+  reserved, **empty-by-default** `lib/app/bootstrap.ts`; Daybreak's _filled_ copy of that scaffold
+  does `await import('@/lib/framework')` → `initFramework()`, then delegates to a fresh empty leaf
+  hook. **Core never references `@/lib/framework`** — the specifier lives only in the fork-owned
+  filled scaffold, so Sunrise/ConQuest (no `lib/framework/`) never resolve it. This is a hard
+  constraint, not a preference: a static dynamic-import specifier is resolved at **build** time, so
+  `next build` in Sunrise/ConQuest would fail on it — a runtime guard wouldn't help; the reference
+  must be _absent_, not caught. It's the `lib/app/capabilities.ts` pattern applied to boot. Because
+  Daybreak writes the `instrumentation.ts` → `initApp()` change as the final generic shape, the
+  eventual upstream adoption merges cleanly and Daybreak keeps only its filled scaffold. **File the
+  upstream Sunrise issue as/after t-3, referencing the working in-fork impl** (upstream may refine
+  for its own guardrails — propose, adopt what lands). **t-2 whitelists the boot file as the single
+  sanctioned core→framework path** (see t-2 ↔ t-3 coupling below).
 
-   boot hook — RESOLVED 2026-07-02.** A **generic boot seam, built correctly
-    in the fork as its final shape** (per [[plan#Decisions log|the fork-first-informs-upstream
-    approach]] — not a stopgap): Sunrise's `instrumentation.ts` `register()` calls a generic
-  `initApp()` from a reserved, **empty-by-default** `lib/app/bootstrap.ts`; Daybreak's _filled_ copy
-    of that scaffold does `await import('@/lib/framework')` → `initFramework()`, then delegates to a
-    fresh empty leaf hook. **Core never references `@/lib/framework`** — the specifier lives only in
-    the fork-owned filled scaffold, so Sunrise/ConQuest (no `lib/framework/`) never resolve it. This
-    is a hard constraint, not a preference: a static dynamic-import specifier is resolved at **build**
-    time, so `next build` in Sunrise/ConQuest would fail on it — a runtime guard wouldn't help; the
-    reference must be _absent_, not caught. It's the `lib/app/capabilities.ts` pattern applied to
-    boot. Because Daybreak writes the `instrumentation.ts` → `initApp()` change as the final generic
-    shape, the eventual upstream adoption merges cleanly and Daybreak keeps only its filled scaffold.
-  **File the upstream Sunrise issue as/after t-3, referencing the working in-fork impl** (upstream
-    may refine for its own guardrails — propose, adopt what lands). **t-2 whitelists the boot file as
-    the single sanctioned core→framework path** (see t-2 ↔ t-3 coupling below).
 - **Not blocking f-bootstrap, but confirm before `f-module-core`:** that Sunrise #368
   (`executeTransaction` tx options) is present in v0.5.0 — the plan assumes it for boot-time bulk
   upserts (module/slot/map sync). Out of scope here; flagged so it isn't discovered late.

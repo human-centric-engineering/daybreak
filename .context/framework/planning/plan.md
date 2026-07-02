@@ -89,7 +89,7 @@ A flat list, shown in rough dependency order (most-ready first), the way the Hub
 | #   | Feature                 | Owner           | Depends on                                        | ~PRs | Capability                                       |
 | --- | ----------------------- | --------------- | ------------------------------------------------- | ---- | ------------------------------------------------ |
 | 01  | `f-seams`               | Simon (Sunrise) | —                                                 | 2    | Two generic Sunrise core seams (pre-fork)        |
-| 02  | `f-bootstrap`           | TBD             | f-seams                                           | 4    | Fork + framework skeleton + enforced boundary    |
+| 02  | `f-bootstrap`           | Simon Holmes    | f-seams                                           | 4    | Fork + framework skeleton + enforced boundary    |
 | 03  | `f-module-core`         | TBD             | f-bootstrap                                       | 4    | Module definition, registry, seam, liveness      |
 | 04  | `f-map`                 | TBD             | f-bootstrap                                       | 4    | Facilitation map: schema, versioning, format     |
 | 05  | `f-slots`               | TBD             | f-bootstrap                                       | 3    | Slot definitions + insert-only values            |
@@ -125,7 +125,7 @@ _Done when:_ both merged to Sunrise `main`; vanilla behaviour unchanged.
 
 ### 02 · `f-bootstrap` — fork + skeleton + boundary
 
-_Owner:_ TBD · _Depends on:_ f-seams · _~4 PRs_ · **detailed plan: [[f-bootstrap]]**
+_Owner:_ Simon Holmes · _Depends on:_ f-seams · _~4 PRs_ · **detailed plan: [[f-bootstrap]]**
 
 The framework repo's home and its enforced boundary.
 
