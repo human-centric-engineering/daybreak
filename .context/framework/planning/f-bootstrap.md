@@ -94,7 +94,7 @@ Concrete reuse anchors found in-tree:
 | t-0 | Fork + branding + upstream-merge procedure                   | _(history: fork, brand env, `.context/framework/README.md`, PR #4)_                                                         | —    | **done** | #4  |
 | t-1 | `lib/framework/` skeleton + `shared/scope.ts` + empty schema | `lib/framework/{modules,facilitation,data-slots,shared}/`, `prisma/schema/framework-*.prisma`                               | t-0  | done     | #6  |
 | t-2 | Boundary enforcement (X6): ESLint + CI, provably failing     | `lib/{framework,app}/eslint.config.mjs` (seams), `eslint.config.mjs`/`ci.yml` (spread + hook), `scripts/boundary/`, fixture | t-1  | done     | #8  |
-| t-3 | `initFramework()` wiring + boot seam + test scaffolding      | `lib/framework/index.ts`, `instrumentation.ts`, `lib/app/bootstrap.ts` (filled), `tests/`                                   | t-1  | backlog  | —   |
+| t-3 | `initFramework()` wiring + boot seam + test scaffolding      | `lib/framework/{index,modules/context}.ts`, `instrumentation.ts`, `lib/app/{bootstrap,leaf-bootstrap}.ts`, `tests/`         | t-1  | done     | #9  |
 
 t-2 and t-3 parallelise once t-1 lands. Three real PRs (t-0 already merged) — inside the
 parent plan's `~4 PRs` estimate.
@@ -182,6 +182,24 @@ established the three-tier convention — so this task no longer creates it.)_
 - **t-2 ↔ t-3 coupling:** the `instrumentation.ts` → `lib/app/bootstrap.ts` → `lib/framework` path
   is the single sanctioned core→framework import; **t-2's boundary rule must whitelist it** or t-3
   red-flags CI. Ship the exception in t-2, don't discover it in t-3.
+
+**Shipped (PR #9).** `lib/framework/index.ts` exports `initFramework()`, which registers one empty
+scaffold contributor — the `"module"` prompt-context loader (`lib/framework/modules/context.ts`,
+returns no body until `f-module-core`) — via the `f-seams` `registerContextContributor()`, from
+**within `lib/framework/`** (the leaf `lib/app/context-contributors.ts` stays empty). Boot seam,
+built as the final generic shape: core's `instrumentation.ts` calls `initApp()` from
+`lib/app/bootstrap.ts` **before** the dev-only ticker guards (so it runs in prod too, nodejs
+runtime); Daybreak's _filled_ `bootstrap.ts` **dynamically** `import('@/lib/framework')` →
+`initFramework()`, then awaits a reserved-empty `lib/app/leaf-bootstrap.ts` (`initLeafApp()`). Core
+holds **no** `@/lib/framework` reference — `instrumentation.ts` imports only `@/lib/app/bootstrap`;
+the framework specifier lives solely in the fork-owned bridge, dynamic so `next build` never resolves
+it in a framework-less fork. A framework boot error is logged, not thrown (boot continues; core
+degrades gracefully). Tests: `initFramework` registers/strips the contributor (registry-shaped, not
+welded) + `initApp` boots the whole chain; boundary CI green — `instrumentation.ts` provably does not
+leak `@/lib/framework`. **Upstream:** the boot-seam + `/framework`-namespace issue is built fork-first
+and ready to file against Sunrise (owned by the Sunrise-side agent, per the split of duties) — the
+generic `initApp()` shape and reserved empty `bootstrap.ts` are the reference.
+
 - **Done when:** `initFramework()` runs at boot via the generic `initApp()` seam registering its
   (empty) contributor, with the leaf surface left empty; the contributor-count test passes; the
   boundary CI is green (boot file whitelisted); **and the combined upstream Sunrise issue (boot seam
@@ -252,11 +270,13 @@ the generic part). Tracked here so they don't get lost in prose.
      `.context/substrate.md`, `CUSTOMIZATION.md`).
   2. **The generic `initApp()` boot seam** — a `register()` call in `instrumentation.ts` invoking a
      reserved, empty-by-default `lib/app/bootstrap.ts`, zero framework vocabulary.
-  - **Trigger:** once t-3's boot seam is working in Daybreak, so the issue links the proven in-fork
-    implementation (as f-seams was raised as Sunrise #372). Filing the combined issue **gates t-3's
-    Done-when.** Owner: the t-3 owner. _(Accepted tradeoff: the `/framework` reservation alone isn't
-    gated on t-3 and its collision risk is mildly time-sensitive; bundling trades a small delay for
-    a single clean filing.)_
+  - **Status:** the boot seam is **built fork-first and working in Daybreak** (t-3, PR #9) — the
+    generic `initApp()` in `instrumentation.ts` + reserved-empty `lib/app/bootstrap.ts` are the
+    reference the issue should link. **Filing is delegated to the Sunrise-side agent** (owner of the
+    Sunrise repo's issues/PRs), so it no longer gates the Daybreak-local t-3 done-when — t-3 ships on
+    code + tests + green boundary CI. Left unchecked here as a reminder that the cross-repo filing is
+    still owed. _(Bundled with the `/framework`-namespace reservation, whose collision risk is mildly
+    time-sensitive — flag that to the Sunrise agent.)_
 
 - [x] **Extension seams for fork-added ESLint rules + CI checks — [Sunrise #382](https://github.com/human-centric-engineering/sunrise/issues/382)** (filed 2026-07-02, surfaced by t-2; **built fork-first in t-2**).
       Proposes two seams, both now **implemented in Daybreak as the final generic shape** (per
