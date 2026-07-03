@@ -102,6 +102,23 @@ both levels; each is filed at its primary home with a cross-reference. Mark an e
   flipped to `done` when the PR merges. One transition, nothing to forget. _Status: folded-in for
   plan.md's vocab; still open for the Hub's plan-authoring instructions._
 
+### A6 · With a shared board + multiple owners, claim + plan is a standalone docs PR _before_ task work
+
+- **Discovery.** `f-module-core` (single owner) folded its plan doc into t-1's PR — fine when one
+  person builds. Planning `f-map` with **John about to build features in parallel**, the human called
+  that the claim (board Owner + `in flight`) and the plan must go up **together as a docs PR before any
+  task starts**, so the claim is _visible_ and two owners can't unknowingly start the same feature.
+- **Impact.** Folding the claim into t-1 means the board doesn't show the feature as taken until the
+  first _code_ PR lands — a real collision window once >1 person builds. A board nobody can see isn't a
+  coordination surface.
+- **Feedback.** The working model should make **claim-first a standalone docs PR** the default the
+  moment the plan has **more than one builder**: set Owner + `in flight`, write `<feature>.md`, push
+  both as one docs-only PR (skips security/code-review), merge, _then_ start t-1. For a strictly
+  single-owner plan, folding into t-1 is still acceptable — the trigger is concurrent ownership, which
+  is exactly the HCE Hub's normal condition. Cross-ref [A5] (board as the low-friction system of
+  record) and [[building-a-feature]] step 1. _Status: folded-in for plan.md + building-a-feature.md;
+  open for the Hub's plan-authoring instructions._
+
 ---
 
 ## §B — Feature-plan authoring
