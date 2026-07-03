@@ -104,8 +104,8 @@ Concrete reuse anchors found in-tree:
 | ID  | Task                                                                                                                                   | Files                                                                                                                                                                                                                                       | Deps | Status    | PR  |
 | --- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | --------- | --- |
 | t-1 | **Registration → row**: `ModuleDefinition` + `registerModule()` + registry + `Module` model + boot sync + `isRegistered` (+ this plan) | `lib/framework/modules/{definition,registry,sync,index}.ts`, `lib/framework/index.ts`, `lib/app/bootstrap.ts`, `prisma/schema/framework-modules.prisma`, `framework_…` migration, `tests/…`, `.context/framework/planning/f-module-core.md` | —    | **done**  | #10 |
-| t-2 | **Liveness**: pure `isModuleLive(module, flags, now)` (A5) + entitlement-predicate seam (C1)                                           | `lib/framework/modules/{liveness,status}.ts`, `tests/…`                                                                                                                                                                                     | t-1  | available | —   |
-| t-3 | **Admin read API**: `GET /api/v1/admin/framework/modules` + end-to-end visibility proof                                                | `app/api/v1/admin/framework/modules/route.ts`, `tests/integration/lib/framework/modules/*`                                                                                                                                                  | t-1  | backlog   | —   |
+| t-2 | **Liveness**: pure `isModuleLive(module, flags, now)` (A5) + entitlement-predicate seam (C1)                                           | `lib/framework/modules/{liveness,status}.ts`, `tests/…`                                                                                                                                                                                     | t-1  | **done**  | #11 |
+| t-3 | **Admin read API**: `GET /api/v1/admin/framework/modules` + end-to-end visibility proof                                                | `lib/framework/modules/queries.ts`, `app/api/v1/admin/framework/modules/route.ts`, `tests/integration/{api/v1/admin/framework/modules,lib/framework/modules}/*`                                                                             | t-1  | available | —   |
 
 t-2 and t-3 parallelise once t-1 lands. **Three PRs** — one under the parent plan's `~4 PRs`
 estimate, after folding the original commit-sized registry-only task into its sync (per
@@ -215,21 +215,33 @@ The "see it" half of the vertical: exposes the `framework_module` rows through t
 admin route, proving registration → row → admin visibility without shipping anything a fork strips
 (decisions 1 + 2).
 
+- **`lib/framework/modules/queries.ts`** — `listModules()`: the read side, `prisma.module.findMany({
+orderBy: { slug: 'asc' } })`. Separated from `sync.ts` (write side) so admin/ops surfaces share one
+  testable data fn, mirroring how Sunrise admin routes delegate reads to a lib fn (`getAllFlags`). The
+  `Module` type is imported straight from `@prisma/client` — **not** re-exported through core
+  `types/prisma.ts`, which stays free of framework vocabulary (X6). Does not swallow errors into `[]`.
 - **`app/api/v1/admin/framework/modules/route.ts`** — `GET`, guarded by `withAdminAuth()` (inherits
-  the automatic section rate-limit; no handler limiter), returns the `Module` rows via
-  `successResponse()`. First route under `app/api/v1/admin/framework/` — establishes the framework
-  admin-API namespace the boundary already reserves. Rows already carry `isRegistered` (set by
-  sync), so the endpoint just reads them; no registry/DB merge needed in the handler.
-- **`tests/integration/lib/framework/modules/*`** — the HTTP-contract layer, reusing the tests-only
-  fixture from t-1 (never in the running app): register a fixture `ModuleDefinition` → sync → `GET`
-  the admin route → assert the module row is returned in the `successResponse()` envelope; assert the
-  route is admin-guarded (unauthenticated / non-admin → rejected). The register→row→`isRegistered`
-  mechanics are t-1's proof test; this task proves the _API contract_ over those rows, not the sync
-  again.
-- **Done when:** the endpoint returns admin-guarded module rows in the standard envelope; a fresh
-  tree (no registrations) returns `[]` — the clean fork state; the integration test drives the real
-  register → sync → API chain green; **gates green — `/pre-pr` then `/code-review`, both before
-  opening the PR** (retro B4).
+  the automatic section rate-limit; no handler limiter), returns `listModules()` via
+  `successResponse()`. **First route under `app/api/v1/admin/framework/`** — establishes the framework
+  admin-API namespace, and is the first file to actually exercise the X6 ESLint glob
+  `app/api/v1/admin/framework/**` as _framework tier_ (it imports `@/lib/framework/*`; flat-config
+  last-match-wins over the core→framework ban — verified green). Rows already carry `isRegistered`
+  (set by sync), so the endpoint just reads them.
+- **Two test files** (split to keep the boundary clean — the contract test needs no `@/lib/framework`
+  import, so it lives at the conventional API path; the e2e imports framework fns, so it lives at the
+  boundary-exempt `tests/**/lib/framework/**` path):
+  - `tests/integration/api/v1/admin/framework/modules/route.test.ts` — HTTP contract: admin-guarded
+    (401 unauth / 403 non-admin, DB untouched), 200 returns rows in the envelope ordered by slug, `[]`
+    on the clean-fork empty state. Mocks Prisma + auth.
+  - `tests/integration/lib/framework/modules/registration-visibility.test.ts` — **end-to-end**
+    (decision 1): the _real_ registry → `syncRegisteredModules` → `listModules` chain against a small
+    **stateful in-memory Prisma fake** (create/update mutate a store, findMany reads it), proving
+    register → row → visible, retire-on-removal (`isRegistered=false`, row retained), and re-register.
+    The tests-only fixture lives here — nothing a fork strips.
+- **Done when:** the endpoint returns admin-guarded module rows in the standard envelope; a fresh tree
+  returns `[]` (clean fork state); the e2e drives the real register → sync → read chain green; the
+  boundary CI stays green with the new framework admin path; **gates green — `/pre-pr` then
+  `/code-review`, both before opening the PR** (retro B4).
 
 ## Boundary & forkability notes
 

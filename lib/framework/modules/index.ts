@@ -11,6 +11,7 @@
 export type { ModuleDefinition } from '@/lib/framework/modules/definition';
 export { registerModule, getRegisteredModules } from '@/lib/framework/modules/registry';
 export { syncRegisteredModules } from '@/lib/framework/modules/sync';
+export { listModules } from '@/lib/framework/modules/queries';
 export { MODULE_STATUS } from '@/lib/framework/modules/status';
 export type { ModuleStatus } from '@/lib/framework/modules/status';
 export { isModuleLive } from '@/lib/framework/modules/liveness';
