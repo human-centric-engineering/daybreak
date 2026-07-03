@@ -29,7 +29,7 @@ the spine features 06–08 hang off (`f-module-config` versions the config, `f-m
 agents/capabilities/workflows, `f-engagement` adds the event stream).
 
 **What ships here, and what deliberately does not.** In scope: the `ModuleDefinition` type, the
-`registerModule()` seam + in-memory registry, the `Module` model, boot-time upsert-by-slug sync with
+`registerModule()` seam + in-memory registry, the `Module` model, boot-time set-based sync with
 `isRegistered` handling, and pure `isModuleLive()`. **Out of scope** (owned by the features that
 consume them, so no dead fields land early): `ModuleVersion` / config history (A10 → f-module-config),
 the binding pivots + `agentRoles` / `capabilities` (A6/A8 → f-module-bindings), `slotDefinitions`
@@ -148,12 +148,17 @@ plan doc.
 - **Migration** — a single `framework_…`-named migration touching only `framework_*` tables (the
   boundary-hygiene CI keys on this). First real framework DDL: authored with
   `prisma migrate dev --create-only` then reviewed, per the migration-drift guard.
-- **`lib/framework/modules/sync.ts`** — `syncRegisteredModules()`: read the registry, **upsert by
-  slug** inside `executeTransaction` (bulk; `{ timeout }` headroom via #368), setting
-  `isRegistered=true` and code-owned defaults (name/description) while **preserving operator-owned
-  columns** (`status`, `config`, window, `audience`) on existing rows. Rows whose slug is **absent**
-  from the registry (code removed) are flipped to `isRegistered=false`, never deleted (audit
-  retention). Idempotent — safe to re-run every boot.
+- **`lib/framework/modules/sync.ts`** — `syncRegisteredModules()`: reconcile the registry into rows
+  inside `executeTransaction` (`{ timeout }` headroom via #368), **set-based** (not a per-slug upsert
+  loop — that would rewrite every row every boot and churn `updatedAt`; caught in t-1 code review).
+  Three guarded statements: `createMany({ …, skipDuplicates: true })` writes code-owned data
+  (`slug`/`name`) for **new** rows only; `updateMany({ slug in code, isRegistered: false })` re-flags
+  a reappeared slug; `updateMany({ slug notIn code, isRegistered: true })` retires removed rows
+  (`isRegistered=false`, never deleted — audit). Both updates are guarded by an `isRegistered`
+  mismatch, so a **no-change boot writes zero rows** and never bumps `updatedAt` (operator columns
+  preserved). **An empty registry returns early — a true no-op, never a mass-unregister** (an empty
+  registry can't be told apart from "registration didn't run", so the destructive branch is skipped;
+  this also means `notIn` never sees `[]`). Idempotent — safe to re-run every boot.
 - **`lib/framework/index.ts`** — add `syncFramework()` (async), which today runs
   `syncRegisteredModules()` and is the single stable entry `initApp()` calls; later features add
   their own sync passes _inside_ it, so `initApp` never changes again.
@@ -166,14 +171,16 @@ plan doc.
   they declare `onDelete` per the privacy rule.
 - **Proof test (register → row):** a mocked-prisma test (house style — see the reconciliation note
   above) registers a fixture `ModuleDefinition` through the real `registerModule()`, runs the real
-  `syncRegisteredModules()`, and asserts the exact SQL shape: one `upsert` per slug writing code data
-  on create and only `isRegistered` on update (operator columns never in the update payload), plus the
-  `updateMany` that flips code-removed rows to `isRegistered=false`. The fixture lives in `tests/`
-  (decision 1 — tests-only, nothing a fork strips).
+  `syncRegisteredModules()`, and asserts the exact SQL shape: `createMany` with `slug`/`name` only
+  (no operator columns) and `skipDuplicates`; the re-register and retire `updateMany`s each guarded by
+  an `isRegistered` mismatch; the **empty-registry no-op** (no transaction, no writes); and the
+  `registered`/`retired` log counts. The fixture lives in `tests/` (decision 1 — tests-only, nothing
+  a fork strips).
 - **Done when:** migration applies clean and passes the drift-check (Prisma's spurious `DROP INDEX`
   for the unmodelled pgvector/tsvector objects stripped); `registerModule()` is idempotent by slug
-  (unit test); `syncRegisteredModules()` upserts-by-slug, preserves operator columns, and flips
-  `isRegistered` on code removal (mocked-prisma unit test); boot sync is resilient (bootstrap unit
+  (unit test); `syncRegisteredModules()` reconciles set-based, preserves operator columns, writes zero
+  rows on a no-change boot, no-ops on an empty registry, and flips `isRegistered` on code removal
+  (mocked-prisma unit test); boot sync is resilient (bootstrap unit
   test: framework init throw AND sync throw → logged, not rethrown, leaf still runs); **gates green —
   `/pre-pr` then `/code-review`, both run before opening the PR** (retro B4).
 

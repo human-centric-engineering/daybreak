@@ -4,12 +4,13 @@
  * House style: no live DB in vitest (real-DB verification is via `smoke:*`
  * scripts). We mock `executeTransaction` to forward its callback to a prisma `tx`
  * mock and assert the SQL shape `syncRegisteredModules()` issues:
- *   - one upsert-by-slug per registered module, writing code-owned data only on
- *     create and touching ONLY `isRegistered` on update (operator columns —
- *     `status`, `config`, window, `audience` — are never in the update payload,
- *     so they survive every boot);
- *   - one `updateMany` flipping code-removed rows to `isRegistered=false`
- *     (retained for audit), scoped by `slug notIn <registered>`.
+ *   - `createMany({ skipDuplicates })` writes code-owned data (`slug`, `name`) for
+ *     NEW rows only — never `status`/`config`/window/`audience`, so operator columns
+ *     survive;
+ *   - a guarded `updateMany` re-registers a reappeared slug (only rows that change);
+ *   - a guarded `updateMany` retires code-removed rows (`isRegistered=false`);
+ *   - an EMPTY registry is a deliberate no-op — no transaction, no writes;
+ *   - the success log reports both `registered` and `retired` counts.
  * The registry itself is real (we register fixtures through `registerModule()`).
  */
 
@@ -18,7 +19,7 @@ import { z } from 'zod';
 
 const txMock = {
   module: {
-    upsert: vi.fn(),
+    createMany: vi.fn(),
     updateMany: vi.fn(),
   },
 };
@@ -37,8 +38,10 @@ const { syncRegisteredModules } = await import('@/lib/framework/modules/sync');
 const { registerModule, __resetModuleRegistryForTests } =
   await import('@/lib/framework/modules/registry');
 const { executeTransaction } = await import('@/lib/db/utils');
+const { logger } = await import('@/lib/logging');
 
 const executeTransactionMock = executeTransaction as ReturnType<typeof vi.fn>;
+const loggerInfo = logger.info as ReturnType<typeof vi.fn>;
 
 function register(slug: string): void {
   registerModule({
@@ -52,60 +55,71 @@ function register(slug: string): void {
 beforeEach(() => {
   vi.clearAllMocks();
   __resetModuleRegistryForTests();
+  // The retire updateMany returns a Prisma-shaped { count }.
+  txMock.module.updateMany.mockResolvedValue({ count: 0 });
 });
 
 describe('syncRegisteredModules', () => {
-  it('upserts each registered module by slug, writing code data on create and only isRegistered on update', async () => {
+  it('creates new rows with code-owned data only (skipDuplicates), never operator columns', async () => {
     register('alpha');
     register('beta');
 
     await syncRegisteredModules();
 
-    expect(txMock.module.upsert).toHaveBeenCalledTimes(2);
-    expect(txMock.module.upsert).toHaveBeenCalledWith({
-      where: { slug: 'alpha' },
-      create: { slug: 'alpha', name: 'Module alpha', isRegistered: true },
-      update: { isRegistered: true },
+    expect(txMock.module.createMany).toHaveBeenCalledTimes(1);
+    expect(txMock.module.createMany).toHaveBeenCalledWith({
+      data: [
+        { slug: 'alpha', name: 'Module alpha' },
+        { slug: 'beta', name: 'Module beta' },
+      ],
+      skipDuplicates: true,
     });
-    expect(txMock.module.upsert).toHaveBeenCalledWith({
-      where: { slug: 'beta' },
-      create: { slug: 'beta', name: 'Module beta', isRegistered: true },
-      update: { isRegistered: true },
-    });
+    // create payloads carry no status / config / window / audience keys.
+    const created = txMock.module.createMany.mock.calls[0]?.[0]?.data;
+    for (const row of created) {
+      expect(Object.keys(row).sort()).toEqual(['name', 'slug']);
+    }
   });
 
-  it('never clobbers operator columns — the update payload is isRegistered only', async () => {
-    register('alpha');
-
-    await syncRegisteredModules();
-
-    const updatePayload = txMock.module.upsert.mock.calls[0]?.[0]?.update;
-    // Exactly { isRegistered: true } — no status / config / window / audience keys,
-    // so an operator's edits to those columns survive the sync.
-    expect(updatePayload).toEqual({ isRegistered: true });
-  });
-
-  it('flags code-removed rows isRegistered=false, scoped by slug notIn the registered set', async () => {
+  it('re-registers reappeared slugs and retires removed rows, each guarded to only touch changed rows', async () => {
     register('alpha');
     register('beta');
 
     await syncRegisteredModules();
 
-    expect(txMock.module.updateMany).toHaveBeenCalledTimes(1);
+    // Re-register pass: slugs present in code but currently isRegistered=false.
+    expect(txMock.module.updateMany).toHaveBeenCalledWith({
+      where: { slug: { in: ['alpha', 'beta'] }, isRegistered: false },
+      data: { isRegistered: true },
+    });
+    // Retire pass: rows whose slug is not in code and still isRegistered=true.
     expect(txMock.module.updateMany).toHaveBeenCalledWith({
       where: { slug: { notIn: ['alpha', 'beta'] }, isRegistered: true },
       data: { isRegistered: false },
     });
   });
 
-  it('empty registry: no upserts, and updateMany(notIn: []) unregisters every prior row', async () => {
+  it('empty registry is a no-op: no transaction, no writes', async () => {
     await syncRegisteredModules();
 
-    expect(txMock.module.upsert).not.toHaveBeenCalled();
-    // notIn: [] matches all rows — correct: no code registered ⇒ nothing is registered.
-    expect(txMock.module.updateMany).toHaveBeenCalledWith({
-      where: { slug: { notIn: [] }, isRegistered: true },
-      data: { isRegistered: false },
+    expect(executeTransactionMock).not.toHaveBeenCalled();
+    expect(txMock.module.createMany).not.toHaveBeenCalled();
+    expect(txMock.module.updateMany).not.toHaveBeenCalled();
+    expect(loggerInfo).toHaveBeenCalledWith(
+      'syncRegisteredModules: no registered modules — nothing to sync'
+    );
+  });
+
+  it('logs registered and retired counts', async () => {
+    register('alpha');
+    // Retire pass reports 2 rows flipped to unregistered.
+    txMock.module.updateMany.mockResolvedValue({ count: 2 });
+
+    await syncRegisteredModules();
+
+    expect(loggerInfo).toHaveBeenCalledWith('syncRegisteredModules: framework modules synced', {
+      registered: 1,
+      retired: 2,
     });
   });
 
