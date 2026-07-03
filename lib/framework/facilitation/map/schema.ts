@@ -52,12 +52,6 @@ export const TEMPORAL_KINDS = [
 ] as const;
 export type TemporalKind = (typeof TEMPORAL_KINDS)[number];
 
-const TEMPORAL_AT_KINDS: readonly TemporalKind[] = [
-  'available_after',
-  'available_until',
-  'recommended_by',
-];
-
 // ─── Conditions (F4) — declarative gates the engine evaluates ────────────────
 
 /** State predicate: e.g. "milestone M reached". */
@@ -86,25 +80,30 @@ export const temporalConditionSchema = z
   .object({
     family: z.literal('temporal'),
     kind: z.enum(TEMPORAL_KINDS),
-    /** ISO-8601 instant for the three date kinds. */
-    at: z.string().datetime().optional(),
+    /** ISO-8601 instant for the three date kinds. `offset: true` accepts zoned
+     *  forms (`…+02:00`), not only UTC `…Z` — authors write local offsets. */
+    at: z.string().datetime({ offset: true }).optional(),
     /** Hours since the last visit for `cooldown_since_last_visit`. */
     durationHours: z.number().positive().optional(),
   })
   .superRefine((cond, ctx) => {
-    if (TEMPORAL_AT_KINDS.includes(cond.kind)) {
-      if (cond.at === undefined) {
+    // The cooldown kind carries a duration; the date kinds carry an instant.
+    // Deriving the branch from the single `cooldown` case (rather than a parallel
+    // date-kinds list) means a new date kind added to TEMPORAL_KINDS defaults to
+    // requiring `at` — no second list to keep in sync.
+    if (cond.kind === 'cooldown_since_last_visit') {
+      if (cond.durationHours === undefined) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ['at'],
-          message: `Temporal condition "${cond.kind}" requires an ISO-8601 "at".`,
+          path: ['durationHours'],
+          message: 'Temporal condition "cooldown_since_last_visit" requires "durationHours".',
         });
       }
-    } else if (cond.durationHours === undefined) {
+    } else if (cond.at === undefined) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['durationHours'],
-        message: 'Temporal condition "cooldown_since_last_visit" requires "durationHours".',
+        path: ['at'],
+        message: `Temporal condition "${cond.kind}" requires an ISO-8601 "at".`,
       });
     }
   });
@@ -131,7 +130,8 @@ const metaSchema = z.record(z.string(), z.unknown());
 
 export const nodeSchema = z
   .object({
-    /** Stable key referenced by user journey state (F2) — never a row id. */
+    /** Stable key referenced by user journey state (F2) — never a row id. This
+     *  is the `NodeKey` vocabulary from `shared/scope.ts` (today `string`). */
     key: z.string().min(1),
     type: z.enum(NODE_TYPES),
     /** Required iff `type === 'module'` — binds the node to a registered Module. */
@@ -163,7 +163,15 @@ export const edgeSchema = z.object({
   meta: metaSchema.optional(),
 });
 
-/** The full authored snapshot stored as `FacilitationGraphVersion.definition`. */
+/**
+ * The full authored snapshot stored as `FacilitationGraphVersion.definition`.
+ *
+ * Persist the `parse()` RESULT, not the raw draft: `.default()` fields
+ * (node `completionMode`, condition `reached`) are materialised by parsing, and
+ * the inferred `MapDefinition` marks them required — so storing raw input would
+ * leave the row missing keys the type promises a reader. t-2's publish path
+ * parses before it writes.
+ */
 export const mapDefinitionSchema = z.object({
   nodes: z.array(nodeSchema),
   edges: z.array(edgeSchema),

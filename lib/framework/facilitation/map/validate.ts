@@ -9,11 +9,16 @@
  *
  * Deliberately NOT here — they belong to `f-engine` (spec §5.3 / §5.5, and see
  * f-map.md decision 3): prerequisite-edge cycles, unreachable-required nodes,
- * and "removing a key that has live user state" warnings — all need graph
- * traversal or journey state, which the engine owns. This is FORMAT validation;
- * the engine adds INVARIANT validation as a later step in the same publish
- * chain (`validatePublishableMap` in t-2 is written to be extended, not
- * reshaped).
+ * and "removing a key that has live user state" warnings. The boundary is NOT
+ * "graph walks live in the engine" (the region-containment check below is itself
+ * a walk) — it is that those are CONDITIONAL invariants: a prerequisite "cycle"
+ * may be inert once an edge's `condition` is evaluated, and reachability /
+ * live-key checks need journey state, so only the engine can decide them. Region
+ * containment, by contrast, is a STATIC structural fact of the snapshot (a region
+ * cannot contain itself, whatever any engine later does), so it is a format
+ * invariant and lives here. This is FORMAT validation; the engine adds INVARIANT
+ * validation as a later step in the same publish chain (`validatePublishableMap`
+ * in t-2 is written to be extended, not reshaped).
  *
  * Pure and DB-free. Returns `{ ok, errors }`, mirroring the workflow validator.
  */
@@ -62,7 +67,9 @@ export function validateMapFormat(definition: MapDefinition): MapValidationResul
 
   // ---- Edge endpoints resolve to a node ----------------------------------
   edges.forEach((edge, i) => {
-    for (const endpoint of [edge.from, edge.to]) {
+    // Dedupe endpoints so a self-referential edge to a missing node (from === to)
+    // reports the dangling endpoint once, not twice.
+    for (const endpoint of new Set([edge.from, edge.to])) {
       if (!keyToNode.has(endpoint)) {
         errors.push({
           code: 'DANGLING_EDGE_ENDPOINT',

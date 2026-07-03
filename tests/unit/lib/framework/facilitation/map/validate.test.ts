@@ -66,6 +66,14 @@ describe('validateMapFormat', () => {
     expect(errors[0]).toMatchObject({ code: 'DANGLING_EDGE_ENDPOINT', path: ['edges[0]'] });
   });
 
+  it('reports a self-referential edge to a missing node only once', () => {
+    const errors = validateMapFormat(
+      parse({ nodes: [], edges: [{ from: 'ghost', to: 'ghost', type: 'unlocks' }] })
+    ).errors;
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatchObject({ code: 'DANGLING_EDGE_ENDPOINT', path: ['edges[0]'] });
+  });
+
   it('flags a region ref to a non-existent node', () => {
     expect(
       codes({ nodes: [{ key: 'n', type: 'milestone', region: 'nowhere' }], edges: [] })

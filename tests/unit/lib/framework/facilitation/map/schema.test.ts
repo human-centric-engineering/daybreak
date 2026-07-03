@@ -122,6 +122,11 @@ describe('conditionSchema (F4)', () => {
           conditionSchema.safeParse({ family: 'temporal', kind, at: '2026-07-03T00:00:00Z' })
             .success
         ).toBe(true);
+        // A zoned ISO-8601 offset (not only UTC "Z") is accepted.
+        expect(
+          conditionSchema.safeParse({ family: 'temporal', kind, at: '2026-07-03T09:00:00+02:00' })
+            .success
+        ).toBe(true);
         // A non-ISO string is rejected.
         expect(
           conditionSchema.safeParse({ family: 'temporal', kind, at: 'next week' }).success
