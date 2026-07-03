@@ -42,7 +42,14 @@ feature merges, reconcile the board so the next person sees the truth.
      fidelity. Never write "integration test against the dev DB" (retro B9).
 3. **Present the plan to the feature owner before building** — especially task sizing and any
    genuine design/forkability decisions. Planning is collaborative; surface the choices, don't
-   pre-commit. Fold the plan doc into the first task's PR (no separate plan-only PR).
+   pre-commit.
+4. **Push the claim + plan as a standalone docs PR _before_ starting any task work.** The board
+   claim (Owner + `in flight` in [`plan.md`](./plan.md)) and the new `<feature>.md` go up together as
+   one docs-only PR, which merges before t-1 begins. This is what makes the board a real
+   coordination surface once more than one person is building: a claim nobody can see doesn't stop
+   two owners starting the same feature. (Docs-only, so it skips `/security-review` and
+   `/code-review` — see step 3 of close-out.) _Earlier features folded the plan into t-1's PR; with
+   the board live and multiple builders, claim-first is the standard._
 
 ## 2. Build each task — the gate loop
 
