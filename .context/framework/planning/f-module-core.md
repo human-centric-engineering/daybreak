@@ -103,8 +103,8 @@ Concrete reuse anchors found in-tree:
 
 | ID  | Task                                                                                                                                   | Files                                                                                                                                                                                                                                       | Deps | Status    | PR  |
 | --- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | --------- | --- |
-| t-1 | **Registration → row**: `ModuleDefinition` + `registerModule()` + registry + `Module` model + boot sync + `isRegistered` (+ this plan) | `lib/framework/modules/{definition,registry,sync,index}.ts`, `lib/framework/index.ts`, `lib/app/bootstrap.ts`, `prisma/schema/framework-modules.prisma`, `framework_…` migration, `tests/…`, `.context/framework/planning/f-module-core.md` | —    | available | —   |
-| t-2 | **Liveness**: pure `isModuleLive(module, flags, now)` (A5) + entitlement-predicate seam (C1)                                           | `lib/framework/modules/liveness.ts`, `tests/…`                                                                                                                                                                                              | t-1  | backlog   | —   |
+| t-1 | **Registration → row**: `ModuleDefinition` + `registerModule()` + registry + `Module` model + boot sync + `isRegistered` (+ this plan) | `lib/framework/modules/{definition,registry,sync,index}.ts`, `lib/framework/index.ts`, `lib/app/bootstrap.ts`, `prisma/schema/framework-modules.prisma`, `framework_…` migration, `tests/…`, `.context/framework/planning/f-module-core.md` | —    | **done**  | #10 |
+| t-2 | **Liveness**: pure `isModuleLive(module, flags, now)` (A5) + entitlement-predicate seam (C1)                                           | `lib/framework/modules/{liveness,status}.ts`, `tests/…`                                                                                                                                                                                     | t-1  | available | —   |
 | t-3 | **Admin read API**: `GET /api/v1/admin/framework/modules` + end-to-end visibility proof                                                | `app/api/v1/admin/framework/modules/route.ts`, `tests/integration/lib/framework/modules/*`                                                                                                                                                  | t-1  | backlog   | —   |
 
 t-2 and t-3 parallelise once t-1 lands. **Three PRs** — one under the parent plan's `~4 PRs`
@@ -200,8 +200,9 @@ A5 as a pure function — the "is it on at all?" question, kept out of the "is i
     This is the "earliest-relevant interface — touches Phase 1" from Appendix C: a paid tier is a
     fourth liveness input, so the signature reserves the seam now (same "shape it now, wire it later"
     discipline as `canRead`), and omitting it means "no entitlement gating," the single-tier default.
-  - Returns an **explainable** result (`{ live: boolean; reason?: 'status' | 'flag' | 'window' |
-'entitlement' }`) so admin/guidance surfaces can say _why_ a module is dark, not just that it is.
+  - Returns an **explainable** discriminated union — `{ live: true } | { live: false; reason:
+'status' | 'flag' | 'window' | 'entitlement' }` — so admin/guidance surfaces can say _why_ a
+    module is dark, and a caller can only read `reason` once it has checked `live` is false.
 - **Permutation tests** across status × flag × window × entitlement (present/absent), including
   boundary instants on the window.
 - **Done when:** `isModuleLive` is pure and total; the permutation matrix passes; the entitlement
