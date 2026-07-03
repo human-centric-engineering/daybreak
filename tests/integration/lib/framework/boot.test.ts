@@ -20,6 +20,12 @@ vi.mock('@/lib/orchestration/knowledge/search', () => ({
 vi.mock('@/lib/app/context-contributors', () => ({
   initAppContextContributors: vi.fn(),
 }));
+// Neutralise the DB half of the boot: initApp() now also runs syncFramework() →
+// syncRegisteredModules(). This test proves the CONTRIBUTOR wiring composes across
+// tiers; the sync's SQL shape is covered by sync.test.ts (no live DB in vitest).
+vi.mock('@/lib/framework/modules/sync', () => ({
+  syncRegisteredModules: vi.fn(() => Promise.resolve()),
+}));
 
 const { initApp } = await import('@/lib/app/bootstrap');
 const { MODULE_CONTEXT_TYPE, MODULE_CONTEXT_UNAVAILABLE } =

@@ -21,11 +21,12 @@ import { logger } from '@/lib/logging';
 import { initLeafApp } from '@/lib/app/leaf-bootstrap';
 
 export async function initApp(): Promise<void> {
-  // Framework init is isolated from leaf init: a framework boot bug is logged,
-  // not thrown, so core degrades gracefully (`buildContext` still works without
-  // the contributor) AND the leaf hook below still runs. A failure of the leaf
-  // hook (or of this whole function) is in turn isolated from the rest of server
-  // startup by the try/catch around `initApp()` in `instrumentation.ts`.
+  // Framework init is isolated from leaf init: a framework boot bug (including a
+  // failure to even load `@/lib/framework`) is logged, not thrown, so core degrades
+  // gracefully (`buildContext` still works without the contributor) AND the leaf hook
+  // below still runs. A failure of the leaf hook (or of this whole function) is in
+  // turn isolated from the rest of server startup by the try/catch around `initApp()`
+  // in `instrumentation.ts`.
   try {
     const { initFramework } = await import('@/lib/framework');
     initFramework();
@@ -35,6 +36,28 @@ export async function initApp(): Promise<void> {
     });
   }
 
-  // Leaf app (a fork of Daybreak) — reserved, empty by default.
+  // Leaf app (a fork of Daybreak) — reserved, empty by default. Registers the
+  // leaf's own modules (via the framework's `registerModule()`) before the sync.
+  //
+  // Deliberately NOT wrapped in try/catch: if the leaf boot throws, the rejection
+  // propagates and the sync below is SKIPPED (caught by instrumentation.register's
+  // outer try/catch). That is the fail-safe — a half-populated registry must not be
+  // reconciled, because `syncFramework()` would then flag partially-registered
+  // modules as removed. A leaf failure delays the sync to the next clean boot
+  // (the sync is idempotent) rather than corrupting `framework_module` state.
   await initLeafApp();
+
+  // Framework DB sync — runs after framework + leaf registration have completed
+  // cleanly (see above). Its own try/catch (the dynamic import is cached, so
+  // re-importing is cheap): a DB-unavailable boot must not crash
+  // `instrumentation.register()` or disarm the dev ticker; a fork with no registered
+  // modules is a no-op (syncFramework returns early without touching the table).
+  try {
+    const { syncFramework } = await import('@/lib/framework');
+    await syncFramework();
+  } catch (err) {
+    logger.error('initApp: framework sync failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }

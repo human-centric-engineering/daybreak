@@ -138,14 +138,21 @@ _Done when:_ fork builds/boots; boundary checks green and provably catch violati
 
 ### 03 · `f-module-core` — module definition, registry & liveness
 
-_Owner:_ TBD · _Depends on:_ f-bootstrap · _~4 PRs_
+_Owner:_ Simon Holmes · _Depends on:_ f-bootstrap · _~4 PRs_ · **detailed plan: [[f-module-core]]**
 
 The code-first module spine (spec §4): code defines the module; the DB row holds only operator config.
+**First pure framework-tier feature — no Sunrise touch-point, so no upstream issue.**
 
-- **t** — `ModuleDefinition` type + `registerModule()` seam + fork-owned `lib/app/modules.ts` scaffold + `initAppModules()`.
-- **t** — `Module` model (`framework_module`, free-form `String` status per X1) + boot-time upsert-by-slug sync + `isRegistered` handling.
-- **t** — Module liveness: pure `isModuleLive(module, flags, now)` (status × flag × window, A5) with an optional entitlement-predicate seam (C1); permutation tests.
-- **t** — A trivial demo module registered through the seam, proving registration → row → admin visibility end-to-end.
+- **t-1** — Registration → row: `ModuleDefinition` + `registerModule()` + registry **+** `Module` model (`framework_module`, free-form `String` status per X1) + boot-time upsert-by-slug sync (`syncFramework()` after `initLeafApp()`) + `isRegistered` handling + register→row proof test (+ the plan doc, folded in).
+- **t-2** — Module liveness: pure `isModuleLive(module, flags, now)` (status × flag × window, A5) with an optional entitlement-predicate seam (C1); permutation tests.
+- **t-3** — Read API (`GET /api/v1/admin/framework/modules`) + demo fixture **tests-only** (no live row), proving registration → row → admin visibility end-to-end.
+
+_Sizing: the rev-16 spec's four indicative tasks fold to **three** promoted PRs — the registry-only task was commit-sized and inert without its sync ([[planning-retro#B1 · Sizing self-check when promoting tasks]]), so it ships with the model+sync as one "code → row" vertical._
+
+Three forkability reconciliations vs the rev-16 spec (decided 2026-07-02, see decisions log): demo is
+tests-only (fork boots to an empty modules table); admin visibility is a read API not a page (UI →
+`f-ops-views`); the leaf registers modules from the single `initLeafApp()` hook, not a per-concern
+`lib/app/modules.ts` scaffold.
 
 ### 04 · `f-map` — facilitation map
 
@@ -369,6 +376,7 @@ Claude reads this doc for intent and the spec for the binding _how_, then produc
 
 Append-only. Newest at the top.
 
+- **2026-07-02 — `f-module-core` planned; three forkability reconciliations vs the rev-16 spec.** Guiding principle: **ship nothing a fork has to delete** — a `git fork` of Daybreak boots clean (empty modules table, one empty leaf hook, zero example rows) while every layer is proven by integration tests against a real DB + real API. (1) **Demo module is tests-only** — a fixture registered through the real `registerModule()` + real `syncRegisteredModules()` in an integration test, not a permanent `demo` row every leaf inherits and strips. (2) **Admin visibility is a read API, not a page** — `GET /api/v1/admin/framework/modules` (API-first; spec §4.4 backend-only); the module list _page_ is `f-ops-views` (feature 15). (3) **Leaf registers modules from the single `initLeafApp()` hook**, not the spec's dedicated `lib/app/modules.ts` + `initAppModules()` scaffold — the forkable shape is _one leaf boot hook, many framework `registerX()` functions_, so the leaf fills exactly one file and `initApp()`'s shape stays frozen (`initFramework()` → `initLeafApp()` → `syncFramework()`) as the framework grows. Also: **first pure framework-tier feature** — everything lives in `lib/framework/modules/`, touches no Sunrise core seam, so it files **no upstream issue** (unlike f-seams/f-bootstrap). Detail: [[f-module-core]].
 - **2026-07-02 — Framework boot hook: generic `initApp()` seam, built fork-first to inform upstream.** [[f-bootstrap]]'s last open question resolved. Daybreak's `initFramework()` is invoked at boot via a **generic** seam: Sunrise's `instrumentation.ts` calls `initApp()` from a reserved, empty-by-default `lib/app/bootstrap.ts`; Daybreak's _filled_ copy imports `@/lib/framework` and runs `initFramework()`, delegating to a fresh empty leaf hook. **Core never references `@/lib/framework`** — a static dynamic-import specifier resolves at _build_ time, so Sunrise/ConQuest (no such folder) would fail to build; the reference must be absent from core, living only in the fork-owned filled scaffold (the `lib/app/capabilities.ts` pattern, applied to boot). Built **fork-first as the final generic shape** (not an interim hack) so the eventual upstream PR is a clean extract; file the upstream Sunrise issue as/after `f-bootstrap` t-3, referencing the working impl. Couples t-2↔t-3: the boundary CI whitelists the boot file as the single sanctioned core→framework path.
 - **2026-07-02 — Fork-first informs upstream (working model).** When Daybreak needs a generic capability Sunrise lacks, build it **correctly in the fork as its final generic shape**, prove it in situ, and use that to inform an upstream Sunrise PR — never an interim/throwaway. Upstream may refine for its own guardrails; propose from something real, adopt what lands. This is `building-on-sunrise` (fix-in-place → classify → promote upstream) stated as a working preference.
 - **2026-07-02 — Framework schema naming: `framework_` tables + clean model names.** [[f-bootstrap]] reconciliation #3 resolved. Framework DDL uses the spec's `framework-*.prisma` files / `framework_` table prefix / `framework_`-named migrations (Appendix B), **not** Sunrise's generic leaf `app_` convention — in the three-tier model `app_` is the _leaf app's_ namespace, so it would tangle Daybreak's DDL with Lelanea's and break the boundary CI that keys on `framework_`. Prisma **model** names stay clean/unprefixed (`model Module { @@map("framework_module") }`) for client ergonomics; accepted low risk of a future Sunrise model-name collision, mitigated by a cheap framework-side rename.
