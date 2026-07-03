@@ -346,6 +346,10 @@ Per the Hub's `parked` Phase status — carried so they're not lost, kept out of
 
 ## How features and tasks work
 
+> This section is the **structure** (levels, statuses, sizing). For the **execution rhythm** — how to
+> take a feature from claim to shipped (plan-first → per-task gate loop → close-out) — see
+> [[building-a-feature]]. New contributors (and their agents): read that first.
+
 ### Status vocabulary
 
 - **Features:** `not started | in flight | blocked | shipped`. Owner + `depends on`; `blocked` lists what's blocking.

@@ -21,6 +21,12 @@
 > §9 upstream sync) and [`.context/framework/README.md`](./.context/framework/README.md)
 > (the three-tier model + ownership table).
 >
+> **Building or picking up a framework feature?** Start with
+> [`.context/framework/planning/building-a-feature.md`](./.context/framework/planning/building-a-feature.md)
+> — the operational flow (plan-first → per-task gate loop → close-out) — and the
+> [board in `plan.md`](./.context/framework/planning/plan.md) for what's claimable. This saves
+> you the learning curve the first features went through.
+>
 > **Three tiers: Sunrise → Daybreak → app.** Apps are built by forking **Daybreak**,
 > not Sunrise. So Daybreak applies Sunrise's fork discipline _one level up_: it owns the
 > framework layer and **reserves the leaf-app surface empty** for its own forks. Working in

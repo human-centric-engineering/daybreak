@@ -114,6 +114,8 @@ applied Sunrise migration; add a follow-up. Full reconciliation recipe:
 - [`.context/substrate.md`](../substrate.md) — Sunrise's platform documentation entry point
 - [`planning/`](./planning/) — the Daybreak build plan (`plan.md`), spec
   (`framework-architecture.md`), and per-feature plans
+- [`planning/building-a-feature.md`](./planning/building-a-feature.md) — **start here to build or pick
+  up a feature**: the operational flow (plan-first → per-task gate loop → close-out)
 
 ## Daybreak feature docs
 
