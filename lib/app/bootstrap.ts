@@ -21,11 +21,12 @@ import { logger } from '@/lib/logging';
 import { initLeafApp } from '@/lib/app/leaf-bootstrap';
 
 export async function initApp(): Promise<void> {
-  // Framework init is isolated from leaf init: a framework boot bug is logged,
-  // not thrown, so core degrades gracefully (`buildContext` still works without
-  // the contributor) AND the leaf hook below still runs. A failure of the leaf
-  // hook (or of this whole function) is in turn isolated from the rest of server
-  // startup by the try/catch around `initApp()` in `instrumentation.ts`.
+  // Framework init is isolated from leaf init: a framework boot bug (including a
+  // failure to even load `@/lib/framework`) is logged, not thrown, so core degrades
+  // gracefully (`buildContext` still works without the contributor) AND the leaf hook
+  // below still runs. A failure of the leaf hook (or of this whole function) is in
+  // turn isolated from the rest of server startup by the try/catch around `initApp()`
+  // in `instrumentation.ts`.
   try {
     const { initFramework } = await import('@/lib/framework');
     initFramework();
@@ -35,6 +36,21 @@ export async function initApp(): Promise<void> {
     });
   }
 
-  // Leaf app (a fork of Daybreak) — reserved, empty by default.
+  // Leaf app (a fork of Daybreak) — reserved, empty by default. Registers the
+  // leaf's own modules (via the framework's `registerModule()`) before the sync.
   await initLeafApp();
+
+  // Framework DB sync — runs AFTER framework + leaf registration so every
+  // registered module reaches its `framework_module` row. Its own try/catch (the
+  // dynamic import is cached, so re-importing is cheap): a DB-unavailable boot must
+  // not crash `instrumentation.register()` or disarm the dev ticker; a fork with no
+  // registered modules syncs an empty registry (a no-op).
+  try {
+    const { syncFramework } = await import('@/lib/framework');
+    await syncFramework();
+  } catch (err) {
+    logger.error('initApp: framework sync failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }

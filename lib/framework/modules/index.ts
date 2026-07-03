@@ -2,7 +2,12 @@
  * Modules domain — registered, bounded feature units: definition + registry,
  * generic config, agent/workflow/knowledge bindings, and engagement stats.
  *
- * Empty skeleton (f-bootstrap t-1). Populated from `f-module-core` onward — see
- * `.context/framework/planning/plan.md` (features 03, 06, 07, 08) and the spec §4.
+ * `f-module-core` populates the code-first spine: the `ModuleDefinition` type, the
+ * `registerModule()` seam + registry, and the boot-time `framework_module` sync.
+ * Config (06), bindings (07), and engagement (08) land in their own features.
+ * See `.context/framework/planning/f-module-core.md` and the spec §4.
  */
-export {};
+
+export type { ModuleDefinition } from '@/lib/framework/modules/definition';
+export { registerModule, getRegisteredModules } from '@/lib/framework/modules/registry';
+export { syncRegisteredModules } from '@/lib/framework/modules/sync';

@@ -6,5 +6,37 @@
 // only in `framework_`-named migrations touching only `framework_*` tables.
 // Prisma model names stay clean/unprefixed (e.g. `model Module { @@map("framework_module") }`).
 //
-// Empty skeleton (f-bootstrap t-1) — no models yet. The first tables arrive in
-// `f-module-core`. See `.context/framework/planning/plan.md` feature 03 and spec §4.
+// First table (f-module-core t-1). See `.context/framework/planning/f-module-core.md`
+// and spec §4.1.
+
+// A registered module's operator-controlled row. The code half (identity, config
+// schema, capabilities…) lives in a `ModuleDefinition` registered in code; this row
+// holds only what an operator controls. Registration syncs code → row by slug at
+// boot (`syncRegisteredModules()`), which writes code-owned data on create and only
+// re-marks `isRegistered` on update — operator columns are never clobbered.
+//
+// `status`/`audience` are free-form `String`, not Prisma enums (convention X1: an
+// enum makes every new value a migration and complicates fork merges). Effective
+// availability is COMPUTED, never stored (`isModuleLive()` — status × flag × window,
+// f-module-core t-2); this row stores the inputs, not the verdict.
+//
+// Scope note: config *versioning* (`ModuleVersion`, A10 → f-module-config) and the
+// binding pivots (agents/workflows, A6/A8 → f-module-bindings) are intentionally
+// absent — added by the features that own them, so no unused columns land early.
+model Module {
+  id              String    @id @default(cuid())
+  slug            String    @unique // matches the registered ModuleDefinition.slug
+  name            String // display name; defaults from code, operator-overridable
+  status          String    @default("draft") // draft | active | scheduled | retired (free-form, X1)
+  featureFlagName String? // optional binding to a FeatureFlag (one on/off switch)
+  availableFrom   DateTime? // limited-time window start (null = open-ended)
+  availableUntil  DateTime? // limited-time window end (null = open-ended)
+  audience        String    @default("all") // all | invite | flag-gated (free-form, X1)
+  config          Json      @default("{}") // operator values, validated by the module's configSchema (f-module-config)
+  isRegistered    Boolean   @default(true) // false = code removed but row retained for audit
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([status])
+  @@map("framework_module")
+}
