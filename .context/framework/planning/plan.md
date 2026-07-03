@@ -31,17 +31,17 @@ This plan uses the Hub's levels, with each level meaning exactly what it means i
 
 ## Project
 
-| Field                   | Value                                                                                                                       |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Name                    | **Daybreak** (the expert-led-apps framework)                                                                                |
-| Active epic             | **Framework v1** (the whole build below)                                                                                    |
-| Spec                    | [[framework-architecture]] rev 16 (Binding decisions in Appendix A)                                                         |
-| Repo                    | `human-centric-engineering/daybreak` — fork of `human-centric-engineering/sunrise` (tracking `upstream`, at Sunrise v0.5.0) |
-| Placement               | Separate fork of Sunrise, **not** core ([[placement-decision-memo                                                           | decision 2026-06-23]]) |
-| Relationship to Sunrise | [[building-on-sunrise]], one level up: fix-in-place → classify → promote generic upstream; Hub-coordinated                  |
-| First app               | Lelanea (transcendental coaching) — forks this framework repo                                                               |
-| Lead                    | Simon Holmes                                                                                                                |
-| Status                  | `in flight` — `f-seams` shipped (Sunrise v0.5.0); `f-bootstrap` next                                                        |
+| Field                   | Value                                                                                                                                                                                 |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Name                    | **Daybreak** (the expert-led-apps framework)                                                                                                                                          |
+| Active epic             | **Framework v1** (the whole build below)                                                                                                                                              |
+| Spec                    | [[framework-architecture]] rev 16 (Binding decisions in Appendix A)                                                                                                                   |
+| Repo                    | `human-centric-engineering/daybreak` — fork of `human-centric-engineering/sunrise` (tracking `upstream`, at Sunrise v0.5.0)                                                           |
+| Placement               | Separate fork of Sunrise, **not** core ([[placement-decision-memo                                                                                                                     | decision 2026-06-23]]) |
+| Relationship to Sunrise | [[building-on-sunrise]], one level up: fix-in-place → classify → promote generic upstream; Hub-coordinated                                                                            |
+| First app               | Lelanea (transcendental coaching) — forks this framework repo                                                                                                                         |
+| Lead                    | Simon Holmes                                                                                                                                                                          |
+| Status                  | `in flight` — `f-seams` + `f-bootstrap` + `f-module-core` **shipped**; **5 features available to claim** (`f-map`, `f-slots`, `f-module-config`, `f-module-bindings`, `f-engagement`) |
 
 ---
 
@@ -84,37 +84,45 @@ Filed against Sunrise on 2026-06-30 while building ConQuest. They split cleanly 
 
 ## Features (epic: Framework v1)
 
-A flat list, shown in rough dependency order (most-ready first), the way the Hub would sort it. Order is _emergent from `depends on`_, not prescriptive — the [[#3. Human-centric principles|exploratory-ordering principle]] holds. PR counts are indicative sizing, readable at a glance.
+A flat list, shown in rough dependency order (most-ready first), the way the Hub would sort it. Order is _emergent from `depends on`_, not prescriptive — the [[#3. Human-centric principles|exploratory-ordering principle]] holds. PR counts are indicative sizing. The **Owner** and **Status** columns are the at-a-glance board: who holds what, and what's free to claim (see [[#Board — status &amp; claiming|the board legend]] below the table).
 
-| #   | Feature                 | Owner           | Depends on                                        | ~PRs | Capability                                       |
-| --- | ----------------------- | --------------- | ------------------------------------------------- | ---- | ------------------------------------------------ |
-| 01  | `f-seams`               | Simon (Sunrise) | —                                                 | 2    | Two generic Sunrise core seams (pre-fork)        |
-| 02  | `f-bootstrap`           | Simon Holmes    | f-seams                                           | 4    | Fork + framework skeleton + enforced boundary    |
-| 03  | `f-module-core`         | TBD             | f-bootstrap                                       | 4    | Module definition, registry, seam, liveness      |
-| 04  | `f-map`                 | TBD             | f-bootstrap                                       | 4    | Facilitation map: schema, versioning, format     |
-| 05  | `f-slots`               | TBD             | f-bootstrap                                       | 3    | Slot definitions + insert-only values            |
-| 06  | `f-module-config`       | TBD             | f-module-core                                     | 4    | Generic Zod config form + config versioning      |
-| 07  | `f-module-bindings`     | TBD             | f-module-core                                     | 4    | Agent / workflow / knowledge bindings            |
-| 08  | `f-engagement`          | TBD             | f-module-core                                     | 3    | Engagement event stream + stats + feedback       |
-| 09  | `f-journey-state`       | TBD             | f-map                                             | 3    | Journey state models + access discipline         |
-| 10  | `f-slot-capture`        | TBD             | f-slots                                           | 3    | `fill_slot` / `get_state` capture capabilities   |
-| 11  | `f-engine`              | TBD             | f-map, f-journey-state                            | 5    | Deterministic engine + GraphStore                |
-| 12  | `f-guidance`            | TBD             | f-engine, f-slot-capture                          | 5    | Guidance service, capabilities, chat injection   |
-| 13  | `f-facilitation-agents` | TBD             | f-guidance                                        | 3    | Facilitation agent family + surface-scoping      |
-| 14  | `f-map-editor`          | TBD             | f-map, f-engine                                   | 5    | Map editor + journey dry-run simulator           |
-| 15  | `f-ops-views`           | TBD             | f-module-config, f-journey-state                  | 4    | Module admin + journey explorer                  |
-| 16  | `f-atlas`               | TBD             | f-module-bindings, f-facilitation-agents, f-slots | 3    | Framework atlas (composition view)               |
-| 17  | `f-policies`            | TBD             | f-facilitation-agents                             | 4    | Typed facilitation policy kinds                  |
-| 18  | `f-emergence`           | TBD             | f-engine, f-facilitation-agents                   | 4    | Structure-change proposal pipeline + eval wiring |
-| 19  | `f-overlays`            | TBD             | f-guidance                                        | 3    | pgvector similarity + proactive guidance         |
+| #   | Feature                 | Owner           | Status                                                      | Depends on                                        | ~PRs | Capability                                       |
+| --- | ----------------------- | --------------- | ----------------------------------------------------------- | ------------------------------------------------- | ---- | ------------------------------------------------ |
+| 01  | `f-seams`               | Simon (Sunrise) | **shipped** (v0.5.0)                                        | —                                                 | 2    | Two generic Sunrise core seams (pre-fork)        |
+| 02  | `f-bootstrap`           | Simon Holmes    | **shipped** (#4/#6/#8/#9)                                   | f-seams                                           | 4    | Fork + framework skeleton + enforced boundary    |
+| 03  | `f-module-core`         | Simon Holmes    | **shipped** (#10 / #11 / #12)                               | f-bootstrap                                       | 3    | Module definition, registry, seam, liveness      |
+| 04  | `f-map`                 | _unclaimed_     | **available** ▲                                             | f-bootstrap ✅                                    | 4    | Facilitation map: schema, versioning, format     |
+| 05  | `f-slots`               | _unclaimed_     | **available** ▲                                             | f-bootstrap ✅                                    | 3    | Slot definitions + insert-only values            |
+| 06  | `f-module-config`       | _unclaimed_     | **available** ▲                                             | f-module-core ✅                                  | 4    | Generic Zod config form + config versioning      |
+| 07  | `f-module-bindings`     | _unclaimed_     | **available** ▲                                             | f-module-core ✅                                  | 4    | Agent / workflow / knowledge bindings            |
+| 08  | `f-engagement`          | _unclaimed_     | **available** ▲                                             | f-module-core ✅                                  | 3    | Engagement event stream + stats + feedback       |
+| 09  | `f-journey-state`       | _unclaimed_     | blocked → f-map                                             | f-map                                             | 3    | Journey state models + access discipline         |
+| 10  | `f-slot-capture`        | _unclaimed_     | blocked → f-slots                                           | f-slots                                           | 3    | `fill_slot` / `get_state` capture capabilities   |
+| 11  | `f-engine`              | _unclaimed_     | blocked → f-map, f-journey-state                            | f-map, f-journey-state                            | 5    | Deterministic engine + GraphStore                |
+| 12  | `f-guidance`            | _unclaimed_     | blocked → f-engine, f-slot-capture                          | f-engine, f-slot-capture                          | 5    | Guidance service, capabilities, chat injection   |
+| 13  | `f-facilitation-agents` | _unclaimed_     | blocked → f-guidance                                        | f-guidance                                        | 3    | Facilitation agent family + surface-scoping      |
+| 14  | `f-map-editor`          | _unclaimed_     | blocked → f-map, f-engine                                   | f-map, f-engine                                   | 5    | Map editor + journey dry-run simulator           |
+| 15  | `f-ops-views`           | _unclaimed_     | blocked → f-module-config, f-journey-state                  | f-module-config, f-journey-state                  | 4    | Module admin + journey explorer                  |
+| 16  | `f-atlas`               | _unclaimed_     | blocked → f-module-bindings, f-facilitation-agents, f-slots | f-module-bindings, f-facilitation-agents, f-slots | 3    | Framework atlas (composition view)               |
+| 17  | `f-policies`            | _unclaimed_     | blocked → f-facilitation-agents                             | f-facilitation-agents                             | 4    | Typed facilitation policy kinds                  |
+| 18  | `f-emergence`           | _unclaimed_     | blocked → f-engine, f-facilitation-agents                   | f-engine, f-facilitation-agents                   | 4    | Structure-change proposal pipeline + eval wiring |
+| 19  | `f-overlays`            | _unclaimed_     | blocked → f-guidance                                        | f-guidance                                        | 3    | pgvector similarity + proactive guidance         |
 
 **Critical path:** `f-seams → f-bootstrap → f-module-core/f-map → f-journey-state → f-engine → f-guidance → f-facilitation-agents`. Admin (14–16) and governance (17–19) hang off that spine and parallelise once it exists.
+
+### Board — status & claiming
+
+**Legend.** `shipped` — merged to `main`. `in flight` — an owner is actively building it (its promoted tasks live in the feature's detailed plan). `available` ▲ — every dependency is shipped and no one owns it: **free to claim now**. `blocked → X` — waiting on feature X to ship.
+
+**Claimable right now (▲) — five open features:** with `f-bootstrap` and `f-module-core` both shipped, the unblocked set is **`f-map` (04)**, **`f-slots` (05)**, **`f-module-config` (06)**, **`f-module-bindings` (07)**, and **`f-engagement` (08)**. `f-map` and `f-slots` sit at the head of the critical path (they unblock the facilitation spine — engine, guidance), so prefer those first; 06–08 extend the now-complete module layer and can run in parallel behind them.
+
+**To claim a feature:** put your name in its **Owner** cell + set **Status** to `in flight`, then create its detailed plan (`.context/framework/planning/<feature>.md`, following [[f-module-core]]) and promote its first tasks. Flip the feature to `shipped` when its last task's PR merges. One owner per feature (the unit of ownership); tasks within a feature are the PR-sized units that owner advances. Suggested split with **John** joining: the claimable features are mutually independent, so different owners can build them in parallel without stepping on each other — e.g. one takes `f-map`, another `f-slots`.
 
 ---
 
 ### 01 · `f-seams` — Sunrise core seams (pre-fork)
 
-_Owner:_ Simon (Sunrise) · _Depends on:_ — · _~2 PRs_
+_Owner:_ Simon (Sunrise) · _Status:_ **shipped** (Sunrise v0.5.0) · _Depends on:_ — · _~2 PRs_
 
 The framework's only two core touch-points, PR'd to Sunrise _before_ forking (verified absent, June 2026). Generic, so they belong upstream.
 
@@ -125,7 +133,7 @@ _Done when:_ both merged to Sunrise `main`; vanilla behaviour unchanged.
 
 ### 02 · `f-bootstrap` — fork + skeleton + boundary
 
-_Owner:_ Simon Holmes · _Depends on:_ f-seams · _~4 PRs_ · **detailed plan: [[f-bootstrap]]**
+_Owner:_ Simon Holmes · _Status:_ **shipped** (#4 / #6 / #8 / #9) · _Depends on:_ f-seams · _~4 PRs_ · **detailed plan: [[f-bootstrap]]**
 
 The framework repo's home and its enforced boundary.
 
@@ -138,7 +146,7 @@ _Done when:_ fork builds/boots; boundary checks green and provably catch violati
 
 ### 03 · `f-module-core` — module definition, registry & liveness
 
-_Owner:_ Simon Holmes · _Depends on:_ f-bootstrap · _~4 PRs_ · **detailed plan: [[f-module-core]]**
+_Owner:_ Simon Holmes · _Status:_ **shipped** (t-1 #10 · t-2 #11 · t-3 #12) · _Depends on:_ f-bootstrap · _~3 PRs_ · **detailed plan: [[f-module-core]]**
 
 The code-first module spine (spec §4): code defines the module; the DB row holds only operator config.
 **First pure framework-tier feature — no Sunrise touch-point, so no upstream issue.**
@@ -156,7 +164,7 @@ tests-only (fork boots to an empty modules table); admin visibility is a read AP
 
 ### 04 · `f-map` — facilitation map
 
-_Owner:_ TBD · _Depends on:_ f-bootstrap · _~4 PRs_
+_Owner:_ _unclaimed_ · _Status:_ **available to claim** ▲ (dep `f-bootstrap` shipped) · _Depends on:_ f-bootstrap · _~4 PRs_
 
 The authored typed-graph, whole-map snapshot versions (F1/F2).
 
@@ -166,7 +174,7 @@ The authored typed-graph, whole-map snapshot versions (F1/F2).
 
 ### 05 · `f-slots` — slot definitions + values
 
-_Owner:_ TBD · _Depends on:_ f-bootstrap · _~3 PRs_
+_Owner:_ _unclaimed_ · _Status:_ **available to claim** ▲ (dep `f-bootstrap` shipped) · _Depends on:_ f-bootstrap · _~3 PRs_
 
 The data-slot shape the other layers need (spec §6); deep capture-loop design deferred (§9.1).
 
@@ -395,6 +403,31 @@ Append-only. Newest at the top.
 
 Append-only. Newest at the top.
 
+- **2026-07-03 — `f-module-core` **shipped** (t-1 #10, t-2 #11, t-3 #12 all merged).** The
+  code-first module spine, entirely framework-tier (no Sunrise touch-point, no upstream issue). **t-1**
+  (#10) — `ModuleDefinition` + `registerModule()` + registry + `framework_module` model + boot-time
+  **set-based** `syncFramework()` (code-review rebuilt it from the planned per-slug upsert: that churned
+  `updatedAt` every boot and `notIn:[]` mass-unregistered on an empty registry — now createMany +
+  `isRegistered`-guarded updateManys + empty-registry no-op). **t-2** (#11) — pure
+  `isModuleLive(module, flags, now, entitlement?)` (A5) returning a discriminated union, with the C1
+  entitlement seam reserved; `MODULE_STATUS` vocabulary. **t-3** (#12) — `GET
+/api/v1/admin/framework/modules` (`withAdminAuth`; first `app/api/v1/admin/framework/` route — first
+  file to exercise that tier's ESLint glob) + `listModules()` + an end-to-end register→sync→read
+  visibility test (stateful in-memory Prisma fake). Every PR ran the full gate loop (`/pre-pr` →
+  `/security-review` → `/code-review`); code-review caught real defects on #10 and #12. Sizing: the
+  spec's 4 indicative tasks folded to 3 promoted PRs ([[planning-retro#B1]]). A fresh fork still boots to
+  an empty modules table. Detail: [[f-module-core]]. `f-module-core` is **shipped**, unblocking
+  `f-module-config` / `f-module-bindings` / `f-engagement`.
+- **2026-07-03 — `f-bootstrap` shipped (t-2 #8, t-3 #9).** The enforced boundary (X6) and the boot seam.
+  **t-2** (#8) — framework↔Sunrise boundary via **fork-first** ESLint/CI seams (fork-owned
+  `lib/framework/eslint.config.mjs` + reserved leaf seam + a one-line root spread + an `--if-present` CI
+  hook), not direct edits to platform-owned config; `scripts/boundary/` proves it bites. **t-3** (#9) —
+  `initFramework()` + the generic `initApp()` **core→fork boot seam** (`instrumentation.ts` → reserved
+  `lib/app/bootstrap.ts` → `@/lib/framework`, dynamic-import so a framework-less fork still builds),
+  with failure-isolation added in code-review. Both seams built fork-first as their final generic shape;
+  upstream Sunrise issues **#382** (ESLint/CI seams) and **#385** (boot seam + `/framework` reservation)
+  filed with the fork-build learnings for the Sunrise agent to implement. `f-bootstrap` is **shipped**;
+  execution lessons captured in [[planning-retro]] §B (B5–B9).
 - **2026-07-02 — `f-bootstrap` started; t-1 (framework skeleton) merged.** `lib/framework/{modules,facilitation,data-slots,shared}/` stood up, with `shared/scope.ts` (the one scoping vocabulary) as the only real logic; three empty `framework-*.prisma` files; a scope test. Merged via **PR #6** (all gates green: pre-pr + code-review clean). Sizing note: t-1 landed commit-sized rather than PR-sized — captured as process feedback in [[planning-retro]].
 - **2026-07-02 — `f-seams` shipped, and Sunrise v0.5.0 merged into the fork.** The two generic core seams were filed as Sunrise **#372**, implemented upstream in **PR #373** (`CapabilityContext.scope?: Record<string,string>` + the `registerContextContributor()` registry on `buildContext()` + the empty fork-owned `lib/app/context-contributors.ts` scaffold), and released in **Sunrise v0.5.0**. Merged into this Daybreak fork via **PR #4** — `SUNRISE_VERSION → 0.5.0` while Daybreak's app version stays `0.1.0`; three trivial conflicts (`package.json`, `package-lock.json`, `CLAUDE.md`) resolved keeping the fork's identity + banner; no new migrations. Type-check / lint / format green, 64 seam tests pass. `f-seams` is **shipped**; `f-bootstrap` is unblocked and next.
   - _Note on ownership:_ scoped in the plan as "2 PRs, owner Simon (Sunrise)"; delivered as us filing the Sunrise issue and upstream implementing it as a single PR — the seams are generic, so they belong to Sunrise, exactly as intended.
