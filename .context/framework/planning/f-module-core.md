@@ -2,7 +2,7 @@
 name: f-module-core
 feature: 03 · f-module-core
 epic: Framework v1
-status: in flight (planning)
+status: shipped (t-1 #10 · t-2 #11 · t-3 #12)
 owner: Simon Holmes
 depends_on: f-bootstrap (shipped — t-0 #4 / t-1 #6 / t-2 #8 / t-3 #9)
 spec: framework-architecture.md §4 (Modules) + Appendix A (A3 / A4 / A5 / A9 / A10 / X1) + Appendix C (C1)
@@ -101,11 +101,11 @@ Concrete reuse anchors found in-tree:
 
 ## Tasks (promoted)
 
-| ID  | Task                                                                                                                                   | Files                                                                                                                                                                                                                                       | Deps | Status    | PR  |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | --------- | --- |
-| t-1 | **Registration → row**: `ModuleDefinition` + `registerModule()` + registry + `Module` model + boot sync + `isRegistered` (+ this plan) | `lib/framework/modules/{definition,registry,sync,index}.ts`, `lib/framework/index.ts`, `lib/app/bootstrap.ts`, `prisma/schema/framework-modules.prisma`, `framework_…` migration, `tests/…`, `.context/framework/planning/f-module-core.md` | —    | **done**  | #10 |
-| t-2 | **Liveness**: pure `isModuleLive(module, flags, now)` (A5) + entitlement-predicate seam (C1)                                           | `lib/framework/modules/{liveness,status}.ts`, `tests/…`                                                                                                                                                                                     | t-1  | **done**  | #11 |
-| t-3 | **Admin read API**: `GET /api/v1/admin/framework/modules` + end-to-end visibility proof                                                | `lib/framework/modules/queries.ts`, `app/api/v1/admin/framework/modules/route.ts`, `tests/integration/{api/v1/admin/framework/modules,lib/framework/modules}/*`                                                                             | t-1  | available | —   |
+| ID  | Task                                                                                                                                   | Files                                                                                                                                                                                                                                       | Deps | Status   | PR  |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | -------- | --- |
+| t-1 | **Registration → row**: `ModuleDefinition` + `registerModule()` + registry + `Module` model + boot sync + `isRegistered` (+ this plan) | `lib/framework/modules/{definition,registry,sync,index}.ts`, `lib/framework/index.ts`, `lib/app/bootstrap.ts`, `prisma/schema/framework-modules.prisma`, `framework_…` migration, `tests/…`, `.context/framework/planning/f-module-core.md` | —    | **done** | #10 |
+| t-2 | **Liveness**: pure `isModuleLive(module, flags, now)` (A5) + entitlement-predicate seam (C1)                                           | `lib/framework/modules/{liveness,status}.ts`, `tests/…`                                                                                                                                                                                     | t-1  | **done** | #11 |
+| t-3 | **Admin read API**: `GET /api/v1/admin/framework/modules` + end-to-end visibility proof                                                | `lib/framework/modules/queries.ts`, `app/api/v1/admin/framework/modules/route.ts`, `tests/integration/{api/v1/admin/framework/modules,lib/framework/modules}/*`                                                                             | t-1  | **done** | #12 |
 
 t-2 and t-3 parallelise once t-1 lands. **Three PRs** — one under the parent plan's `~4 PRs`
 estimate, after folding the original commit-sized registry-only task into its sync (per
