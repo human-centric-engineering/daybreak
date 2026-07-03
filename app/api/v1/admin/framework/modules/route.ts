@@ -8,9 +8,14 @@
  * (the ESLint config lists `app/api/v1/admin/framework/**` in the framework block):
  * it may import `@/lib/framework/*`, and core/app-shell code must not import it.
  *
- * Authentication: admin only (`withAdminAuth`, which also applies the automatic
- * section rate-limit — no per-handler limiter is needed for a read). The module
- * list *page* is deferred to `f-ops-views`; this endpoint is the API-first surface.
+ * Authentication: admin only (`withAdminAuth`). Rate limiting is NOT applied by the
+ * guard — the automatic `/api/v1/**` section cap is enforced by `proxy.ts` via the
+ * central policy table (CLAUDE.md "Rate limiting is automatic"), so a read handler
+ * needs no per-handler limiter.
+ *
+ * Returns the raw `Module` rows (including operator `config`) — intentional for this
+ * admin-only read; DTO shaping is deferred to `f-ops-views`, which owns the list
+ * *page*. This endpoint is the API-first surface.
  */
 
 import { withAdminAuth } from '@/lib/auth/guards';

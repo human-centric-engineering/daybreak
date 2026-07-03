@@ -220,8 +220,9 @@ orderBy: { slug: 'asc' } })`. Separated from `sync.ts` (write side) so admin/ops
   testable data fn, mirroring how Sunrise admin routes delegate reads to a lib fn (`getAllFlags`). The
   `Module` type is imported straight from `@prisma/client` — **not** re-exported through core
   `types/prisma.ts`, which stays free of framework vocabulary (X6). Does not swallow errors into `[]`.
-- **`app/api/v1/admin/framework/modules/route.ts`** — `GET`, guarded by `withAdminAuth()` (inherits
-  the automatic section rate-limit; no handler limiter), returns `listModules()` via
+- **`app/api/v1/admin/framework/modules/route.ts`** — `GET`, guarded by `withAdminAuth()` (auth only —
+  the `/api/v1/**` section rate-limit is applied by `proxy.ts`, not the guard, so no handler limiter is
+  needed for a read), returns `listModules()` via
   `successResponse()`. **First route under `app/api/v1/admin/framework/`** — establishes the framework
   admin-API namespace, and is the first file to actually exercise the X6 ESLint glob
   `app/api/v1/admin/framework/**` as _framework tier_ (it imports `@/lib/framework/*`; flat-config

@@ -101,7 +101,7 @@ describe('GET /api/v1/admin/framework/modules', () => {
       vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
     });
 
-    it('returns the module rows in the success envelope, ordered by slug', async () => {
+    it('passes the rows through the success envelope and requests slug ordering from the DB', async () => {
       const rows = [
         mockModule({ id: 'mod_a', slug: 'alpha', name: 'Alpha' }),
         mockModule({ id: 'mod_b', slug: 'beta', name: 'Beta', isRegistered: false }),
@@ -113,9 +113,11 @@ describe('GET /api/v1/admin/framework/modules', () => {
       expect(response.status).toBe(200);
       const body = await parseResponse<{ success: boolean; data: Module[] }>(response);
       expect(body.success).toBe(true);
+      // The route returns exactly the rows the query gave it, unshaped (raw Module rows).
       expect(body.data.map((m) => m.slug)).toEqual(['alpha', 'beta']);
       expect(body.data[1]?.isRegistered).toBe(false);
-      // Read is ordered by slug (the query contract listModules relies on).
+      // The ORDERING guarantee lives in the query, not the mock: assert listModules
+      // asks the DB to sort by slug (the mock can't order; Prisma does at runtime).
       expect(prisma.module.findMany).toHaveBeenCalledWith({ orderBy: { slug: 'asc' } });
     });
 
