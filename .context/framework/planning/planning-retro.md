@@ -115,7 +115,9 @@ both levels; each is filed at its primary home with a cross-reference. Mark an e
   _(Not about "done work" — the other tasks were correctly sized; this is purely the sliver.)_
 - **Feedback.** When promoting indicative tasks to real ones, the feature-plan agent must run a
   **sizing self-check**: if a task's only real content is scaffolding + one small file, **fold it
-  into its dependent task** and size by real changed surface. _Status: open._
+  into its dependent task** and size by real changed surface. _Status: **confirmed in f-module-core**
+  — the sizing self-check ran at plan time and folded the spec's commit-sized registry-only task into
+  its model+sync (4 indicative → 3 promoted), so the sliver never shipped. The lesson works; keep it._
 
 ### B2 · Start every feature plan with a "reconcile spec vs current repo reality" section — it worked
 
@@ -143,4 +145,71 @@ both levels; each is filed at its primary home with a cross-reference. Mark an e
 
 - **Feedback.** Mirror [A4] at task granularity: each promoted task's **"Done when"** should list
   the standard gates (`/pre-pr`, then `/code-review`, green) as explicit completion criteria, so
-  "task complete" provably includes them. _Status: open._
+  "task complete" provably includes them. _Status: **applied in f-module-core** — every promoted task's
+  Done-when carries the gate line; keep._
+
+### B5 · Wiring into platform-owned central config → build the seam fork-first, not direct edits
+
+- **Discovery.** `f-bootstrap` t-2 first wired the boundary by **editing platform-owned central config
+  directly** (`eslint.config.mjs`, `ci.yml`). That passed review but was the wrong shape — every such
+  edit is a merge conflict on the next Sunrise pull. It was rebuilt fork-first (fork-owned
+  `lib/framework/eslint.config.mjs` + a reserved leaf seam + a one-line spread in root; a generic
+  `--if-present` CI hook) only after the human pushed back.
+- **Impact.** Real rework late; a "review-passing but merge-hostile" implementation nearly shipped.
+- **Feedback.** When a feature must extend a **platform-owned central config file** and no seam exists,
+  the feature plan must **call for building the seam fork-first (its final generic shape)** — a minimal
+  generic hook in the platform file that delegates to a fork-owned file — _not_ direct edits deferred
+  for "later." Cross-ref [A3] (enumerate the seam) and the "fork-first informs upstream" decision.
+  _Status: open._
+
+### B6 · A core→fork seam's plan must specify resilience / failure-isolation, not just the mechanism
+
+- **Discovery.** The `initApp()` boot seam ([B3]) was designed for _mechanism_ but not _resilience_.
+  Code-review (not planning) found the unguarded `await initApp()` would let any fork boot error reject
+  `instrumentation.register()` and silently disarm the dev ticker. Two isolation layers were added
+  after the fact.
+- **Impact.** A resilience gap in a load-bearing seam surfaced in review rather than being specified up
+  front — cheap to fix here, expensive if it had shipped.
+- **Feedback.** Extend [B3]: when a feature builds a **core→fork** (or any boot-time) seam, the plan
+  must **specify the failure-isolation contract** — what happens when the fork side throws, and how the
+  host degrades — as an explicit requirement, not an implementation detail discovered in review.
+  _Status: open._
+
+### B7 · Filing the upstream issue is the fork feature's own Done-when deliverable
+
+- **Discovery.** `f-bootstrap` t-3 initially recorded the upstream Sunrise issue as "delegated to the
+  Sunrise agent." The human corrected this: filing the issue — **with the fork-perspective learnings
+  the in-fork build produced** — is the completing act of the _downstream_ feature that built the
+  reference, precisely because building it fork-first is what reveals what the seam actually needs.
+- **Impact.** The plan nearly dropped a cross-repo deliverable on the floor by treating it as someone
+  else's job.
+- **Feedback.** A feature that builds a fork-first seam ([B5]) or a core→fork mechanism ([B6]) must list
+  **"file the upstream issue, carrying the fork-build learnings"** in its own Done-when. The Sunrise
+  side _implements_; the fork side _files with evidence_. _Status: open._
+
+### B8 · Boot-time reconcile: plan the write shape's correctness, don't just say "upsert"
+
+- **Discovery.** `f-module-core` t-1's plan sketched the module sync as "boot-time upsert-by-slug."
+  Code-review found the naive per-slug `upsert` **rewrites every row every boot** (churning `updatedAt`,
+  destroying its "last operator edit" meaning) and that the removal pass `updateMany({ notIn: [] })`
+  **mass-unregisters all rows on an empty registry**. It was rebuilt set-based (createMany +
+  `isRegistered`-guarded updateManys + empty-registry no-op).
+- **Impact.** A correctness bug in a boot-time write path caught in review, not planning.
+- **Feedback.** The same boot-upsert shape recurs across features (`f-slots` slot registration, `f-map`
+  snapshot writes). A feature plan that describes a **boot-time reconcile** must state its correctness
+  properties as requirements — **no-write-when-unchanged** (idempotent, don't churn `updatedAt`) and
+  **safe-on-empty** (an empty registry must not be destructive) — rather than naming a single ORM call.
+  _Status: open._
+
+### B9 · DB features: state the vitest test strategy up front (no live DB in vitest)
+
+- **Discovery.** `f-module-core`'s plan twice said "integration test against the dev DB" (t-1, t-3), but
+  the repo's vitest runs on `happy-dom` with **no live DB** — tests mock `@/lib/db/client` and forward
+  `executeTransaction` to a `tx` mock; real-DB verification is via `smoke:*` scripts. Both tasks had to
+  reconcile the wording to the actual house style (mocked-prisma unit + a stateful in-memory fake for
+  the e2e).
+- **Impact.** Repeated mid-build reconciliation of the same false assumption.
+- **Feedback.** A feature plan touching DB reads/writes must **state the vitest strategy up front**:
+  mocked-`@/lib/db/client` unit tests asserting the query/`tx` calls, a stateful in-memory fake where an
+  end-to-end chain must be proven, and a `smoke:*` script for real-DB fidelity — never "integration test
+  against the dev DB." (A B2-style repo-reality reconciliation, specific to the test layer.) _Status: open._
