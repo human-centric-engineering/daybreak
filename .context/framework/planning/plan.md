@@ -31,17 +31,17 @@ This plan uses the Hub's levels, with each level meaning exactly what it means i
 
 ## Project
 
-| Field                   | Value                                                                                                                                                                                                       |
-| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Name                    | **Daybreak** (the expert-led-apps framework)                                                                                                                                                                |
-| Active epic             | **Framework v1** (the whole build below)                                                                                                                                                                    |
-| Spec                    | [[framework-architecture]] rev 16 (Binding decisions in Appendix A)                                                                                                                                         |
-| Repo                    | `human-centric-engineering/daybreak` — fork of `human-centric-engineering/sunrise` (tracking `upstream`, at Sunrise v0.5.0)                                                                                 |
-| Placement               | Separate fork of Sunrise, **not** core ([[placement-decision-memo                                                                                                                                           | decision 2026-06-23]]) |
-| Relationship to Sunrise | [[building-on-sunrise]], one level up: fix-in-place → classify → promote generic upstream; Hub-coordinated                                                                                                  |
-| First app               | Lelanea (transcendental coaching) — forks this framework repo                                                                                                                                               |
-| Lead                    | Simon Holmes                                                                                                                                                                                                |
-| Status                  | `in flight` — `f-seams` + `f-bootstrap` + `f-module-core` **shipped**; `f-map` **in flight** (Simon); **4 features available to claim** (`f-slots`, `f-module-config`, `f-module-bindings`, `f-engagement`) |
+| Field                   | Value                                                                                                                                                                                                                            |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Name                    | **Daybreak** (the expert-led-apps framework)                                                                                                                                                                                     |
+| Active epic             | **Framework v1** (the whole build below)                                                                                                                                                                                         |
+| Spec                    | [[framework-architecture]] rev 16 (Binding decisions in Appendix A)                                                                                                                                                              |
+| Repo                    | `human-centric-engineering/daybreak` — fork of `human-centric-engineering/sunrise` (tracking `upstream`, at Sunrise v0.5.0)                                                                                                      |
+| Placement               | Separate fork of Sunrise, **not** core ([[placement-decision-memo                                                                                                                                                                | decision 2026-06-23]]) |
+| Relationship to Sunrise | [[building-on-sunrise]], one level up: fix-in-place → classify → promote generic upstream; Hub-coordinated                                                                                                                       |
+| First app               | Lelanea (transcendental coaching) — forks this framework repo                                                                                                                                                                    |
+| Lead                    | Simon Holmes                                                                                                                                                                                                                     |
+| Status                  | `in flight` — `f-seams` + `f-bootstrap` + `f-module-core` **shipped**; `f-map` **in flight** (Simon), `f-slots` **in flight** (John); **3 features available to claim** (`f-module-config`, `f-module-bindings`, `f-engagement`) |
 
 ---
 
@@ -92,7 +92,7 @@ A flat list, shown in rough dependency order (most-ready first), the way the Hub
 | 02  | `f-bootstrap`           | Simon Holmes    | **shipped** (#4/#6/#8/#9)                                   | f-seams                                           | 4    | Fork + framework skeleton + enforced boundary    |
 | 03  | `f-module-core`         | Simon Holmes    | **shipped** (#10 / #11 / #12)                               | f-bootstrap                                       | 3    | Module definition, registry, seam, liveness      |
 | 04  | `f-map`                 | Simon Holmes    | **in flight** ([[f-map]])                                   | f-bootstrap ✅                                    | 4    | Facilitation map: schema, versioning, format     |
-| 05  | `f-slots`               | _unclaimed_     | **available** ▲                                             | f-bootstrap ✅                                    | 3    | Slot definitions + insert-only values            |
+| 05  | `f-slots`               | John            | **in flight** ([[f-slots]])                                 | f-bootstrap ✅                                    | 3    | Slot definitions + insert-only values            |
 | 06  | `f-module-config`       | _unclaimed_     | **available** ▲                                             | f-module-core ✅                                  | 4    | Generic Zod config form + config versioning      |
 | 07  | `f-module-bindings`     | _unclaimed_     | **available** ▲                                             | f-module-core ✅                                  | 4    | Agent / workflow / knowledge bindings            |
 | 08  | `f-engagement`          | _unclaimed_     | **available** ▲                                             | f-module-core ✅                                  | 3    | Engagement event stream + stats + feedback       |
@@ -114,7 +114,7 @@ A flat list, shown in rough dependency order (most-ready first), the way the Hub
 
 **Legend.** `shipped` — merged to `main`. `in flight` — an owner is actively building it (its promoted tasks live in the feature's detailed plan). `available` ▲ — every dependency is shipped and no one owns it: **free to claim now**. `blocked → X` — waiting on feature X to ship.
 
-**Claimable right now (▲) — four open features:** `f-map` (04) is **in flight** (Simon). The unblocked, unclaimed set is **`f-slots` (05)**, **`f-module-config` (06)**, **`f-module-bindings` (07)**, and **`f-engagement` (08)**. `f-slots` sits at the head of the critical path alongside `f-map` (they unblock the facilitation spine — engine, guidance), so prefer it first; 06–08 extend the now-complete module layer and can run in parallel behind it.
+**Claimable right now (▲) — three open features:** `f-map` (04) is **in flight** (Simon) and `f-slots` (05) is **in flight** (John) — together they sit at the head of the critical path (unblocking the facilitation spine — engine, guidance). The unblocked, unclaimed set is **`f-module-config` (06)**, **`f-module-bindings` (07)**, and **`f-engagement` (08)** — they extend the now-complete module layer and can run in parallel.
 
 **To claim a feature:** put your name in its **Owner** cell + set **Status** to `in flight`, then write its detailed plan (`.context/framework/planning/<feature>.md`, following [[f-module-core]] / [[f-map]]) and promote its first tasks — and **push the claim + plan as a standalone docs PR _before_ starting any task work** (so the claim is visible and two owners don't start the same feature; see [[building-a-feature]] step 1). Flip the feature to `shipped` when its last task's PR merges. One owner per feature (the unit of ownership); tasks within a feature are the PR-sized units that owner advances. Suggested split with **John** joining: the claimable features are mutually independent, so different owners can build them in parallel without stepping on each other — e.g. one takes `f-slots`, another `f-module-config`.
 
@@ -177,7 +177,7 @@ editor is `f-map-editor` (14) and graph-invariant checks (cycles/reachability) a
 
 ### 05 · `f-slots` — slot definitions + values
 
-_Owner:_ _unclaimed_ · _Status:_ **available to claim** ▲ (dep `f-bootstrap` shipped) · _Depends on:_ f-bootstrap · _~3 PRs_
+_Owner:_ John · _Status:_ **in flight** (claimed 2026-07-03) · _Depends on:_ f-bootstrap · _~3 PRs_ · **detailed plan: [[f-slots]]**
 
 The data-slot shape the other layers need (spec §6); deep capture-loop design deferred (§9.1).
 
