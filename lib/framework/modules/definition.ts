@@ -8,16 +8,15 @@
  * (status, availability window, config values). Code describes structure; the row
  * describes operation.
  *
- * Scope is deliberately minimal for `f-module-core`: identity + `configSchema`.
- * Fields the later features own are added *by those features*, so no unused
- * surface lands early:
+ * Scope grows one field per consuming feature, so no unused surface lands early:
+ *   - `slotDefinitions`              → `f-slots` (§6) — added below
  *   - `capabilities` / `agentRoles`  → `f-module-bindings` (A6/A8)
- *   - `slotDefinitions`              → `f-slots` (§6)
  *   - `events`                       → `f-engagement` (A9)
  */
 
 import type { z } from 'zod';
 import type { ModuleSlug } from '@/lib/framework/shared/scope';
+import type { SlotDefinitionInput } from '@/lib/framework/data-slots/definition';
 
 export interface ModuleDefinition {
   /** Stable identity, referenced everywhere (matches the synced `Module.slug`). */
@@ -40,4 +39,13 @@ export interface ModuleDefinition {
    * (`lib/orchestration/outbound/types.ts`).
    */
   configSchema: z.ZodTypeAny;
+
+  /**
+   * The data-slots this module owns (spec §6.1, decision D-series). Declared in
+   * code and reconciled into `framework_slot_definition` rows at boot, each stamped
+   * `scope = module:<slug>` (`data-slots/sync.ts`). Optional — a module that
+   * captures no per-user data declares none. The `fill_slot` / `get_state`
+   * capabilities that read/write these are a later feature (`f-slot-capture`).
+   */
+  slotDefinitions?: SlotDefinitionInput[];
 }
