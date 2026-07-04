@@ -33,7 +33,7 @@ Alongside `f-map` it sits at the head of the critical path.
 
 **What ships here, and what deliberately does not.** In scope: the `SlotDefinition` model + the
 free-string vocabulary; **module-declared** slot registration (`slotDefinitions` on
-`ModuleDefinition`, upserted set-based at boot, scope-stamped `module:<slug>`); the `SlotValue`
+`ModuleDefinition`, reconciled into rows at boot, scope-stamped `module:<slug>`); the `SlotValue`
 insert-only model with its `supersededAt` head-read denormalisation, the hand-FK cascade + erasure
 proof; the pure **insert-only value engine** (`appendSlotValue` / `getSlotHeads`); and a slot-definition
 admin read API. **Out of scope** (owned by the features that consume them, so no dead surface lands
@@ -89,7 +89,7 @@ declare their own), while every layer is proven by tests. Decisions (2026-07-03)
    on the `fill_slot` capability, not on this model** (D5, §6.2). _(Owner may revisit on review; if
    reversed, t-2 becomes table-only and the engine moves to f-slot-capture.)_
 2. **Registration is module-declared only.** Slots come from `ModuleDefinition.slotDefinitions`,
-   scope-stamped `module:<slug>` at collection, upserted set-based into the one
+   scope-stamped `module:<slug>` at collection, reconciled into the one
    `framework_slot_definition` table (§6.1: definitions "come from two sources that land in one
    table"). The spec's other source — app-seeded **global** slots — is an **additive**
    `registerGlobalSlotDefinitions()` seam a leaf adds when it needs non-module slots; not built now,
@@ -116,10 +116,11 @@ Concrete reuse anchors found in-tree:
   from f-bootstrap t-1). f-slots fills it; no new schema file.
 - **`ModuleSlug`** — `lib/framework/shared/scope.ts`; the `module:<slug>` scope reuses the same slug
   that keys `Module.slug` and namespaces module capabilities (`module-slug.tool`, A8).
-- **Set-based boot sync** — `lib/framework/modules/sync.ts` is the exact pattern to mirror:
-  `createMany({ skipDuplicates })` + `isRegistered`/`isActive`-guarded `updateMany`s + empty-registry
-  no-op, inside `executeTransaction(work, { timeout })`. Slot-definition sync is the same three-statement
-  shape keyed on `isActive`.
+- **Boot sync** — `lib/framework/modules/sync.ts` is the pattern the slot sync starts from
+  (`createMany({ skipDuplicates })` + guarded `updateMany`s + fluke-safe no-op, inside
+  `executeTransaction(work, { timeout })`), but the slot sync **diverges to a full reconcile** because
+  a slot-definition row is a pure code projection with no operator columns (see the t-1 execution note
+  under the tasks) — it must propagate authored edits, and partition its deactivate to `module:%` rows.
 - **Insert-only versioned precedent** — `AiWorkflowVersion` / `AiAgentVersion`
   (`prisma/schema/orchestration-workflows.prisma`): `version Int` monotonic per parent,
   `@@unique([parentId, version])`, rows never mutated. `SlotValue` differs only in head-tracking: no
@@ -158,11 +159,11 @@ Never "integration test against the dev DB" in vitest.
 
 ## Tasks (promoted)
 
-| ID  | Task                                                                                                                                   | Files                                                                                                                                                                                                                                                                | Deps | Status    | PR  |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | --------- | --- |
-| t-1 | **Slot definitions**: `SlotDefinition` model + vocabulary + module-declared registration + set-based boot sync + queries (+ this plan) | `prisma/schema/framework-data-slots.prisma`, `lib/framework/data-slots/{vocabulary,definition,sync,queries,index}.ts`, `lib/framework/modules/definition.ts`, `lib/framework/index.ts`, `framework_…` migration, `tests/…`, `.context/framework/planning/f-slots.md` | —    | available | —   |
-| t-2 | **Slot values**: `SlotValue` insert-only model + value engine (`appendSlotValue` / `getSlotHeads`) + hand-FK cascade + erasure proof   | `prisma/schema/framework-data-slots.prisma`, `lib/framework/data-slots/{values,index}.ts`, `framework_…` migration, `scripts/smoke/erasure.ts`, `tests/…`                                                                                                            | t-1  | backlog   | —   |
-| t-3 | **Admin read API**: `GET /api/v1/admin/framework/slot-definitions` + contract test                                                     | `app/api/v1/admin/framework/slot-definitions/route.ts`, `tests/integration/api/v1/admin/framework/slot-definitions/route.test.ts`                                                                                                                                    | t-1  | backlog   | —   |
+| ID  | Task                                                                                                                                 | Files                                                                                                                                                                                                                      | Deps | Status            | PR  |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ----------------- | --- |
+| t-1 | **Slot definitions**: `SlotDefinition` model + vocabulary + module-declared registration + full-reconcile boot sync + queries        | `prisma/schema/framework-data-slots.prisma`, `lib/framework/data-slots/{vocabulary,definition,sync,queries,index}.ts`, `lib/framework/modules/definition.ts`, `lib/framework/index.ts`, `framework_…` migration, `tests/…` | —    | claimed (PR open) | #19 |
+| t-2 | **Slot values**: `SlotValue` insert-only model + value engine (`appendSlotValue` / `getSlotHeads`) + hand-FK cascade + erasure proof | `prisma/schema/framework-data-slots.prisma`, `lib/framework/data-slots/{values,index}.ts`, `framework_…` migration, `scripts/smoke/erasure.ts`, `tests/…`                                                                  | t-1  | backlog           | —   |
+| t-3 | **Admin read API**: `GET /api/v1/admin/framework/slot-definitions` + contract test                                                   | `app/api/v1/admin/framework/slot-definitions/route.ts`, `tests/integration/api/v1/admin/framework/slot-definitions/route.test.ts`                                                                                          | t-1  | backlog           | —   |
 
 t-2 and t-3 parallelise once t-1 lands. **Three PRs**, matching the parent plan's `~3 PRs` estimate
 and mirroring [[f-module-core]]'s shape (code→row / value vertical / →visible). The board's
@@ -200,15 +201,20 @@ scope])`; `@@map("framework_slot_definition")`. Every status/type field is free-
 **Registration + sync (reconciles code → row):**
 
 - **`lib/framework/data-slots/sync.ts`** — `syncRegisteredSlotDefinitions()`: collect every
-  registered module's `slotDefinitions` (`getRegisteredModules().flatMap(...)`), **stamp `scope =
-"module:" + module.slug`**, dedupe by slug, and reconcile **set-based** inside
-  `executeTransaction({ timeout })` — the three-statement shape from module sync, keyed on
-  `isActive`: `createMany({ …, skipDuplicates: true })` writes code-owned fields (`slug`, `group`,
-  `description`, `scope`, `visibility`, `mode`, `dataType`, `sensitivity`, `priorityWeight`) for
-  **new** rows only; `updateMany({ slug in code, isActive: false } → isActive: true)` reactivates a
-  reappeared slug; `updateMany({ slug notIn code, isActive: true } → isActive: false)` deactivates
-  removed slugs (never deleted — audit). **Empty set returns early — a true no-op, never `notIn:
-[]`, never mass-deactivate.** No-change boot writes zero rows, never bumps `updatedAt` (B8).
+  registered module's `slotDefinitions`, **stamp `scope = "module:" + module.slug`**, dedupe by slug,
+  and reconcile inside `executeTransaction({ timeout })`. **Shipped as a _full_ reconcile, not the
+  module sync's seed-once shape** (design refined during t-1 — see the execution note below): unlike
+  `framework_module` (operator-owned columns → seed once, never rewrite), a `framework_slot_definition`
+  row has **no operator columns** — it is a pure projection of code — so an authored edit (e.g. a
+  changed `sensitivity`, which drives downstream masking) **must** propagate. So the sync reads current
+  rows, then: `createMany({ skipDuplicates })` for **new** slugs → a **diff-guarded per-slug `update`**
+  that propagates changed code fields and re-activates a reappeared slug (guarded so an unchanged boot
+  writes zero rows and never bumps `updatedAt`, B8) → an `updateMany` that **deactivates code-removed
+  rows scoped to `scope startsWith "module:"`** (so a non-module global/facilitation slot is never
+  touched). The **"did registration run?" guard keys on registered _modules_, not the collected slot
+  set** — zero modules ⇒ fluke-safe no-op; a module with zero slots still reconciles (so removing a
+  module's _last_ slot deactivates its row); the `notIn: []` degenerate case is avoided by omitting the
+  slug filter when no slugs remain.
 - **`lib/framework/data-slots/queries.ts`** — `listSlotDefinitions()` →
   `prisma.slotDefinition.findMany({ orderBy: { slug: 'asc' } })`. `SlotDefinition` imported from
   `@prisma/client`, not re-exported through core `types/prisma.ts` (X6). Does not swallow errors
@@ -220,17 +226,39 @@ syncRegisteredSlotDefinitions()` after `syncRegisteredModules()`. `initApp()` sh
 - **Migration** `…_framework_add_slot_definition` — `prisma migrate dev --create-only`, only the
   `framework_slot_definition` table (no `userId`, no hand-FK), strip Prisma's spurious
   pgvector/tsvector `DROP`s per [[prisma-unmodelled-objects|.context/database/prisma-unmodelled-objects.md]].
-- **Proof tests (mocked-prisma):** a unit test asserting the sync SQL shape (`createMany` with
-  code-owned fields + `skipDuplicates`; the two guarded `updateMany`s; scope-stamped `module:<slug>`;
-  the **empty-registry no-op** — no transaction, no writes); and the e2e stateful-fake test at
+- **Proof tests (mocked-prisma):** a unit test asserting the reconcile shape (`createMany` with
+  code-owned fields + `skipDuplicates`; the diff-guarded per-slug `update` propagating edits +
+  reactivation; the `module:%`-scoped deactivate `updateMany`; scope-stamped `module:<slug>`; the
+  **no-registered-modules no-op** — no transaction — vs a **module-with-zero-slots** that still
+  reconciles); and the e2e stateful-fake test at
   `tests/integration/lib/framework/data-slots/registration-visibility.test.ts` driving the real
   register(module with `slotDefinitions`) → `syncRegisteredSlotDefinitions` → `listSlotDefinitions`
-  chain, proving `module:<slug>` scope, retire-on-removal (`isActive=false`, row retained), and
+  chain, proving `module:<slug>` scope, an authored edit propagating, retire-on-removal
+  (`isActive=false`, row retained), that a global row is never deactivated by the module sync, and
   re-register. Fixtures live in `tests/` — nothing a fork strips.
-- **Done when:** migration applies clean + passes the drift check; sync is set-based, idempotent,
-  no-churn (zero writes on a no-change boot), safe-on-empty (empty set = no-op, never
-  mass-deactivate), and scope-stamps `module:<slug>`; a fresh fork lists `[]`; the e2e chain is
-  green; **gates green — `/pre-pr` then `/code-review`, both run before opening the PR** (B4).
+- **Done when:** migration applies clean + passes the drift check; sync fully reconciles
+  (creates/propagates edits/deactivates), is idempotent + no-churn (zero writes on a no-change boot),
+  scopes deactivation to `module:%` rows, keys its no-op on registered modules, and scope-stamps
+  `module:<slug>`; a fresh fork lists `[]`; the e2e chain is green; **gates green — `/pre-pr` then
+  `/code-review`, both run before opening the PR** (B4). ✅ **Shipped — PR #19** (`/code-review`
+  caught the deactivate-scope + no-op-guard defects; fixed in-PR, see the execution note below).
+
+> **t-1 execution note (2026-07-04) — the sync shape refined during build, from seed-once to
+> full-reconcile.** The plan above originally sketched the slot-definition sync as "the same
+> three-statement shape as module sync" (seed-once). Building it surfaced that a
+> `framework_slot_definition` row is a **pure code projection** (no operator columns, unlike
+> `framework_module`), so authored edits — critically a changed `sensitivity`, which drives
+> downstream masking — **must** propagate: it ships as a _full_ reconcile (create → diff-guarded
+> per-slug update → deactivate), keeping the two module-sync invariants (no-write-when-unchanged;
+> safe-on-empty). `/code-review` (high-effort) then caught **two real defects** in that reconcile:
+> (1) the deactivate `updateMany` wasn't scope-partitioned, so a future global/facilitation slot (a
+> different, schema-permitted write-source) would be silently deactivated on every module-sync boot —
+> fixed by scoping to `scope startsWith "module:"`; and (2) the empty-set early-return conflated "no
+> slots declared" with "registration didn't run", so removing a module's _last_ slot never
+> deactivated its row — fixed by keying the no-op on registered **modules**, not the collected slot
+> set. Both fixed in-PR with tests; folded back into [[planning-retro]] §B (B10). The takeaway for
+> later boot-reconciles (`f-map`, `f-engagement`): when a table has **multiple write-sources**, the
+> removal pass must be partitioned to the rows _this_ sync owns.
 
 ### t-2 · Slot values — insert-only model + value engine + erasure
 
