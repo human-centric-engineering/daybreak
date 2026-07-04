@@ -2,7 +2,7 @@
 name: f-slots
 feature: 05 · f-slots
 epic: Framework v1
-status: in flight (t-1 / t-2 / t-3 promoted)
+status: in flight (t-1 done #19 · t-2 in PR · t-3 backlog)
 owner: John
 depends_on: f-bootstrap (shipped — #4 / #6 / #8 / #9) · f-module-core (shipped — #10 / #11 / #12, for the `ModuleDefinition.slotDefinitions` seam)
 spec: framework-architecture.md §6 (Data-Slots) + Appendix A (D1 / D2 / D3 / D4 / D5 / D6 / A2 / X1 / X2)
@@ -161,8 +161,8 @@ Never "integration test against the dev DB" in vitest.
 
 | ID  | Task                                                                                                                                 | Files                                                                                                                                                                                                                      | Deps | Status            | PR  |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ----------------- | --- |
-| t-1 | **Slot definitions**: `SlotDefinition` model + vocabulary + module-declared registration + full-reconcile boot sync + queries        | `prisma/schema/framework-data-slots.prisma`, `lib/framework/data-slots/{vocabulary,definition,sync,queries,index}.ts`, `lib/framework/modules/definition.ts`, `lib/framework/index.ts`, `framework_…` migration, `tests/…` | —    | claimed (PR open) | #19 |
-| t-2 | **Slot values**: `SlotValue` insert-only model + value engine (`appendSlotValue` / `getSlotHeads`) + hand-FK cascade + erasure proof | `prisma/schema/framework-data-slots.prisma`, `lib/framework/data-slots/{values,index}.ts`, `framework_…` migration, `scripts/smoke/erasure.ts`, `tests/…`                                                                  | t-1  | backlog           | —   |
+| t-1 | **Slot definitions**: `SlotDefinition` model + vocabulary + module-declared registration + full-reconcile boot sync + queries        | `prisma/schema/framework-data-slots.prisma`, `lib/framework/data-slots/{vocabulary,definition,sync,queries,index}.ts`, `lib/framework/modules/definition.ts`, `lib/framework/index.ts`, `framework_…` migration, `tests/…` | —    | done              | #19 |
+| t-2 | **Slot values**: `SlotValue` insert-only model + value engine (`appendSlotValue` / `getSlotHeads`) + hand-FK cascade + erasure proof | `prisma/schema/framework-data-slots.prisma`, `lib/framework/data-slots/{values,index}.ts`, `framework_…` migration, `scripts/smoke/erasure.ts`, `tests/…`                                                                  | t-1  | claimed (PR open) | —   |
 | t-3 | **Admin read API**: `GET /api/v1/admin/framework/slot-definitions` + contract test                                                   | `app/api/v1/admin/framework/slot-definitions/route.ts`, `tests/integration/api/v1/admin/framework/slot-definitions/route.test.ts`                                                                                          | t-1  | backlog           | —   |
 
 t-2 and t-3 parallelise once t-1 lands. **Three PRs**, matching the parent plan's `~3 PRs` estimate
@@ -291,10 +291,12 @@ version])`; `@@index([userId, capturedAt])` (freshest-slots reads for guidance);
 are never updated (except the`supersededAt`stamp on the outgoing head) and never deleted.
 Timestamp comes from the caller / a single`new Date()` at the top of the tx so the supersede and
       the new row agree.
-  - **`getSlotHeads(userId, filter?)`** — `findMany({ where: { userId, supersededAt: null,
-…filter }, orderBy: { capturedAt: 'desc' } })` — the guidance hot path, served by
-    `@@index([userId, capturedAt])`. `filter` admits `scope` / `group` narrowing (open value, so
-    later `canRead`-driven scoping composes).
+  - **`getSlotHeads(userId, options?)`** — `findMany({ where: { userId, supersededAt: null,
+…options }, orderBy: { capturedAt: 'desc' } })` — the guidance hot path, served by
+    `@@index([userId, capturedAt])`. Narrowing is by `slotSlugs?` (a column this table has); the
+    `scope`/`group` narrowing the plan first sketched needs a join to `SlotDefinition`, so it belongs
+    to the guidance query that owns that join (`f-guidance`), not this raw engine — `getSlotHeads`
+    keeps `userId` as the seam `canRead` supplies later.
   - Barrel (`index.ts`) exports both.
 - **Erasure** — the hand-FK `ON DELETE CASCADE` erases `SlotValue` automatically via `eraseUser()`'s
   `tx.user.delete()`; **no erasure hook needed** (no external resources, no `SET NULL` residual PII).

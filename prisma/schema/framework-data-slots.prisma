@@ -6,7 +6,7 @@
 // every table here uses the `framework_` prefix via `@@map`, and its DDL lands
 // only in `framework_`-named migrations touching only `framework_*` tables.
 //
-// First tables (f-slots t-1: `SlotDefinition`). See
+// First tables (f-slots t-1: `SlotDefinition`; t-2: `SlotValue`). See
 // `.context/framework/planning/f-slots.md` and spec §6.1.
 
 // A slot definition — authored config: *what* the system aims to learn about a
@@ -37,4 +37,44 @@ model SlotDefinition {
 
   @@index([group, scope])
   @@map("framework_slot_definition")
+}
+
+// A slot value — runtime user data: *what* the system has learned about a user
+// (spec §6.1). INSERT-ONLY — never updated, never deleted (except erasure); a new
+// reading is a new version, and the previous head gets its `supersededAt` stamped.
+// The current picture of a user is "every row WHERE supersededAt IS NULL"; the full
+// version sequence is the archive of their evolution, each row carrying its own
+// provenance back to the conversation.
+//
+// `userId` is a PLAIN scalar FK to core `User` (no Prisma `@relation` — a fork table
+// must not add a reverse field to the Sunrise-owned `User` model). The
+// `ON DELETE CASCADE` is written BY HAND in the migration SQL (Prisma won't emit it
+// without a relation), so `eraseUser()`'s `user.delete()` erases these rows — the
+// satellite convention + erasure hook (spec §6.4). See `.context/privacy/data-erasure.md`.
+//
+// `sourceType` is a free-form `String` (convention X1). `slotSlug` is a plain string,
+// NOT an FK to `SlotDefinition` — open-mode capture mints slugs with no backing
+// definition (§6.1); validating a targeted slug against its definition is the
+// `fill_slot` capability's job (f-slot-capture), not a DB constraint.
+model SlotValue {
+  id            String    @id @default(cuid())
+  userId        String // FK to User.id — no @relation; ON DELETE CASCADE hand-written in the migration
+  slotSlug      String // definition slug, or a minted slug (open mode)
+  version       Int // monotonic per (userId, slotSlug), starting at 1
+  value         String    @db.Text // plain language — canonical for conversation
+  valueJson     Json? // typed form per the definition's dataType — canonical for gates & analytics
+  confidence    Int // 1–10
+  sourceType    String // direct | unprompted | emerged_naturally | built_across_turns | inferred | user_confirmed | synthesised
+  reasoningNote String    @db.Text // one sentence: how this reading was made
+  provenance    Json // { conversationId, messageRange?, moduleSlug?, nodeKey?, capturedAt, contextExcerptRef? }
+  // supersededAt: set on the PREVIOUS head when a new version lands. Deliberate
+  // denormalisation — the current picture is "WHERE supersededAt IS NULL", one
+  // indexed filter instead of a max(version) scan per slug. Do not "simplify" this
+  // away; head reads are the hot path (D4).
+  supersededAt  DateTime?
+  capturedAt    DateTime  @default(now())
+
+  @@unique([userId, slotSlug, version])
+  @@index([userId, capturedAt]) // "freshest slots" reads for guidance
+  @@map("framework_slot_value")
 }
