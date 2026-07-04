@@ -282,8 +282,12 @@ version])`; `@@index([userId, capturedAt])` (freshest-slots reads for guidance);
 - **Migration** `…_framework_add_slot_value` — `--create-only`, only `framework_slot_value`, then
   **hand-add** the referential action Prisma won't emit:
   `ALTER TABLE "framework_slot_value" ADD CONSTRAINT "framework_slot_value_userId_fkey" FOREIGN KEY
-("userId") REFERENCES "User"("id") ON DELETE CASCADE;`. Strip Prisma's spurious pgvector/tsvector
-  `DROP`s. The drift check flags the hand-FK line — expected (the fork-table pattern).
+("userId") REFERENCES "user"("id") ON DELETE CASCADE;`. **Reference the core table's actual name
+  `"user"`, not the model name `User`** — the `User` model maps to table `"user"` (`auth.prisma
+@@map("user")`); referencing `"User"` fails at apply time (see [[planning-retro]] §B11). Apply with
+  `db:migrate:deploy`, not `migrate dev` — `dev` sees the hand-FK (absent from the schema) as drift and
+  offers to reset. Strip Prisma's spurious pgvector/tsvector `DROP`s. The drift check flags the hand-FK
+  line — expected (the fork-table pattern).
 - **`lib/framework/data-slots/values.ts`** — the insert-only engine:
   - **`appendSlotValue(input)`** — in one `executeTransaction`: read the current head
     (`findFirst({ where: { userId, slotSlug, supersededAt: null } })`); `version = head ? head.version
