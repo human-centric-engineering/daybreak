@@ -230,3 +230,29 @@ both levels; each is filed at its primary home with a cross-reference. Mark an e
   mocked-`@/lib/db/client` unit tests asserting the query/`tx` calls, a stateful in-memory fake where an
   end-to-end chain must be proven, and a `smoke:*` script for real-DB fidelity — never "integration test
   against the dev DB." (A B2-style repo-reality reconciliation, specific to the test layer.) _Status: open._
+
+### B10 · Boot-reconcile: classify the row (operator-owned vs code projection) and partition the removal pass per write-source
+
+- **Discovery.** `f-slots` t-1's plan reused `f-module-core`'s "boot-upsert" wording verbatim
+  ("the same three-statement shape as module sync", seed-once). Building it surfaced that a
+  `framework_slot_definition` row, unlike `framework_module`, has **no operator-owned columns** — it is a
+  _pure projection of code_ — so seed-once would leave an authored edit (a changed `sensitivity`, which
+  drives downstream masking) stale on the row forever; it had to become a **full reconcile** (create →
+  diff-guarded update → deactivate). `/code-review` then caught two further defects the plan's generic
+  boot-reconcile language didn't specify: (1) the deactivate `updateMany` wasn't **partitioned to the
+  rows this sync owns** — `framework_slot_definition` has _multiple_ write-sources by design (module,
+  and a reserved global/facilitation seam), so an unscoped `notIn slugs` would silently deactivate a
+  global slot on every module-sync boot; and (2) the empty-set no-op keyed on the _collected set_, not
+  the _source that proves registration ran_, so removing a module's **last** slot never deactivated its
+  row (an empty slot set is normal here, unlike an empty _module_ registry).
+- **Impact.** A design divergence (seed-once → full-reconcile) discovered in build, plus two boot-reconcile
+  correctness bugs surfaced in review rather than planning — cheap here (`isActive` has no consumer until
+  `f-slot-capture`), latent otherwise.
+- **Feedback.** Extends [B8]. When a feature plan describes a **boot-time reconcile**, it must, in
+  addition to _no-write-when-unchanged_ and _safe-on-empty_: (a) **classify the row** — operator-owned
+  (seed once, never rewrite non-key columns) vs pure code projection (fully reconcile, propagating edits)
+  — don't copy a sibling sync's shape without checking which it is; (b) if the table has **more than one
+  write-source**, **partition the removal/deactivate pass to the rows this sync owns** (e.g. `scope
+startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registration run?" guard on the
+  source that proves registration ran** (registered modules), not on the derived/collected set, which can
+  be legitimately empty. Recurs directly for `f-map` snapshot writes and `f-engagement`. _Status: open._
