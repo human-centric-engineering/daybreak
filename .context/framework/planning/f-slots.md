@@ -2,7 +2,7 @@
 name: f-slots
 feature: 05 · f-slots
 epic: Framework v1
-status: in flight (t-1 done #19 · t-2 done #22 · t-3 in PR)
+status: shipped (t-1 done #19 · t-2 done #22 · t-3 done #24)
 owner: John
 depends_on: f-bootstrap (shipped — #4 / #6 / #8 / #9) · f-module-core (shipped — #10 / #11 / #12, for the `ModuleDefinition.slotDefinitions` seam)
 spec: framework-architecture.md §6 (Data-Slots) + Appendix A (D1 / D2 / D3 / D4 / D5 / D6 / A2 / X1 / X2)
@@ -163,7 +163,7 @@ Never "integration test against the dev DB" in vitest.
 | --- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ------ | --- |
 | t-1 | **Slot definitions**: `SlotDefinition` model + vocabulary + module-declared registration + full-reconcile boot sync + queries        | `prisma/schema/framework-data-slots.prisma`, `lib/framework/data-slots/{vocabulary,definition,sync,queries,index}.ts`, `lib/framework/modules/definition.ts`, `lib/framework/index.ts`, `framework_…` migration, `tests/…` | —    | done   | #19 |
 | t-2 | **Slot values**: `SlotValue` insert-only model + value engine (`appendSlotValue` / `getSlotHeads`) + hand-FK cascade + erasure proof | `prisma/schema/framework-data-slots.prisma`, `lib/framework/data-slots/{values,index}.ts`, `framework_…` migration, `scripts/smoke/erasure.ts`, `tests/…`                                                                  | t-1  | done   | #22 |
-| t-3 | **Admin read API**: `GET /api/v1/admin/framework/slot-definitions` + contract test                                                   | `app/api/v1/admin/framework/slot-definitions/route.ts`, `tests/integration/api/v1/admin/framework/slot-definitions/route.test.ts`                                                                                          | t-1  | in PR  | —   |
+| t-3 | **Admin read API**: `GET /api/v1/admin/framework/slot-definitions` + contract test                                                   | `app/api/v1/admin/framework/slot-definitions/route.ts`, `tests/integration/api/v1/admin/framework/slot-definitions/route.test.ts`                                                                                          | t-1  | done   | #24 |
 
 t-2 and t-3 parallelise once t-1 lands. **Three PRs**, matching the parent plan's `~3 PRs` estimate
 and mirroring [[f-module-core]]'s shape (code→row / value vertical / →visible). The board's
