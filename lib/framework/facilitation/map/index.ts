@@ -60,3 +60,5 @@ export type {
   ListVersionsOptions,
   ListVersionsResult,
 } from '@/lib/framework/facilitation/map/version-service';
+export { listGraphs, getGraphDetail } from '@/lib/framework/facilitation/map/queries';
+export type { FacilitationGraphWithPublished } from '@/lib/framework/facilitation/map/queries';

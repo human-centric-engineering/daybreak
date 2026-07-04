@@ -393,12 +393,17 @@ export interface ListVersionsOptions {
 
 export interface ListVersionsResult {
   versions: FacilitationGraphVersion[];
+  /** The currently live version's id (matches one `versions[].id`), or null. Lets
+   *  a version-history view mark the published row without a second request. */
+  publishedVersionId: string | null;
   nextCursor: string | null;
 }
 
 /**
  * Paginated version list, newest first. `cursor` is the id of the last version on
- * the previous page (versions are immutable, so an id cursor is stable).
+ * the previous page (versions are immutable, so an id cursor is stable). Carries
+ * the graph's `publishedVersionId` (already loaded, no extra query) so a consumer
+ * can flag the live version.
  */
 export async function listVersions(
   slug: string,
@@ -414,7 +419,11 @@ export async function listVersions(
   });
   const hasMore = versions.length > limit;
   const page = hasMore ? versions.slice(0, limit) : versions;
-  return { versions: page, nextCursor: hasMore ? (page[page.length - 1]?.id ?? null) : null };
+  return {
+    versions: page,
+    publishedVersionId: graph.publishedVersionId,
+    nextCursor: hasMore ? (page[page.length - 1]?.id ?? null) : null,
+  };
 }
 
 /** Single immutable version by number, for diff / detail views. */
