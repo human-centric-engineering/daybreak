@@ -38,3 +38,25 @@ export type {
   MapValidationError,
   MapValidationResult,
 } from '@/lib/framework/facilitation/map/validate';
+export {
+  validatePublishableMap,
+  createGraph,
+  saveDraft,
+  discardDraft,
+  publishDraft,
+  rollback,
+  getPublishedMap,
+  listVersions,
+  getVersion,
+} from '@/lib/framework/facilitation/map/version-service';
+export type {
+  CreateGraphArgs,
+  SaveDraftArgs,
+  DiscardDraftArgs,
+  PublishDraftArgs,
+  PublishResult,
+  RollbackArgs,
+  PublishedMap,
+  ListVersionsOptions,
+  ListVersionsResult,
+} from '@/lib/framework/facilitation/map/version-service';
