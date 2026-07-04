@@ -10,8 +10,10 @@
  *     `module:<slug>`;
  *   - a per-slug `update` fires ONLY when a row's code-owned fields (or `isActive`)
  *     changed — an unchanged boot writes nothing;
- *   - a guarded `updateMany` deactivates code-removed rows;
- *   - an EMPTY set is a deliberate no-op — no transaction, no writes.
+ *   - a guarded `updateMany` deactivates code-removed rows, scoped to `module:%`;
+ *   - the "did registration run?" guard keys on MODULES: zero registered modules is
+ *     a no-op, but a module with zero slots still reconciles (so removing a module's
+ *     last slot deactivates its row).
  * The module registry is real (slots are collected from registered modules).
  */
 
@@ -87,10 +89,7 @@ beforeEach(() => {
 });
 
 describe('syncRegisteredSlotDefinitions', () => {
-  it('empty set is a no-op: no transaction, no writes', async () => {
-    // A module with no slots contributes nothing → empty set.
-    registerModuleWithSlots('onboarding', []);
-
+  it('no registered modules is a no-op: no transaction, no writes', async () => {
     await syncRegisteredSlotDefinitions();
 
     expect(executeTransactionMock).not.toHaveBeenCalled();
@@ -98,8 +97,25 @@ describe('syncRegisteredSlotDefinitions', () => {
     expect(txMock.slotDefinition.update).not.toHaveBeenCalled();
     expect(txMock.slotDefinition.updateMany).not.toHaveBeenCalled();
     expect(loggerInfo).toHaveBeenCalledWith(
-      'syncRegisteredSlotDefinitions: no registered slot definitions — nothing to sync'
+      'syncRegisteredSlotDefinitions: no registered modules — nothing to sync'
     );
+  });
+
+  it('a module registered with zero slots still reconciles (deactivates all module-owned rows)', async () => {
+    // A module is present (registration ran) but declares no slots — its last slot
+    // was removed. The deactivate pass must run, scoped to module:% with no slug filter.
+    registerModuleWithSlots('onboarding', []);
+
+    await syncRegisteredSlotDefinitions();
+
+    expect(executeTransactionMock).toHaveBeenCalledTimes(1);
+    expect(txMock.slotDefinition.findMany).not.toHaveBeenCalled(); // no slugs to look up
+    expect(txMock.slotDefinition.createMany).not.toHaveBeenCalled();
+    expect(txMock.slotDefinition.update).not.toHaveBeenCalled();
+    expect(txMock.slotDefinition.updateMany).toHaveBeenCalledWith({
+      where: { isActive: true, scope: { startsWith: 'module:' } },
+      data: { isActive: false },
+    });
   });
 
   it('creates new slugs with defaults resolved and scope stamped module:<slug>', async () => {
@@ -212,20 +228,25 @@ describe('syncRegisteredSlotDefinitions', () => {
     });
   });
 
-  it('deactivates rows whose code was removed, guarded to only touch active rows', async () => {
+  it('deactivates module-owned rows whose code was removed, guarded to only active rows', async () => {
     registerModuleWithSlots('onboarding', [
       { slug: 'primary_goal', group: 'goals', description: 'The main goal' },
     ]);
 
     await syncRegisteredSlotDefinitions();
 
+    // Scoped to module:% (never touches global/facilitation rows) and to active rows.
     expect(txMock.slotDefinition.updateMany).toHaveBeenCalledWith({
-      where: { slug: { notIn: ['primary_goal'] }, isActive: true },
+      where: {
+        isActive: true,
+        scope: { startsWith: 'module:' },
+        slug: { notIn: ['primary_goal'] },
+      },
       data: { isActive: false },
     });
   });
 
-  it('dedupes a slug declared by two modules — last registration wins, logged', async () => {
+  it('dedupes a slug declared twice — last registration wins, logged', async () => {
     registerModuleWithSlots('onboarding', [
       { slug: 'goal', group: 'goals', description: 'From onboarding' },
     ]);
@@ -244,7 +265,7 @@ describe('syncRegisteredSlotDefinitions', () => {
     expect(created[0]?.description).toBe('From review');
     expect(created[0]?.scope).toBe('module:review');
     expect(loggerWarn).toHaveBeenCalledWith(
-      'collectRegisteredSlotDefinitions: duplicate slot slug across modules — last registration wins',
+      'collectRegisteredSlotDefinitions: duplicate slot slug — last registration wins (slugs must be globally unique)',
       { slug: 'goal', moduleSlug: 'review' }
     );
   });

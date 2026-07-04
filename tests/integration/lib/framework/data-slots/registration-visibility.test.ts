@@ -18,7 +18,7 @@ import { z } from 'zod';
 import type { SlotDefinition } from '@prisma/client';
 import type { SlotDefinitionInput } from '@/lib/framework/data-slots/definition';
 
-const { prismaFake, resetStore } = vi.hoisted(() => {
+const { prismaFake, resetStore, seedRow } = vi.hoisted(() => {
   const store = new Map<string, SlotDefinition>();
 
   function rowFrom(data: Record<string, unknown>): SlotDefinition {
@@ -41,7 +41,11 @@ const { prismaFake, resetStore } = vi.hoisted(() => {
 
   function matches(
     r: SlotDefinition,
-    where: { slug?: string | { in?: string[]; notIn?: string[] }; isActive?: boolean }
+    where: {
+      slug?: string | { in?: string[]; notIn?: string[] };
+      isActive?: boolean;
+      scope?: { startsWith?: string };
+    }
   ): boolean {
     if (typeof where.slug === 'string' && r.slug !== where.slug) return false;
     if (typeof where.slug === 'object') {
@@ -49,6 +53,7 @@ const { prismaFake, resetStore } = vi.hoisted(() => {
       if (where.slug.notIn && where.slug.notIn.includes(r.slug)) return false;
     }
     if (where.isActive !== undefined && r.isActive !== where.isActive) return false;
+    if (where.scope?.startsWith && !r.scope.startsWith(where.scope.startsWith)) return false;
     return true;
   }
 
@@ -81,7 +86,11 @@ const { prismaFake, resetStore } = vi.hoisted(() => {
         return { ...r };
       },
       updateMany: async (args: {
-        where: { slug?: { in?: string[]; notIn?: string[] }; isActive?: boolean };
+        where: {
+          slug?: { in?: string[]; notIn?: string[] };
+          isActive?: boolean;
+          scope?: { startsWith?: string };
+        };
         data: { isActive?: boolean };
       }) => {
         let count = 0;
@@ -96,7 +105,15 @@ const { prismaFake, resetStore } = vi.hoisted(() => {
     },
   };
 
-  return { prismaFake, resetStore: () => store.clear() };
+  return {
+    prismaFake,
+    resetStore: () => store.clear(),
+    // Inject a row the module sync didn't author (e.g. a global/facilitation slot).
+    seedRow: (data: Record<string, unknown>) => {
+      const r = rowFrom(data);
+      store.set(r.slug, r);
+    },
+  };
 });
 
 vi.mock('@/lib/db/client', () => ({ prisma: prismaFake }));
@@ -210,18 +227,52 @@ describe('slot-definition registration → row → read visibility', () => {
     expect(slots.find((s) => s.slug === 'secondary_goal')?.isActive).toBe(true);
   });
 
-  it('an empty set is a no-op and leaves prior rows untouched', async () => {
+  it('a module that keeps registering but drops its last slot deactivates that row', async () => {
     registerModuleWithSlots('onboarding', [
       { slug: 'primary_goal', group: 'goals', description: 'The main goal' },
     ]);
     await syncRegisteredSlotDefinitions();
 
-    // A boot where nothing registers (fluke-empty) must not mass-deactivate.
+    // The module still registers (registration ran) but now declares zero slots —
+    // its last slot was removed. It must deactivate, not linger active (unlike the
+    // fluke-empty case below where NO module registers).
+    __resetModuleRegistryForTests();
+    registerModuleWithSlots('onboarding', []);
+    await syncRegisteredSlotDefinitions();
+
+    const slot = (await listSlotDefinitions()).find((s) => s.slug === 'primary_goal');
+    expect(slot?.isActive).toBe(false);
+  });
+
+  it('zero registered modules is a no-op and leaves prior rows untouched', async () => {
+    registerModuleWithSlots('onboarding', [
+      { slug: 'primary_goal', group: 'goals', description: 'The main goal' },
+    ]);
+    await syncRegisteredSlotDefinitions();
+
+    // A boot where NO module registers (fluke — a caught init error) must not
+    // mass-deactivate; "no modules" ≠ "a module intentionally declaring no slots".
     __resetModuleRegistryForTests();
     await syncRegisteredSlotDefinitions();
 
     const slots = await listSlotDefinitions();
     expect(slots).toHaveLength(1);
     expect(slots[0]?.isActive).toBe(true);
+  });
+
+  it('the module sync never deactivates a non-module (global) slot', async () => {
+    // A global slot exists (a different, schema-permitted source — default scope).
+    seedRow({ slug: 'person_name', group: 'identity', description: 'Name', scope: 'global' });
+
+    // A module registers its own slot; its sync runs the deactivate pass.
+    registerModuleWithSlots('onboarding', [
+      { slug: 'primary_goal', group: 'goals', description: 'The main goal' },
+    ]);
+    await syncRegisteredSlotDefinitions();
+
+    // The global row is untouched — the deactivate is scoped to module:% rows.
+    const global = (await listSlotDefinitions()).find((s) => s.slug === 'person_name');
+    expect(global?.isActive).toBe(true);
+    expect(global?.scope).toBe('global');
   });
 });

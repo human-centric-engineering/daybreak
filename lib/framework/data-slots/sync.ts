@@ -5,27 +5,34 @@
  *
  * Called once at startup by `syncFramework()` (after every tier has registered its
  * modules), it collects each registered module's `slotDefinitions`, stamps
- * `scope = module:<module.slug>`, and reconciles the set into rows.
+ * `scope = module:<module.slug>`, and reconciles that set into rows.
  *
  * **Why this differs from the module sync (`modules/sync.ts`).** A `framework_module`
  * row carries *operator*-owned columns (status, config, window), so module sync
  * seeds a row once (`createMany … skipDuplicates`) and never rewrites it. A
  * `framework_slot_definition` row has **no operator columns** — it is a pure
  * projection of code — so an authored edit (a changed `sensitivity`, which drives
- * downstream masking; a reworded `description`) *must* propagate to the row.
- * This sync therefore reads the current rows and reconciles fully:
+ * downstream masking; a reworded `description`) *must* propagate. This sync reads
+ * the current rows and reconciles fully:
  *
  * 1. **Create** rows for newly-declared slugs.
  * 2. **Update** rows whose code changed — guarded by a field diff, so a boot where
  *    nothing changed writes zero rows and never bumps `updatedAt` (the
  *    no-write-when-unchanged invariant). Re-declaring a previously-removed slug is
  *    just an update that flips `isActive` back to `true`.
- * 3. **Deactivate** rows whose code was removed (`isActive = false`, row retained
- *    for audit) — guarded by `isActive: true` so already-inactive rows aren't rewritten.
+ * 3. **Deactivate** module-owned rows whose code was removed (`isActive = false`,
+ *    row retained for audit) — guarded by `isActive: true` so already-inactive rows
+ *    aren't rewritten, and **scoped to `module:%` rows** so a global/facilitation
+ *    slot (a different, schema-permitted source — see `definition.ts`) is never
+ *    touched by the module sync.
  *
- * **An empty set is a no-op, never a mass-deactivate** (same reasoning as module
- * sync: "no slots declared" is indistinguishable from "registration didn't run",
- * so the destructive `notIn` branch is skipped and never sees an empty list).
+ * **The "did registration run?" guard keys on modules, not slots.** A booted app
+ * with **zero registered modules** means registration didn't run (a caught leaf-init
+ * error, an HMR reset), so we skip entirely and never mass-deactivate on a fluke —
+ * the same protection module sync has. But a module registered with **zero slots**
+ * is a *normal* state that must still reconcile: that is how removing a module's
+ * *last* slot deactivates its row (an empty slot set is common even when
+ * registration fully succeeded, so it must not short-circuit the deactivate pass).
  *
  * Wrapped in one interactive transaction via `executeTransaction`; the `{ timeout }`
  * option (#368) gives headroom for the write set.
@@ -35,11 +42,13 @@ import type { SlotDefinition } from '@prisma/client';
 import { executeTransaction } from '@/lib/db/utils';
 import { logger } from '@/lib/logging';
 import { getRegisteredModules } from '@/lib/framework/modules/registry';
+import type { SlotDefinitionInput } from '@/lib/framework/data-slots/definition';
 import {
   SLOT_VISIBILITY,
   SLOT_MODE,
   SLOT_DATA_TYPE,
   SLOT_SENSITIVITY,
+  SLOT_SCOPE_MODULE_PREFIX,
   moduleSlotScope,
 } from '@/lib/framework/data-slots/vocabulary';
 
@@ -47,27 +56,20 @@ import {
 const SYNC_TX_TIMEOUT_MS = 20_000;
 
 /**
- * The code-owned fields the sync writes to a row — everything except the DB-managed
- * `id`/`createdAt`/`updatedAt` and the sync-managed `isActive`. Resolved from a
- * `SlotDefinitionInput` with defaults applied, so it is directly comparable to a row.
+ * A `SlotDefinitionInput` with every default resolved and `scope` stamped — the
+ * exact set of code-owned columns the sync writes (everything except the DB-managed
+ * `id`/`createdAt`/`updatedAt` and the sync-managed `isActive`). Derived from the
+ * input type so a new slot column is added in one place (the input) and flows here,
+ * to the create payload, and to the field diff automatically.
  */
-interface ResolvedSlotDefinition {
-  slug: string;
-  group: string;
-  description: string;
-  scope: string;
-  visibility: string;
-  mode: string;
-  dataType: string;
-  sensitivity: string;
-  priorityWeight: number;
-}
+type ResolvedSlotDefinition = Required<SlotDefinitionInput> & { scope: string };
 
 /**
  * Collect every registered module's `slotDefinitions`, resolve defaults, and stamp
- * `scope = module:<slug>`. Deduped by slug (a slot slug is globally unique, spec
- * §6.1); a collision across modules is an authoring error — last registration wins,
- * logged. Exported for unit testing of the collection/stamping step.
+ * `scope = module:<slug>`. Deduped by slug — a slot slug is globally unique (spec
+ * §6.1), so a repeat (within a module or across two) is an authoring error: the last
+ * registration wins, logged with the module that supplied it.
+ * Exported for unit testing of the collection/stamping step.
  */
 export function collectRegisteredSlotDefinitions(): ResolvedSlotDefinition[] {
   const bySlug = new Map<string, ResolvedSlotDefinition>();
@@ -76,7 +78,7 @@ export function collectRegisteredSlotDefinitions(): ResolvedSlotDefinition[] {
     for (const input of mod.slotDefinitions ?? []) {
       if (bySlug.has(input.slug)) {
         logger.warn(
-          'collectRegisteredSlotDefinitions: duplicate slot slug across modules — last registration wins',
+          'collectRegisteredSlotDefinitions: duplicate slot slug — last registration wins (slugs must be globally unique)',
           { slug: input.slug, moduleSlug: mod.slug }
         );
       }
@@ -97,35 +99,35 @@ export function collectRegisteredSlotDefinitions(): ResolvedSlotDefinition[] {
   return [...bySlug.values()];
 }
 
-/** Whether a row's code-owned fields (or its active flag) differ from the resolved definition. */
+/**
+ * Whether a row's code-owned fields (or its active flag) differ from the resolved
+ * definition. Iterates the resolved keys so a newly-added column is diffed
+ * automatically — no hand-maintained field list to fall out of step.
+ */
 function slotDefinitionNeedsUpdate(row: SlotDefinition, desired: ResolvedSlotDefinition): boolean {
-  return (
-    !row.isActive ||
-    row.group !== desired.group ||
-    row.description !== desired.description ||
-    row.scope !== desired.scope ||
-    row.visibility !== desired.visibility ||
-    row.mode !== desired.mode ||
-    row.dataType !== desired.dataType ||
-    row.sensitivity !== desired.sensitivity ||
-    row.priorityWeight !== desired.priorityWeight
+  if (!row.isActive) return true;
+  return (Object.keys(desired) as (keyof ResolvedSlotDefinition)[]).some(
+    (key) => row[key] !== desired[key]
   );
 }
 
 export async function syncRegisteredSlotDefinitions(): Promise<void> {
-  const definitions = collectRegisteredSlotDefinitions();
-
-  // Empty set ⇒ deliberate no-op (never mass-deactivate on a fluke-empty registry).
-  if (definitions.length === 0) {
-    logger.info('syncRegisteredSlotDefinitions: no registered slot definitions — nothing to sync');
+  // "Did registration run?" is a question about MODULES, not slots (see the file
+  // header): zero registered modules ⇒ a fluke boot ⇒ skip, never mass-deactivate.
+  if (getRegisteredModules().length === 0) {
+    logger.info('syncRegisteredSlotDefinitions: no registered modules — nothing to sync');
     return;
   }
 
+  const definitions = collectRegisteredSlotDefinitions();
   const slugs = definitions.map((d) => d.slug);
 
   const counts = await executeTransaction(
     async (tx) => {
-      const existing = await tx.slotDefinition.findMany({ where: { slug: { in: slugs } } });
+      const existing =
+        slugs.length > 0
+          ? await tx.slotDefinition.findMany({ where: { slug: { in: slugs } } })
+          : [];
       const bySlug = new Map(existing.map((row) => [row.slug, row]));
 
       // Create newly-declared slugs (all code-owned fields; `isActive` defaults true).
@@ -148,9 +150,16 @@ export async function syncRegisteredSlotDefinitions(): Promise<void> {
         }
       }
 
-      // Deactivate rows whose code was removed (retain for audit).
+      // Deactivate module-owned rows whose code was removed (retain for audit).
+      // Scoped to `module:%` so non-module slots are never touched; the `notIn`
+      // filter is omitted when no slugs remain (all module slots removed) so it
+      // never degenerates to `notIn: []`.
       const { count: deactivated } = await tx.slotDefinition.updateMany({
-        where: { slug: { notIn: slugs }, isActive: true },
+        where: {
+          isActive: true,
+          scope: { startsWith: SLOT_SCOPE_MODULE_PREFIX },
+          ...(slugs.length > 0 ? { slug: { notIn: slugs } } : {}),
+        },
         data: { isActive: false },
       });
 
