@@ -274,3 +274,33 @@ startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registra
   with **`db:migrate:deploy`**, not `migrate dev`, so the intentional schema-vs-DB divergence (the FK the
   schema doesn't model) isn't read as drift. Recurs for every future framework table with a `userId`
   (`f-journey-state`'s `UserJourney`/`JourneyEvent`). _Status: open._
+
+### B12 · When a domain barrel will mix pure + DB-bound exports, pure tests import the specific module, not the barrel
+
+- **Discovery.** `f-map` t-1 shipped `map/index.ts` as a pure, DB-free barrel and its schema/validator tests
+  imported from it. t-2 added the Prisma-bound `version-service` to the **same** barrel, so those "pure"
+  tests silently began loading `@/lib/db/client` (a `PrismaClient` + `pg` Pool) at import — passing only
+  because the test setup injects a placeholder `DATABASE_URL`. Code review caught the invariant erosion.
+- **Impact.** A stated "pure, DB-free" guarantee was silently broken; a later env/DB-client change would fail
+  the schema tests for reasons unrelated to them, and a browser consumer importing a Zod schema from the
+  barrel would drag in the DB client.
+- **Feedback.** A feature whose domain barrel (`lib/framework/<domain>/index.ts`) will grow to mix
+  **browser-safe** exports (schemas, validators, pure predicates) with **server-only** ones (anything
+  importing `@/lib/db/client`) must state the import discipline in its test-strategy section: **pure/unit
+  tests import the specific module** (`.../schema`, `.../validate`), not the barrel — the f-module-core
+  convention (its `registry`/`liveness` tests import the module, not the barrel). Adding a DB-bound export to
+  a shared barrel is a coupling change to flag, not a silent one. Recurs for every domain barrel (modules,
+  facilitation, data-slots). _Status: open._
+
+### B13 · The `migrate dev` pgvector/tsvector DROP-INDEX strip is a certainty for every framework migration — put it in the task's Done-when
+
+- **Discovery.** Every framework migration so far (`f-module-core` t-1, `f-slots`, `f-map` t-2) has hit
+  `prisma migrate dev --create-only` emitting spurious `DROP INDEX` (+ an `ai_knowledge_chunk` `DROP DEFAULT`)
+  for the pgvector/tsvector objects Prisma can't model — stripped by hand each time, then drift-checked.
+- **Impact.** Not a surprise by the third feature, but each plan treated it as one; a missed strip silently
+  drops a production index (the footgun `db:drift-check` and `/pre-pr` exist to catch).
+- **Feedback.** Any feature-plan task that adds a `framework_` migration should list, in its **Done-when**,
+  "author `--create-only`; strip the spurious pgvector/tsvector `DROP INDEX` / `DROP DEFAULT`; `db:drift-check`
+  green" — a standing, expected step (see `.context/database/prisma-unmodelled-objects.md`), not a per-feature
+  rediscovery, for as long as those unmodelled objects exist. Cross-ref [B8] (migration write-shape care).
+  _Status: open._

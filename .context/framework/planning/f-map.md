@@ -2,7 +2,7 @@
 name: f-map
 feature: 04 · f-map
 epic: Framework v1
-status: in flight (planning — t-1 next)
+status: shipped (t-1 #16 · t-2 #20 · t-3 #21)
 owner: Simon Holmes
 depends_on: f-bootstrap (shipped — #4 / #6 / #8 / #9)
 spec: framework-architecture.md §5.1 (the Map) + §5.3 / §5.5 / §5.6 / §7, Appendix A (F1–F5, F8, F19, X1, X6)
@@ -136,7 +136,7 @@ are read alongside §5.1 — recorded here so the settlement is explicit, not re
 | --- | ------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | -------- | --- |
 | t-1 | **Map format + validator** (pure): Zod node/edge/region/condition schema + `validateMapFormat` (+ this plan) | `lib/framework/facilitation/map/{schema,validate,index}.ts`, `tests/…`, `.context/framework/planning/f-map.md`                                                                | —    | **done** | #16 |
 | t-2 | **Models + version service**: `FacilitationGraph`(+`Version`) + create/draft/publish/rollback/read           | `prisma/schema/framework-facilitation.prisma`, `framework_…` migration, `lib/framework/facilitation/map/version-service.ts`, `lib/framework/facilitation/index.ts`, `tests/…` | t-1  | **done** | #20 |
-| t-3 | **Admin API + end-to-end proof**: CRUD + publish/rollback/versions routes                                    | `app/api/v1/admin/framework/maps/**/route.ts`, `tests/integration/{api/v1/admin/framework/maps,lib/framework/facilitation}/*`                                                 | t-2  | backlog  | —   |
+| t-3 | **Admin API + end-to-end proof**: CRUD + publish/rollback/versions routes                                    | `app/api/v1/admin/framework/maps/**/route.ts`, `tests/integration/{api/v1/admin/framework/maps,lib/framework/facilitation}/*`                                                 | t-2  | **done** | #21 |
 
 **Three promoted PRs** (parent plan's `~4` is indicative; folds to 3 the way f-module-core's did — the
 node-format and edge/condition rules are one cohesive Zod schema, so splitting them is an artificial
