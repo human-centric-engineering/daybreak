@@ -304,3 +304,23 @@ startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registra
   green" — a standing, expected step (see `.context/database/prisma-unmodelled-objects.md`), not a per-feature
   rediscovery, for as long as those unmodelled objects exist. Cross-ref [B8] (migration write-shape care).
   _Status: open._
+
+### B14 · A fork-first seam that composes with an upstream issue needs a live ledger, not just plan prose
+
+- **Discovery.** `f-journey-state` t-2 built `canRead` / `subjectScope` as a fork-first seam that must
+  _delegate to Sunrise #367/#366 and delete the shim_ once that resolver lands. Under the fork-first model
+  ([B5]/[B7]) that "delegate when it lands" trigger existed only as prose scattered across the feature plan
+  and the decisions log — nothing an upstream-sync ([[CUSTOMIZATION]] §9) would actually _read_. On the next
+  `git merge vX.Y.Z` it would be easy to pull a Sunrise that shipped #367 and never notice a fork shim now
+  needs retiring, leaving two parallel scope-checks — the exact drift X2 exists to prevent.
+- **Impact.** The upstream-informing half of the fork-first model was write-only: we file the issue (B7) but
+  had no durable, greppable index of _which fork code is waiting on it_, so adoption is a manual re-read of
+  every feature plan.
+- **Feedback.** Any feature that builds a fork-first seam composing with an open Sunrise issue should add a
+  row to **[[upstream-asks|`.context/framework/upstream-asks.md`]]** (seam file · upstream issue(s) ·
+  owning feature · the concrete delegate-when-it-lands action · status) as a **Done-when deliverable**,
+  alongside filing/​updating the upstream note (B7). The ledger is the checklist the upstream-sync step reads;
+  the feature plan and Work-completed log stay the narrative. Distinguish it from a _boundary-breach_ log
+  (editing a Sunrise-owned file — the banner's `keep-mine` case): this ledger is the sanctioned case where the
+  fork code is clean framework-tier but its final home is upstream. Cross-ref [B5]/[B7] (fork-first informs
+  upstream). _Status: open._
