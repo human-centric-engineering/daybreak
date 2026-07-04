@@ -119,20 +119,25 @@ export async function canRead(
  * its journey aggregations so analytics inherits the same access discipline as the
  * single-row reads — one seam, two shapes.
  *
- * Today: an admin-support viewer asking explicitly for `ownership: 'all'` sees
- * every subject (`{}`); everyone else — including the default single-user Lelanea
- * path — sees only their own rows (`{ userId }`). `team` and any future widening
- * delegate to #367 when it lands; until then they fall through to own-only
- * (default-deny), never silently broadening.
+ * Its admin-support behaviour mirrors {@link canRead} exactly, so the row-level
+ * decision and the list-level filter agree: an admin-support viewer sees every
+ * subject (`{}`) — the set form of `canRead` granting that viewer any single
+ * subject — and every other viewer sees only their own rows (`{ userId }`), the
+ * set form of `canRead` allowing only self. `scope`'s `own → team → all` widening
+ * for a *non-support* viewer delegates to #367 when it lands (branched on there,
+ * not here — same as `canRead`); until then a non-support viewer never broadens
+ * past their own rows.
  */
 // eslint-disable-next-line @typescript-eslint/require-await -- async from day one (decision 7): the same seam as canRead, Promise-returning now so #367's resolver widens `own→team→all` without a caller sweep.
 export async function subjectScope(
   viewer: JourneyViewer,
   scope: AccessScope = {}
 ): Promise<SubjectFilter> {
-  // Admin support-tooling explicitly asking for the full set sees every subject.
-  if (viewer.isAdminSupport && scope.ownership === 'all') return {};
-  // Default (and single-user Lelanea): the viewer's own rows only. `team`/`all`
-  // for a non-support viewer widen here once #367's resolver is wired in.
+  // Admin support-tooling sees every subject — the set form of canRead's admin
+  // grant, so the two faces of the seam agree.
+  if (viewer.isAdminSupport) return {};
+  // Everyone else: their own rows only. `scope`'s `team`/`all` widening for a
+  // non-support viewer delegates to #367 (not branched on here yet, as in canRead).
+  void scope;
   return { userId: viewer.userId };
 }

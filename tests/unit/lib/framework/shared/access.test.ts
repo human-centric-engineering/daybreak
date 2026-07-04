@@ -68,14 +68,25 @@ describe('subjectScope', () => {
     });
   });
 
-  it('widens to every subject ({}) for admin-support explicitly asking for `all`', async () => {
+  it('widens to every subject ({}) for an admin-support viewer, mirroring canRead', async () => {
+    // The set form of canRead granting an admin-support viewer any single subject:
+    // the two faces of the seam agree, and the widening does not depend on `scope`.
+    await expect(subjectScope(support)).resolves.toEqual({});
+    await expect(subjectScope(support, { ownership: 'own' })).resolves.toEqual({});
     await expect(subjectScope(support, { ownership: 'all' })).resolves.toEqual({});
   });
 
-  it('keeps admin-support narrowed to own unless `all` is explicitly requested', async () => {
-    await expect(subjectScope(support, { ownership: 'own' })).resolves.toEqual({
-      userId: 'user_support',
-    });
-    await expect(subjectScope(support)).resolves.toEqual({ userId: 'user_support' });
+  it('agrees with canRead for every viewer/subject pairing (row filter == access decision)', async () => {
+    // For any (viewer, subject): canRead allow ⇔ subject passes subjectScope's filter.
+    const viewers = [alice, support];
+    const subjects = ['user_alice', 'user_support', 'user_bob'];
+    for (const viewer of viewers) {
+      const filter = await subjectScope(viewer);
+      for (const subject of subjects) {
+        const allowed = await canRead(viewer, subject);
+        const passesFilter = filter.userId === undefined || filter.userId === subject;
+        expect(passesFilter).toBe(allowed);
+      }
+    }
   });
 });

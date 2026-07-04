@@ -43,7 +43,12 @@ export interface JourneyScopedKey {
 export interface JourneyTimelineOptions {
   /** Chronological (`'asc'`, default) or most-recent-first (`'desc'`). */
   order?: 'asc' | 'desc';
-  /** Cap the number of events returned. Omitted ⇒ the full timeline. */
+  /**
+   * Non-negative cap on the number of events returned. Omitted ⇒ the full
+   * timeline; `0` ⇒ none. Passed straight to Prisma `take`, so a **negative**
+   * value takes rows from the *opposite* end of the ordering — callers must not
+   * pass one.
+   */
   limit?: number;
 }
 
