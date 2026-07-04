@@ -1,0 +1,31 @@
+/**
+ * Map read queries (f-map t-3) — list + detail reads for the admin surfaces.
+ *
+ * Separated from `version-service.ts` (the version-centric writer/readers) the
+ * way f-module-core split `queries.ts` from `sync.ts`: a single, testable place
+ * for the "list the maps" / "one map with its published version" reads the admin
+ * routes need. Does not swallow errors.
+ */
+
+import type { FacilitationGraph, FacilitationGraphVersion } from '@prisma/client';
+import { prisma } from '@/lib/db/client';
+import { NotFoundError } from '@/lib/api/errors';
+
+export type FacilitationGraphWithPublished = FacilitationGraph & {
+  publishedVersion: FacilitationGraphVersion | null;
+};
+
+/** Every facilitation map, ordered by slug. Empty on a fresh fork. */
+export async function listGraphs(): Promise<FacilitationGraph[]> {
+  return prisma.facilitationGraph.findMany({ orderBy: { slug: 'asc' } });
+}
+
+/** One map (with its published version) by slug; throws `NotFoundError` if absent. */
+export async function getGraphDetail(slug: string): Promise<FacilitationGraphWithPublished> {
+  const graph = await prisma.facilitationGraph.findUnique({
+    where: { slug },
+    include: { publishedVersion: true },
+  });
+  if (!graph) throw new NotFoundError(`Facilitation map "${slug}" not found`);
+  return graph;
+}
