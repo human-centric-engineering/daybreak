@@ -10,12 +10,14 @@
  */
 
 import { describe, it, expect } from 'vitest';
+// Import the pure format module directly (not the barrel), so these DB-free tests
+// don't transitively load the Prisma-bound version service (f-module-core convention).
 import {
   conditionSchema,
   edgeSchema,
   mapDefinitionSchema,
   nodeSchema,
-} from '@/lib/framework/facilitation/map';
+} from '@/lib/framework/facilitation/map/schema';
 
 describe('nodeSchema', () => {
   it('accepts each node type and defaults completionMode to "once"', () => {

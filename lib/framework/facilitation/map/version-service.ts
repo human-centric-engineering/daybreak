@@ -34,8 +34,11 @@ const ENTITY_TYPE = 'facilitation_graph';
  * integrity. Throws `ValidationError` with field-keyed messages on the first
  * failing stage. **This is the seam `f-engine` extends** — it appends a
  * graph-invariant stage (prerequisite cycles, unreachable-required) after the
- * format checks, without the callers below changing. Kept synchronous until that
- * stage needs I/O.
+ * format checks. Kept synchronous while every stage is pure; when f-engine adds a
+ * stage that needs I/O (e.g. confirming a referenced module exists) this becomes
+ * `async` and the three internal callers below gain an `await`. That ripple stays
+ * internal: the public service API (`createGraph` / `publishDraft` / `rollback`,
+ * all already async) is unchanged — the stability the routes and f-engine rely on.
  */
 export function validatePublishableMap(definition: unknown): MapDefinition {
   const parsed = mapDefinitionSchema.safeParse(definition);
@@ -138,7 +141,8 @@ export async function createGraph(args: CreateGraphArgs): Promise<FacilitationGr
       const created = await tx.facilitationGraph.create({
         data: { slug, name, description: description ?? null, createdBy: userId },
       });
-      if (validated) await createInitialVersion(tx, created.id, validated, userId);
+      if (!validated) return created; // empty map: no version pinned, no re-read needed
+      await createInitialVersion(tx, created.id, validated, userId);
       // Re-read so the returned row reflects the pinned publishedVersionId.
       return tx.facilitationGraph.findUniqueOrThrow({ where: { id: created.id } });
     });
@@ -157,6 +161,10 @@ export async function createGraph(args: CreateGraphArgs): Promise<FacilitationGr
     entityType: ENTITY_TYPE,
     entityId: graph.id,
     entityName: name,
+    // Created with an initial map ⇒ v1 is published: record the transition the
+    // same way publish/rollback do, so audit tooling keying on
+    // `changes.publishedVersion` sees every map's first publication.
+    changes: validated ? { publishedVersion: { from: null, to: 1 } } : undefined,
     metadata: { slug, publishedAtCreate: validated !== null },
     clientIp: clientIp ?? null,
   });

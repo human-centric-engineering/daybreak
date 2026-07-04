@@ -11,7 +11,10 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { mapDefinitionSchema, validateMapFormat } from '@/lib/framework/facilitation/map';
+// Import the pure format modules directly (not the barrel), so these DB-free tests
+// don't transitively load the Prisma-bound version service (f-module-core convention).
+import { mapDefinitionSchema } from '@/lib/framework/facilitation/map/schema';
+import { validateMapFormat } from '@/lib/framework/facilitation/map/validate';
 
 /** Parse raw input into a MapDefinition (all fixtures here are per-element valid). */
 function parse(raw: unknown) {
