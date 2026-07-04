@@ -6,5 +6,35 @@
 // every table here uses the `framework_` prefix via `@@map`, and its DDL lands
 // only in `framework_`-named migrations touching only `framework_*` tables.
 //
-// Empty skeleton (f-bootstrap t-1) — no models yet. The first tables arrive in
-// `f-slots`. See `.context/framework/planning/plan.md` feature 05 and spec §6.
+// First tables (f-slots t-1: `SlotDefinition`). See
+// `.context/framework/planning/f-slots.md` and spec §6.1.
+
+// A slot definition — authored config: *what* the system aims to learn about a
+// user (spec §6.1). Code-first, like `Module`: a module declares its slots in code
+// (`ModuleDefinition.slotDefinitions`) and the boot sync reconciles them into these
+// rows, each stamped `scope = module:<slug>`. Unlike `Module`, a definition has NO
+// operator-owned columns — it is a pure projection of code, so the sync propagates
+// authored edits (see `lib/framework/data-slots/sync.ts`).
+//
+// All classifier columns (`scope`/`visibility`/`mode`/`dataType`/`sensitivity`) are
+// free-form `String`, not Prisma enums (convention X1: a new value is not a
+// migration and forks merge cleanly); the code-side vocabulary is
+// `lib/framework/data-slots/vocabulary.ts`.
+model SlotDefinition {
+  id             String   @id @default(cuid())
+  slug           String   @unique // stable, globally-unique identity (matches SlotValue.slotSlug)
+  group          String // thematic cluster
+  description    String   @db.Text // what this slot means — also prompt material
+  scope          String   @default("global") // global | module:<slug> | facilitation
+  visibility     String   @default("open") // open (user sees/edits) | hidden (system-only)
+  mode           String   @default("targeted") // targeted | open (minted at runtime)
+  dataType       String   @default("text") // text | number | boolean | date | json — typed form for gates & analytics (D2)
+  sensitivity    String   @default("standard") // standard | sensitive | special_category — drives masking/retention/exposure (D3)
+  priorityWeight Int      @default(0) // sequencing input, targeted mode
+  isActive       Boolean  @default(true) // false = code removed but row retained for audit
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([group, scope])
+  @@map("framework_slot_definition")
+}
