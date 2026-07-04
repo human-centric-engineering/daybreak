@@ -30,6 +30,12 @@ export interface SlotValueProvenance {
   messageRange?: string;
   moduleSlug?: string;
   nodeKey?: string;
+  /**
+   * The *source* event time this reading refers to (e.g. when the message it was
+   * drawn from was sent) — distinct from the row's engine-managed `capturedAt`
+   * column, which is the ingestion time. The authoritative "when captured" is the
+   * column; this optional field only records a different source-side timestamp.
+   */
   capturedAt?: string;
   contextExcerptRef?: string;
 }
@@ -66,8 +72,12 @@ export interface GetSlotHeadsOptions {
  *
  * A single `now` is used for both the supersede stamp and the new row's `capturedAt`
  * so they agree. Concurrency backstop: `@@unique([userId, slotSlug, version])` — two
- * racing appends for the same slug compute the same version and the second fails on
- * the unique constraint (the caller retries), so two live heads can't result.
+ * racing appends for the same slug both compute the same next version, so the loser's
+ * `create` fails with a unique violation (P2002) and its transaction rolls back; two
+ * live heads can't result. This engine does **not** retry — a caller that expects
+ * concurrent same-slug writes should catch P2002 and re-run (the fresh head yields the
+ * next version). The head lookup selects only `id`/`version` (all it uses), so the
+ * outgoing head's `value`/`provenance`/`valueJson` are never transferred on a write.
  */
 export async function appendSlotValue(input: AppendSlotValueInput): Promise<SlotValue> {
   const now = new Date();
@@ -76,6 +86,7 @@ export async function appendSlotValue(input: AppendSlotValueInput): Promise<Slot
     const head = await tx.slotValue.findFirst({
       where: { userId: input.userId, slotSlug: input.slotSlug, supersededAt: null },
       orderBy: { version: 'desc' },
+      select: { id: true, version: true },
     });
 
     const version = head ? head.version + 1 : 1;
@@ -113,6 +124,15 @@ export async function appendSlotValue(input: AppendSlotValueInput): Promise<Slot
  * that query (`f-guidance`); it is intentionally not built into this raw engine.
  * Access scoping (`canRead`) wraps this later (`f-journey-state`); the `userId`
  * argument is the seam that predicate supplies.
+ *
+ * `slotSlug` is a deterministic secondary sort key (heads are one-per-slug) so the
+ * "freshest first" order is stable when `capturedAt` ties — downstream prompt/context
+ * builders depend on a reproducible sequence. An empty `slotSlugs` array means "no
+ * narrowing" (all heads), not "match nothing" — the filter is applied only when the
+ * list is non-empty, so a caller's dynamically-empty list can't silently drop every
+ * head via `in: []`. At scale, a partial index `(userId, capturedAt) WHERE
+ * supersededAt IS NULL` would keep this proportional to live heads rather than total
+ * versions — a deep-design-pass optimization (§9 item 1), not needed at v1 scale.
  */
 export async function getSlotHeads(
   userId: string,
@@ -122,8 +142,8 @@ export async function getSlotHeads(
     where: {
       userId,
       supersededAt: null,
-      ...(options?.slotSlugs ? { slotSlug: { in: options.slotSlugs } } : {}),
+      ...(options?.slotSlugs?.length ? { slotSlug: { in: options.slotSlugs } } : {}),
     },
-    orderBy: { capturedAt: 'desc' },
+    orderBy: [{ capturedAt: 'desc' }, { slotSlug: 'asc' }],
   });
 }

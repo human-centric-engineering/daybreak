@@ -86,6 +86,7 @@ describe('appendSlotValue', () => {
     expect(txMock.slotValue.findFirst).toHaveBeenCalledWith({
       where: { userId: 'user_1', slotSlug: 'primary_goal', supersededAt: null },
       orderBy: { version: 'desc' },
+      select: { id: true, version: true },
     });
     expect(txMock.slotValue.update).not.toHaveBeenCalled();
     expect(txMock.slotValue.create).toHaveBeenCalledTimes(1);
@@ -140,14 +141,14 @@ describe('appendSlotValue', () => {
 });
 
 describe('getSlotHeads', () => {
-  it('reads only head rows for the user, newest first', async () => {
+  it('reads only head rows for the user, newest first with a stable tiebreaker', async () => {
     prismaMock.slotValue.findMany.mockResolvedValue([]);
 
     await getSlotHeads('user_1');
 
     expect(prismaMock.slotValue.findMany).toHaveBeenCalledWith({
       where: { userId: 'user_1', supersededAt: null },
-      orderBy: { capturedAt: 'desc' },
+      orderBy: [{ capturedAt: 'desc' }, { slotSlug: 'asc' }],
     });
   });
 
@@ -162,7 +163,19 @@ describe('getSlotHeads', () => {
         supersededAt: null,
         slotSlug: { in: ['primary_goal', 'health_note'] },
       },
-      orderBy: { capturedAt: 'desc' },
+      orderBy: [{ capturedAt: 'desc' }, { slotSlug: 'asc' }],
+    });
+  });
+
+  it('treats an empty slotSlugs array as no narrowing (not "match nothing")', async () => {
+    prismaMock.slotValue.findMany.mockResolvedValue([]);
+
+    await getSlotHeads('user_1', { slotSlugs: [] });
+
+    // No `slotSlug` predicate — an empty list must NOT become `in: []` (which matches nothing).
+    expect(prismaMock.slotValue.findMany).toHaveBeenCalledWith({
+      where: { userId: 'user_1', supersededAt: null },
+      orderBy: [{ capturedAt: 'desc' }, { slotSlug: 'asc' }],
     });
   });
 });
