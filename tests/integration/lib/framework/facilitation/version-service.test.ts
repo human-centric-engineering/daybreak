@@ -353,6 +353,8 @@ describe('listVersions / getVersion', () => {
     const page1 = await listVersions('main', { limit: 2 });
     expect(page1.versions.map((v) => v.version)).toEqual([3, 2]);
     expect(page1.nextCursor).not.toBeNull();
+    // The live version (the newest, v3) is flagged so a consumer needn't refetch.
+    expect(page1.publishedVersionId).toBe(page1.versions[0]?.id);
 
     const page2 = await listVersions('main', { limit: 2, cursor: page1.nextCursor! });
     expect(page2.versions.map((v) => v.version)).toEqual([1]);

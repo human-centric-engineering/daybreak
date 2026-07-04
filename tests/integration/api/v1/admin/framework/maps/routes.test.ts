@@ -244,15 +244,21 @@ describe('POST /maps/:slug/rollback', () => {
 });
 
 describe('GET /maps/:slug/versions', () => {
-  it('lists versions in the envelope', async () => {
+  it('lists versions (with the live-version pointer) in the envelope', async () => {
     asAdmin();
-    svc.listVersions.mockResolvedValue({ versions: [{ id: 'v1', version: 1 }], nextCursor: null });
+    svc.listVersions.mockResolvedValue({
+      versions: [{ id: 'v1', version: 1 }],
+      publishedVersionId: 'v1',
+      nextCursor: null,
+    });
     const res = await versionsRoute.GET(
       req('GET', undefined, `${BASE}/main/versions?limit=10`),
       ctx('main')
     );
     expect(res.status).toBe(200);
     expect(svc.listVersions).toHaveBeenCalledWith('main', expect.objectContaining({ limit: 10 }));
+    const body = await parse<{ data: { publishedVersionId: string } }>(res);
+    expect(body.data.publishedVersionId).toBe('v1');
   });
 
   it('propagates NotFoundError (unknown map) as 404', async () => {
