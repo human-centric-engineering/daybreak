@@ -3,8 +3,8 @@
  * deterministic engine (sole writer of state), the advisory guidance layer, and
  * governance.
  *
- * Empty skeleton (f-bootstrap t-1). Populated from `f-map` / `f-journey-state` /
- * `f-engine` onward — see `.context/framework/planning/plan.md` (features 04, 09,
- * 11, 12) and the spec §5.
+ * The authored **map** (schema, referential validator, and version service —
+ * `f-map`) is populated below. Journey state / engine / guidance arrive in later
+ * features — see `.context/framework/planning/plan.md` (09, 11, 12) and spec §5.
  */
-export {};
+export * from '@/lib/framework/facilitation/map';

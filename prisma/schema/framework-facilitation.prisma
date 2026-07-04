@@ -6,6 +6,55 @@
 // every table here uses the `framework_` prefix via `@@map`, and its DDL lands
 // only in `framework_`-named migrations touching only `framework_*` tables.
 //
-// Empty skeleton (f-bootstrap t-1) — no models yet. The first tables arrive in
-// `f-map` / `f-journey-state`. See `.context/framework/planning/plan.md`
-// features 04 & 09 and spec §5.
+// First tables (f-map t-2: the authored map — `FacilitationGraph` + immutable
+// `FacilitationGraphVersion` snapshots). Journey state / events / policies arrive
+// in `f-journey-state` and later. See `.context/framework/planning/f-map.md` and
+// spec §5.1.
+
+// A named facilitation map (spec §5.1, F1/F19). Authored config: the current
+// draft (`draftDefinition`, draft-on-edit) plus a pointer to the live published
+// snapshot. Mirrors `AiWorkflow`'s draft/published-version discipline. Multiple
+// graphs per deployment are supported by design (F19 — a primary map and a
+// supporter map are two rows). The `definition` shape is owned by
+// `lib/framework/facilitation/map/schema.ts` and validated before every publish.
+model FacilitationGraph {
+  id                 String   @id @default(cuid())
+  slug               String   @unique // stable identity; user journeys key on it
+  name               String
+  description        String?  @db.Text
+  draftDefinition    Json? // in-progress edit; null when there is no draft
+  publishedVersionId String? // FK to the currently live version
+  createdBy          String? // user id — authored config (no User relation; see below)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  publishedVersion FacilitationGraphVersion?  @relation("FacilitationGraphPublishedVersion", fields: [publishedVersionId], references: [id])
+  versions         FacilitationGraphVersion[] @relation("FacilitationGraphVersions")
+
+  @@index([publishedVersionId])
+  @@map("framework_facilitation_graph")
+}
+
+// Immutable snapshot of a map `definition` at publish time (F1/F2). Mirrors
+// `AiWorkflowVersion`: new rows are inserted by `publishDraft` / `rollback`;
+// existing rows are never mutated. `createdBy` is a bare `String` — it holds a
+// user id OR `"agent:<slug>"` for an approved structure-change proposal (F17), so
+// it is deliberately NOT a `User` relation (which would also mean editing Sunrise's
+// `User` model). The map is authored config, not per-user data — no satellite FK
+// here; personal data (journeys, events) arrives in `f-journey-state`.
+model FacilitationGraphVersion {
+  id            String   @id @default(cuid())
+  graphId       String
+  version       Int // monotonic per graph, starts at 1
+  definition    Json // full map snapshot at publish time
+  changeSummary String?  @db.Text // optional author-supplied label
+  createdBy     String? // user id, or "agent:<slug>" (F17)
+  createdAt     DateTime @default(now())
+
+  graph        FacilitationGraph   @relation("FacilitationGraphVersions", fields: [graphId], references: [id], onDelete: Cascade)
+  publishedFor FacilitationGraph[] @relation("FacilitationGraphPublishedVersion")
+
+  @@unique([graphId, version])
+  @@index([graphId])
+  @@map("framework_facilitation_graph_version")
+}
