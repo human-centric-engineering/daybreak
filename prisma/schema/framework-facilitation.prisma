@@ -6,10 +6,11 @@
 // every table here uses the `framework_` prefix via `@@map`, and its DDL lands
 // only in `framework_`-named migrations touching only `framework_*` tables.
 //
-// First tables (f-map t-2: the authored map — `FacilitationGraph` + immutable
-// `FacilitationGraphVersion` snapshots). Journey state / events / policies arrive
-// in `f-journey-state` and later. See `.context/framework/planning/f-map.md` and
-// spec §5.1.
+// Tables so far: the authored map — `FacilitationGraph` + immutable
+// `FacilitationGraphVersion` snapshots (f-map t-2); per-user journey state —
+// `UserJourney` + the `UserNodeState` projection + the insert-only `JourneyEvent`
+// log (f-journey-state t-1). Policies / structure-change proposals arrive later.
+// See `.context/framework/planning/f-map.md` / `f-journey-state.md` and spec §5.1–§5.2.
 
 // A named facilitation map (spec §5.1, F1/F19). Authored config: the current
 // draft (`draftDefinition`, draft-on-edit) plus a pointer to the live published
@@ -57,4 +58,91 @@ model FacilitationGraphVersion {
   @@unique([graphId, version])
   @@index([graphId])
   @@map("framework_facilitation_graph_version")
+}
+
+// ── Journey state (f-journey-state t-1, spec §5.2) ───────────────────────────
+// Per-user runtime traversal of an authored map. Personal data on the satellite
+// convention: `userId` is a PLAIN scalar FK to core `User` (no Prisma `@relation`
+// — a fork table must not add a reverse field to the Sunrise-owned `User` model),
+// with `ON DELETE CASCADE` hand-written in the migration SQL so `eraseUser()`
+// erases it (spec §11; `.context/privacy/data-erasure.md`). The deterministic
+// engine (`f-engine`, feature 11) is the SOLE writer of this state (F11); these
+// models ship their shape + the erasure guarantee here — the writer arrives with
+// the engine.
+
+// One journey per user per graph PER CONTEXT (spec §5.2, F19). `graphSlug` is a
+// plain string, NOT an FK to `FacilitationGraph` — state is interpreted against the
+// live *published* version (F2), so republishing must never orphan a journey.
+model UserJourney {
+  id     String @id @default(cuid())
+  userId String // FK to User.id — no @relation; ON DELETE CASCADE hand-written in the migration
+  graphSlug String // the map being walked — plain string (F2), not an FK
+  // Distinguishes parallel instances of the same map for one user (e.g. one user
+  // supporting two different people through the same map — §8). NON-NULLABLE by
+  // design (X3): Postgres treats NULLs as distinct in unique indexes, so a nullable
+  // contextKey would let duplicate (userId, graphSlug) default journeys slip past
+  // the @@unique below. "" = the default, context-free journey — the empty-string
+  // sentinel is load-bearing.
+  contextKey String   @default("")
+  startedAt  DateTime @default(now())
+
+  nodeStates UserNodeState[]
+  events     JourneyEvent[]
+
+  @@unique([userId, graphSlug, contextKey])
+  @@map("framework_user_journey")
+}
+
+// Current standing per node — a materialised projection of the event log for cheap
+// reads (F10; the same projection relationship `AiWorkflowExecution` has to its step
+// events). `status` is free-form `String` (X1); the vocabulary lives in
+// `lib/framework/facilitation/journey/vocabulary.ts`.
+model UserNodeState {
+  id             String @id @default(cuid())
+  journeyId      String
+  nodeKey        String
+  status         String // unvisited | available | active | visited | completed
+  timesCompleted Int    @default(0) // repeatable nodes count completions; status reflects the latest pass (F6)
+  // Optional module-defined progress payload (e.g. % through a unit, mastery levels)
+  // — shape owned by the node's module, opaque to the engine. Deeper attainment data
+  // belongs in slots (F7).
+  progress       Json?
+  firstEnteredAt DateTime? // powers "firsts" / airport semantics
+  lastActiveAt   DateTime?
+  completedAt    DateTime? // most recent completion for repeatable nodes
+
+  journey UserJourney @relation(fields: [journeyId], references: [id], onDelete: Cascade)
+
+  @@unique([journeyId, nodeKey])
+  @@map("framework_user_node_state")
+}
+
+// INSERT-ONLY — never updated, never deleted (except erasure). The full history and
+// the source of truth `UserNodeState` projects (F10); also the synopsis agents' raw
+// material, the stats feed (f-engagement, feature 08), and the admin timeline.
+//
+// The stream has TWO write-sources (spec §4.3 = §5.4 — one table): journey-traversal
+// events (which set `journeyId` + `nodeKey`) and non-journey engagement events
+// (`session.started`, module lifecycle — `journeyId` null). So it is keyed on
+// `userId` (a PLAIN scalar FK, `ON DELETE CASCADE` hand-written in the migration) —
+// the ONLY shape that reaches EVERY row from the user for erasure; a `journeyId`-only
+// table would leave non-journey events with no FK path to the user (a GDPR hole).
+// `journeyId` is an OPTIONAL Prisma relation (`SetNull`) for the journey-scoped
+// events. `type` is free-form `String` (X1); f-engagement (08) extends the event
+// vocabulary + the stats read side — not this schema.
+model JourneyEvent {
+  id         String   @id @default(cuid())
+  userId     String // FK to User.id — no @relation; ON DELETE CASCADE hand-written in the migration (erasure path for EVERY event)
+  journeyId  String? // set for journey-traversal events; null for non-journey engagement
+  nodeKey    String?
+  moduleSlug String?
+  type       String // free-form event kind (X1) — e.g. node_entered, node_completed, session.started
+  payload    Json?
+  occurredAt DateTime @default(now())
+
+  journey UserJourney? @relation(fields: [journeyId], references: [id], onDelete: SetNull)
+
+  @@index([userId, occurredAt]) // erasure + per-user engagement reads
+  @@index([journeyId, occurredAt]) // the journey timeline (§5.2)
+  @@map("framework_journey_event")
 }

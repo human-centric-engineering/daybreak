@@ -4,7 +4,10 @@
  * governance.
  *
  * The authored **map** (schema, referential validator, and version service —
- * `f-map`) is populated below. Journey state / engine / guidance arrive in later
- * features — see `.context/framework/planning/plan.md` (09, 11, 12) and spec §5.
+ * `f-map`) and per-user **journey state** (models + status vocabulary —
+ * `f-journey-state` t-1) are populated below. The engine (sole writer of state) and
+ * guidance arrive in later features — see `.context/framework/planning/plan.md`
+ * (11, 12) and spec §5.
  */
 export * from '@/lib/framework/facilitation/map';
+export * from '@/lib/framework/facilitation/journey';

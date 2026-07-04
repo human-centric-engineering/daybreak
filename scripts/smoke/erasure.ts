@@ -52,6 +52,10 @@ async function main(): Promise<void> {
   let datasetId: string | null = null;
   let runId: string | null = null;
   let slotValueId: string | null = null;
+  let journeyId: string | null = null;
+  let nodeStateId: string | null = null;
+  let journeyEventLinkedId: string | null = null;
+  let journeyEventEngagementId: string | null = null;
 
   try {
     // Subject (ADMIN so we also prove a config-creator's createdBy is nulled).
@@ -99,6 +103,35 @@ async function main(): Promise<void> {
       },
     });
     slotValueId = slotValue.id;
+
+    // Framework journey state (f-journey-state t-1). `UserJourney.userId` +
+    // `JourneyEvent.userId` are hand-written ON DELETE CASCADE FKs to `user`;
+    // `UserNodeState` cascades via its journey. We seed TWO events — one linked to
+    // the journey, one a non-journey engagement event (journeyId null, reachable
+    // only via the userId FK) — to prove BOTH erasure paths.
+    const journey = await prisma.userJourney.create({
+      data: { userId: subject.id, graphSlug: `${PREFIX}-graph-${stamp}` },
+    });
+    journeyId = journey.id;
+    const nodeState = await prisma.userNodeState.create({
+      data: { journeyId: journey.id, nodeKey: `${PREFIX}-node`, status: 'active' },
+    });
+    nodeStateId = nodeState.id;
+    const journeyEventLinked = await prisma.journeyEvent.create({
+      data: {
+        userId: subject.id,
+        journeyId: journey.id,
+        nodeKey: `${PREFIX}-node`,
+        type: 'node_entered',
+      },
+    });
+    journeyEventLinkedId = journeyEventLinked.id;
+    const journeyEventEngagement = await prisma.journeyEvent.create({
+      // journeyId left null — a non-journey engagement event (§4.3). Erasable ONLY
+      // via the userId hand-FK; this is the row a journeyId-only table would leak.
+      data: { userId: subject.id, moduleSlug: `${PREFIX}-module`, type: 'session.started' },
+    });
+    journeyEventEngagementId = journeyEventEngagement.id;
 
     // Retained audit row carrying the subject's IP (residual PII to scrub).
     const audit = await prisma.aiAdminAuditLog.create({
@@ -156,6 +189,22 @@ async function main(): Promise<void> {
       (await prisma.slotValue.findUnique({ where: { id: slotValue.id } })) === null,
       'framework slot value cascade-deleted (hand-written ON DELETE CASCADE)'
     );
+    check(
+      (await prisma.userJourney.findUnique({ where: { id: journey.id } })) === null,
+      'framework user journey cascade-deleted (hand-written ON DELETE CASCADE)'
+    );
+    check(
+      (await prisma.userNodeState.findUnique({ where: { id: nodeState.id } })) === null,
+      'framework user node state cascade-deleted (via its journey)'
+    );
+    check(
+      (await prisma.journeyEvent.findUnique({ where: { id: journeyEventLinked.id } })) === null,
+      'framework journey event (journey-linked) cascade-deleted'
+    );
+    check(
+      (await prisma.journeyEvent.findUnique({ where: { id: journeyEventEngagement.id } })) === null,
+      'framework journey event (null-journeyId engagement) cascade-deleted via its userId FK'
+    );
 
     // Org config retained, creator de-attributed.
     const agentAfter = await prisma.aiAgent.findUnique({ where: { id: agent.id } });
@@ -200,6 +249,20 @@ async function main(): Promise<void> {
       await prisma.aiAdminAuditLog.deleteMany({ where: { id: auditId } }).catch(() => undefined);
     if (slotValueId)
       await prisma.slotValue.deleteMany({ where: { id: slotValueId } }).catch(() => undefined);
+    // Journey children before the journey (events' journeyId is SetNull, node states
+    // Cascade — order is safe either way; explicit for clarity on the non-erased path).
+    if (journeyEventLinkedId)
+      await prisma.journeyEvent
+        .deleteMany({ where: { id: journeyEventLinkedId } })
+        .catch(() => undefined);
+    if (journeyEventEngagementId)
+      await prisma.journeyEvent
+        .deleteMany({ where: { id: journeyEventEngagementId } })
+        .catch(() => undefined);
+    if (nodeStateId)
+      await prisma.userNodeState.deleteMany({ where: { id: nodeStateId } }).catch(() => undefined);
+    if (journeyId)
+      await prisma.userJourney.deleteMany({ where: { id: journeyId } }).catch(() => undefined);
     if (subjectUserId)
       await prisma.user.deleteMany({ where: { id: subjectUserId } }).catch(() => undefined);
     if (runId)
