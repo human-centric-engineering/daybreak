@@ -65,6 +65,22 @@ export const SLOT_SENSITIVITY = {
   special_category: 'special_category',
 } as const;
 
+/**
+ * How a slot *value* came to be known (spec §6.1, `SlotValue.sourceType`). A
+ * free-form `String` on the row (X1); the capture capability (`f-slot-capture`)
+ * decides which applies. `user_confirmed` raises confidence on an existing reading;
+ * a contradiction is a new version whose `reasoningNote` records the negation.
+ */
+export const SLOT_SOURCE_TYPE = {
+  direct: 'direct',
+  unprompted: 'unprompted',
+  emerged_naturally: 'emerged_naturally',
+  built_across_turns: 'built_across_turns',
+  inferred: 'inferred',
+  user_confirmed: 'user_confirmed',
+  synthesised: 'synthesised',
+} as const;
+
 /** A known slot scope literal (`global` | `facilitation`; module scopes are dynamic). */
 export type SlotScope = (typeof SLOT_SCOPE)[keyof typeof SLOT_SCOPE];
 /** A known slot visibility literal. */
@@ -75,3 +91,5 @@ export type SlotMode = (typeof SLOT_MODE)[keyof typeof SLOT_MODE];
 export type SlotDataType = (typeof SLOT_DATA_TYPE)[keyof typeof SLOT_DATA_TYPE];
 /** A known slot sensitivity literal. */
 export type SlotSensitivity = (typeof SLOT_SENSITIVITY)[keyof typeof SLOT_SENSITIVITY];
+/** A known slot-value source-type literal (how a value was captured). */
+export type SlotSourceType = (typeof SLOT_SOURCE_TYPE)[keyof typeof SLOT_SOURCE_TYPE];

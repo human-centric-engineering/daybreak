@@ -256,3 +256,21 @@ both levels; each is filed at its primary home with a cross-reference. Mark an e
 startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registration run?" guard on the
   source that proves registration ran** (registered modules), not on the derived/collected set, which can
   be legitimately empty. Recurs directly for `f-map` snapshot writes and `f-engagement`. _Status: open._
+
+### B11 · A hand-written fork→core FK must reference the core table's `@@map` name, and apply via `migrate deploy`
+
+- **Discovery.** `f-slots` t-2's plan (and its first migration draft) wrote the hand-FK as
+  `REFERENCES "User"("id")` — copying the **Prisma model** name. The core `User` model maps to table
+  **`"user"`** (`auth.prisma` `@@map("user")`), so the `ALTER TABLE … ADD CONSTRAINT` failed at apply
+  with `relation "User" does not exist` — **after** the `CREATE TABLE` had already run, leaving a
+  half-applied, failed migration to unwind (drop the table, `migrate resolve --rolled-back`, fix, redeploy).
+  Separately, the correct apply path is `db:migrate:deploy`: `migrate dev` diffs the schema against the DB,
+  sees the hand-FK (which has no `@relation` in the schema) as drift and offers to reset.
+- **Impact.** A failed partial migration mid-build and a manual unwind — avoidable with one correct
+  identifier and the right apply command.
+- **Feedback.** When a fork-table plan specifies a **hand-written FK to a core table**, it must (a) name
+  the **actual table** the target model `@@map`s to (grep the core model's `@@map`, don't assume the
+  model name — Sunrise's auth tables are lowercase: `user`/`session`/`account`), and (b) say to apply
+  with **`db:migrate:deploy`**, not `migrate dev`, so the intentional schema-vs-DB divergence (the FK the
+  schema doesn't model) isn't read as drift. Recurs for every future framework table with a `userId`
+  (`f-journey-state`'s `UserJourney`/`JourneyEvent`). _Status: open._

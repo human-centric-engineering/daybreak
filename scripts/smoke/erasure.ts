@@ -51,6 +51,7 @@ async function main(): Promise<void> {
   let receiptId: string | null = null;
   let datasetId: string | null = null;
   let runId: string | null = null;
+  let slotValueId: string | null = null;
 
   try {
     // Subject (ADMIN so we also prove a config-creator's createdBy is nulled).
@@ -82,6 +83,22 @@ async function main(): Promise<void> {
     const message = await prisma.aiMessage.create({
       data: { conversationId: conversation.id, role: 'user', content: 'hi' },
     });
+
+    // Framework slot value — personal data via a hand-written ON DELETE CASCADE FK
+    // (plain scalar `userId`, no @relation; f-slots t-2). Proves the cascade fires.
+    const slotValue = await prisma.slotValue.create({
+      data: {
+        userId: subject.id,
+        slotSlug: `${PREFIX}-slot-${stamp}`,
+        version: 1,
+        value: 'smoke value',
+        confidence: 5,
+        sourceType: 'direct',
+        reasoningNote: 'smoke',
+        provenance: {},
+      },
+    });
+    slotValueId = slotValue.id;
 
     // Retained audit row carrying the subject's IP (residual PII to scrub).
     const audit = await prisma.aiAdminAuditLog.create({
@@ -135,6 +152,10 @@ async function main(): Promise<void> {
       (await prisma.aiMessage.findUnique({ where: { id: message.id } })) === null,
       'message cascade-deleted via its conversation'
     );
+    check(
+      (await prisma.slotValue.findUnique({ where: { id: slotValue.id } })) === null,
+      'framework slot value cascade-deleted (hand-written ON DELETE CASCADE)'
+    );
 
     // Org config retained, creator de-attributed.
     const agentAfter = await prisma.aiAgent.findUnique({ where: { id: agent.id } });
@@ -177,6 +198,8 @@ async function main(): Promise<void> {
         .catch(() => undefined);
     if (auditId)
       await prisma.aiAdminAuditLog.deleteMany({ where: { id: auditId } }).catch(() => undefined);
+    if (slotValueId)
+      await prisma.slotValue.deleteMany({ where: { id: slotValueId } }).catch(() => undefined);
     if (subjectUserId)
       await prisma.user.deleteMany({ where: { id: subjectUserId } }).catch(() => undefined);
     if (runId)

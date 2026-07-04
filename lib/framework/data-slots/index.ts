@@ -19,6 +19,7 @@ export {
   SLOT_MODE,
   SLOT_DATA_TYPE,
   SLOT_SENSITIVITY,
+  SLOT_SOURCE_TYPE,
   moduleSlotScope,
 } from '@/lib/framework/data-slots/vocabulary';
 export type {
@@ -27,6 +28,13 @@ export type {
   SlotMode,
   SlotDataType,
   SlotSensitivity,
+  SlotSourceType,
 } from '@/lib/framework/data-slots/vocabulary';
 export { syncRegisteredSlotDefinitions } from '@/lib/framework/data-slots/sync';
 export { listSlotDefinitions } from '@/lib/framework/data-slots/queries';
+export { appendSlotValue, getSlotHeads } from '@/lib/framework/data-slots/values';
+export type {
+  SlotValueProvenance,
+  AppendSlotValueInput,
+  GetSlotHeadsOptions,
+} from '@/lib/framework/data-slots/values';
