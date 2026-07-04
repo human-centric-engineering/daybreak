@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
 
-import { NODE_STATE_STATUS, type NodeStateStatus } from '@/lib/framework/facilitation/journey';
+// Import the specific module, not the journey barrel: t-2 adds a DB-bound
+// `queries.ts` to that barrel, and importing the barrel here would drag
+// `@/lib/db/client` into this pure vocabulary test (planning-retro B12).
+import {
+  NODE_STATE_STATUS,
+  type NodeStateStatus,
+} from '@/lib/framework/facilitation/journey/vocabulary';
 
 /**
  * `UserNodeState.status` is a free-form `String` column (X1), but its allowed set is
