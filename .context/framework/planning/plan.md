@@ -86,27 +86,27 @@ Filed against Sunrise on 2026-06-30 while building ConQuest. They split cleanly 
 
 A flat list, shown in rough dependency order (most-ready first), the way the Hub would sort it. Order is _emergent from `depends on`_, not prescriptive — the [[#3. Human-centric principles|exploratory-ordering principle]] holds. PR counts are indicative sizing. The **Owner** and **Status** columns are the at-a-glance board: who holds what, and what's free to claim (see [[#Board — status &amp; claiming|the board legend]] below the table).
 
-| #   | Feature                 | Owner           | Status                                                      | Depends on                                        | ~PRs | Capability                                       |
-| --- | ----------------------- | --------------- | ----------------------------------------------------------- | ------------------------------------------------- | ---- | ------------------------------------------------ |
-| 01  | `f-seams`               | Simon (Sunrise) | **shipped** (v0.5.0)                                        | —                                                 | 2    | Two generic Sunrise core seams (pre-fork)        |
-| 02  | `f-bootstrap`           | Simon Holmes    | **shipped** (#4/#6/#8/#9)                                   | f-seams                                           | 4    | Fork + framework skeleton + enforced boundary    |
-| 03  | `f-module-core`         | Simon Holmes    | **shipped** (#10 / #11 / #12)                               | f-bootstrap                                       | 3    | Module definition, registry, seam, liveness      |
-| 04  | `f-map`                 | Simon Holmes    | **shipped** (#16 / #20 / #21)                               | f-bootstrap ✅                                    | 4    | Facilitation map: schema, versioning, format     |
-| 05  | `f-slots`               | John            | **shipped** (#19 / #22 / #24)                               | f-bootstrap ✅                                    | 3    | Slot definitions + insert-only values            |
-| 06  | `f-module-config`       | _unclaimed_     | **available** ▲                                             | f-module-core ✅                                  | 4    | Generic Zod config form + config versioning      |
-| 07  | `f-module-bindings`     | Simon Holmes    | **in flight**                                               | f-module-core ✅                                  | 4    | Agent / workflow / knowledge bindings            |
-| 08  | `f-engagement`          | _unclaimed_     | **available** ▲                                             | f-module-core ✅                                  | 3    | Engagement event stream + stats + feedback       |
-| 09  | `f-journey-state`       | John            | **shipped** (#27 / #28)                                     | f-map ✅                                          | 3    | Journey state models + access discipline         |
-| 10  | `f-slot-capture`        | _unclaimed_     | **available** ▲                                             | f-slots ✅                                        | 3    | `fill_slot` / `get_state` capture capabilities   |
-| 11  | `f-engine`              | _unclaimed_     | **available** ▲                                             | f-map ✅, f-journey-state ✅                      | 5    | Deterministic engine + GraphStore                |
-| 12  | `f-guidance`            | _unclaimed_     | blocked → f-engine, f-slot-capture                          | f-engine, f-slot-capture                          | 5    | Guidance service, capabilities, chat injection   |
-| 13  | `f-facilitation-agents` | _unclaimed_     | blocked → f-guidance                                        | f-guidance                                        | 3    | Facilitation agent family + surface-scoping      |
-| 14  | `f-map-editor`          | _unclaimed_     | blocked → f-map, f-engine                                   | f-map, f-engine                                   | 5    | Map editor + journey dry-run simulator           |
-| 15  | `f-ops-views`           | _unclaimed_     | blocked → f-module-config                                   | f-module-config, f-journey-state ✅               | 4    | Module admin + journey explorer                  |
-| 16  | `f-atlas`               | _unclaimed_     | blocked → f-module-bindings, f-facilitation-agents, f-slots | f-module-bindings, f-facilitation-agents, f-slots | 3    | Framework atlas (composition view)               |
-| 17  | `f-policies`            | _unclaimed_     | blocked → f-facilitation-agents                             | f-facilitation-agents                             | 4    | Typed facilitation policy kinds                  |
-| 18  | `f-emergence`           | _unclaimed_     | blocked → f-engine, f-facilitation-agents                   | f-engine, f-facilitation-agents                   | 4    | Structure-change proposal pipeline + eval wiring |
-| 19  | `f-overlays`            | _unclaimed_     | blocked → f-guidance                                        | f-guidance                                        | 3    | pgvector similarity + proactive guidance         |
+| #   | Feature                 | Owner           | Status                                                      | Depends on                                             | ~PRs | Capability                                       |
+| --- | ----------------------- | --------------- | ----------------------------------------------------------- | ------------------------------------------------------ | ---- | ------------------------------------------------ |
+| 01  | `f-seams`               | Simon (Sunrise) | **shipped** (v0.5.0)                                        | —                                                      | 2    | Two generic Sunrise core seams (pre-fork)        |
+| 02  | `f-bootstrap`           | Simon Holmes    | **shipped** (#4/#6/#8/#9)                                   | f-seams                                                | 4    | Fork + framework skeleton + enforced boundary    |
+| 03  | `f-module-core`         | Simon Holmes    | **shipped** (#10 / #11 / #12)                               | f-bootstrap                                            | 3    | Module definition, registry, seam, liveness      |
+| 04  | `f-map`                 | Simon Holmes    | **shipped** (#16 / #20 / #21)                               | f-bootstrap ✅                                         | 4    | Facilitation map: schema, versioning, format     |
+| 05  | `f-slots`               | John            | **shipped** (#19 / #22 / #24)                               | f-bootstrap ✅                                         | 3    | Slot definitions + insert-only values            |
+| 06  | `f-module-config`       | _unclaimed_     | **available** ▲                                             | f-module-core ✅                                       | 4    | Generic Zod config form + config versioning      |
+| 07  | `f-module-bindings`     | Simon Holmes    | **in flight**                                               | f-module-core ✅                                       | 4    | Agent / workflow / knowledge bindings            |
+| 08  | `f-engagement`          | _unclaimed_     | **available** ▲                                             | f-module-core ✅                                       | 3    | Engagement event stream + stats + feedback       |
+| 09  | `f-journey-state`       | John            | **shipped** (#27 / #28)                                     | f-map ✅                                               | 3    | Journey state models + access discipline         |
+| 10  | `f-slot-capture`        | _unclaimed_     | **available** ▲                                             | f-slots ✅                                             | 3    | `fill_slot` / `get_state` capture capabilities   |
+| 11  | `f-engine`              | _unclaimed_     | **available** ▲                                             | f-map ✅, f-journey-state ✅                           | 5    | Deterministic engine + GraphStore                |
+| 12  | `f-guidance`            | _unclaimed_     | blocked → f-engine, f-slot-capture                          | f-engine, f-slot-capture                               | 5    | Guidance service, capabilities, chat injection   |
+| 13  | `f-facilitation-agents` | _unclaimed_     | blocked → f-guidance                                        | f-guidance                                             | 3    | Facilitation agent family + surface-scoping      |
+| 14  | `f-map-editor`          | _unclaimed_     | blocked → f-map, f-engine                                   | f-map, f-engine                                        | 5    | Map editor + journey dry-run simulator           |
+| 15  | `f-ops-views`           | _unclaimed_     | blocked → f-module-config, f-module-bindings                | f-module-config, f-module-bindings, f-journey-state ✅ | 4    | Module admin + journey explorer                  |
+| 16  | `f-atlas`               | _unclaimed_     | blocked → f-module-bindings, f-facilitation-agents, f-slots | f-module-bindings, f-facilitation-agents, f-slots      | 3    | Framework atlas (composition view)               |
+| 17  | `f-policies`            | _unclaimed_     | blocked → f-facilitation-agents                             | f-facilitation-agents                                  | 4    | Typed facilitation policy kinds                  |
+| 18  | `f-emergence`           | _unclaimed_     | blocked → f-engine, f-facilitation-agents                   | f-engine, f-facilitation-agents                        | 4    | Structure-change proposal pipeline + eval wiring |
+| 19  | `f-overlays`            | _unclaimed_     | blocked → f-guidance                                        | f-guidance                                             | 3    | pgvector similarity + proactive guidance         |
 
 **Critical path:** `f-seams → f-bootstrap → f-module-core/f-map → f-journey-state → f-engine → f-guidance → f-facilitation-agents`. Admin (14–16) and governance (17–19) hang off that spine and parallelise once it exists.
 
@@ -215,7 +215,7 @@ Stats from an insert-only stream, never counters (A9). Shares `JourneyEvent` wit
 
 > **Coordination — `JourneyEvent` is created by [[#09 · `f-journey-state` — journey state + access discipline|f-journey-state (09)]], not here.** The shared stream ships with the journey-state models (09 is in flight now). It is **`userId`-keyed with a hand-FK cascade + optional `journeyId`** — the shape that holds both journey-traversal events (which set `journeyId`) and this feature's non-journey engagement events (`session.started`, module lifecycle — `journeyId` null) while keeping every row erasable (the §4.3-vs-§5.2 key-column reconciliation; see the decisions log). `f-engagement` **extends its _use_, not its schema**: module-lifecycle event types (`type` is a free-form `String`, X1 — new kinds are not migrations) + stats aggregation over the stream. So this feature's t-1 below becomes "dispatch module-lifecycle events into the existing `JourneyEvent` table + the stats read side", not "create the table". No hard dependency edge (small additive create; whichever of 08/09 ships first would own it, and 09 is in flight).
 
-- **t** — Module lifecycle events dispatched via the event-hook system into `JourneyEvent` (created by `f-journey-state`); `journeyId` left null for non-journey engagement.
+- **t** — Module lifecycle events dispatched via the event-hook system into `JourneyEvent` (created by `f-journey-state`); `journeyId` left null for non-journey engagement. **This same module-lifecycle dispatch point is the trigger for [[#07 · `f-module-bindings` — agent / workflow / knowledge bindings|f-module-bindings (07)]]'s `ModuleWorkflowBinding`** — firing a module event should also call `runModuleWorkflowBindings(moduleSlug, eventType, payload)` (07 t-3), so an admin's "when X happens in this module, run workflow Y" actually fires. (Coordination, not a hard dep edge — same pattern as `JourneyEvent` with 09; whichever of 07/08 lands the shared emit point owns it. Note 07 reconciliation #4: the hook system is **outbound-webhook-only**, so "run workflow" goes via `drainEngine`, not a hook action.)
 - **t** — `record_feedback` framework capability + a plain feedback API endpoint.
 - **t** — Admin module stats (users, entries, completion, dwell, return, ratings) computed from the stream.
 
@@ -262,7 +262,7 @@ Engine computes what's possible; guidance ranks what's wise; agents narrate (F12
 - **t** — `guidance.ts` ranking already-eligible options using recency-weighted slot reads; reasons in payload.
 - **t** — Capability family: `get_journey_state`, `get_next_steps`, `get_progress_synopsis`, `suggest_focus`, `request_transition` — built-in `BaseCapability`s, granted per agent.
 - **t** — Register the framework context contributor via the `f-seams` registry; inject module scope + journey position + fresh slots per turn.
-- **t** — Surface-scoped conversations (X5): each module/facilitation surface its own `AiConversation` with its bound agent; continuity carried by state, not threads.
+- **t** — Surface-scoped conversations (X5): each module/facilitation surface its own `AiConversation` with its bound agent; continuity carried by state, not threads. **This is where `scope.moduleSlug` gets _populated_** (set `ChatRequest.scope` when opening a module surface) — which **completes the enforcement half of [[#07 · `f-module-bindings` — agent / workflow / knowledge bindings|f-module-bindings (07)]]'s** scope-refusal seam: 07 ships the `assertInModuleScope` helper that _reads_ `scope.moduleSlug`, but a module capability only actually refuses out-of-scope once this task writes it (07 reconciliation #3). Tighten 07's interim posture (absent-scope → allow) to enforcing (absent → refuse) here if wanted.
 - **t** — Boundary test: a strip of the framework leaves `buildContext()` with one fewer contributor (proves the seam stayed clean).
 
 ### 13 · `f-facilitation-agents` — facilitation agent family
@@ -289,11 +289,11 @@ Authoring tools on the engine (spec §5.6). **Note:** Sunrise's workflow builder
 
 ### 15 · `f-ops-views` — module admin + journey explorer
 
-_Owner:_ TBD · _Status:_ **blocked** → f-module-config (`f-journey-state` shipped ✅) · _Depends on:_ f-module-config, f-journey-state · _~4 PRs_
+_Owner:_ TBD · _Status:_ **blocked** → f-module-config, f-module-bindings (`f-journey-state` shipped ✅) · _Depends on:_ f-module-config, f-module-bindings, f-journey-state · _~4 PRs_
 
 The operational read surfaces.
 
-- **t** — Module list + detail page; stats from the event stream; bindings management views.
+- **t** — Module list + detail page; stats from the event stream; **bindings management views**. **These views are the admin UI deferred from [[#07 · `f-module-bindings` — agent / workflow / knowledge bindings|f-module-bindings (07)]]** — that feature ships the binding **APIs** (agent seats, workflow bindings, knowledge grants) API-first and defers their forms/tables here, the same split f-module-core made (read API in 03, module page here). So this task builds the seat-binding + workflow-binding + knowledge-grant admin UI **over 07's `/api/v1/admin/framework/modules/[slug]/{agents,workflows,knowledge}` endpoints** — hence the dependency edge on f-module-bindings. (Decision: plan.md 2026-07-05; [[f-module-bindings]] reconciliation #1.)
 - **t** — Journey explorer: read-only canvas with overlays (collective heat, drop-off edges) from the event stream.
 - **t** — Individual-journey replay along the map from the event log; subject-scope-ready queries.
 
