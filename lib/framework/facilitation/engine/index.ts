@@ -19,3 +19,5 @@ export * from '@/lib/framework/facilitation/engine/conditions';
 export * from '@/lib/framework/facilitation/engine/availability';
 export * from '@/lib/framework/facilitation/engine/now';
 export * from '@/lib/framework/facilitation/engine/apply-event';
+export * from '@/lib/framework/facilitation/engine/invariants';
+export * from '@/lib/framework/facilitation/engine/live-key-impact';
