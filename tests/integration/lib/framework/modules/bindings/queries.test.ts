@@ -60,33 +60,61 @@ describe('listModuleBindings', () => {
       binding({ id: 'b2', agentId: 'agent-1', role: 'reviewer' }),
     ]);
     db.aiAgent.findMany.mockResolvedValue([
-      { id: 'agent-1', name: 'Companion', slug: 'companion-agent', isActive: true },
+      {
+        id: 'agent-1',
+        name: 'Companion',
+        slug: 'companion-agent',
+        isActive: true,
+        deletedAt: null,
+      },
     ]);
 
     const rows = await listModuleBindings('reading');
 
-    // One batched agent query for the deduped id set.
+    // One batched agent query for the deduped id set, selecting deletedAt too.
     expect(db.aiAgent.findMany).toHaveBeenCalledTimes(1);
     expect(db.aiAgent.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { id: { in: ['agent-1'] } } })
+      expect.objectContaining({
+        where: { id: { in: ['agent-1'] } },
+        select: expect.objectContaining({ deletedAt: true }),
+      })
     );
     expect(rows).toHaveLength(2);
     expect(rows[0].agent).toMatchObject({ id: 'agent-1', name: 'Companion', isActive: true });
     expect(rows[1].agent).toMatchObject({ id: 'agent-1' });
   });
 
-  it('resolves a soft-deleted agent (isActive false) and a missing agent (null)', async () => {
+  it('distinguishes a tombstoned agent (deletedAt set) from a merely-deactivated one, and a missing agent (null)', async () => {
+    const tombstonedAt = new Date(0);
     db.module.findUnique.mockResolvedValue({ id: 'm1' });
     db.moduleAgentBinding.findMany.mockResolvedValue([
-      binding({ id: 'b1', agentId: 'soft' }),
-      binding({ id: 'b2', agentId: 'gone' }),
+      binding({ id: 'b1', agentId: 'tomb' }),
+      binding({ id: 'b2', agentId: 'off' }),
+      binding({ id: 'b3', agentId: 'gone' }),
     ]);
     db.aiAgent.findMany.mockResolvedValue([
-      { id: 'soft', name: 'Retired', slug: 'retired', isActive: false },
+      {
+        id: 'tomb',
+        name: 'Retired',
+        slug: '-deleted-tomb',
+        isActive: false,
+        deletedAt: tombstonedAt,
+      },
+      { id: 'off', name: 'Paused', slug: 'paused', isActive: false, deletedAt: null },
     ]);
 
     const rows = await listModuleBindings('reading');
-    expect(rows.find((r) => r.id === 'b1')?.agent).toMatchObject({ isActive: false });
-    expect(rows.find((r) => r.id === 'b2')?.agent).toBeNull();
+    // Tombstoned: deletedAt set → a consumer can filter it out.
+    expect(rows.find((r) => r.id === 'b1')?.agent).toMatchObject({
+      isActive: false,
+      deletedAt: tombstonedAt,
+    });
+    // Merely deactivated: isActive false but deletedAt null → still a live binding.
+    expect(rows.find((r) => r.id === 'b2')?.agent).toMatchObject({
+      isActive: false,
+      deletedAt: null,
+    });
+    // Gone entirely (hard-deleted → FK cascade normally removes it) → null.
+    expect(rows.find((r) => r.id === 'b3')?.agent).toBeNull();
   });
 });

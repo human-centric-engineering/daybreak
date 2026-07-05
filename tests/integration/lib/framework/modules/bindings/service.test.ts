@@ -14,7 +14,7 @@
  * @see lib/framework/modules/bindings/service.ts
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { Prisma } from '@prisma/client';
 
 // ─── Stateful in-memory Prisma fake ──────────────────────────────────────────
@@ -337,6 +337,86 @@ describe('updateBinding', () => {
     });
     await expect(
       updateBinding({ moduleSlug: 'writing', bindingId: b.id, isPrimary: true, userId: USER })
+    ).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe('write-error mapping (concurrency races)', () => {
+  const p2002 = (target: string) =>
+    new Prisma.PrismaClientKnownRequestError('unique', {
+      code: 'P2002',
+      clientVersion: 'test',
+      meta: { target },
+    });
+  const p2025 = () =>
+    new Prisma.PrismaClientKnownRequestError('not found', {
+      code: 'P2025',
+      clientVersion: 'test',
+    });
+
+  afterEach(() => vi.restoreAllMocks());
+
+  it('bindAgent: a single-primary index violation → ValidationError (not a raw 500)', async () => {
+    seedModule('reading', ['companion']);
+    seedAgent('agent-1');
+    vi.spyOn(prismaFake.moduleAgentBinding, 'create').mockRejectedValueOnce(
+      p2002('framework_module_agent_single_primary')
+    );
+    await expect(
+      bindAgent({
+        moduleSlug: 'reading',
+        agentId: 'agent-1',
+        role: 'companion',
+        isPrimary: true,
+        userId: USER,
+      })
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('updateBinding: a concurrent primary-promote (P2002 single_primary) → ValidationError', async () => {
+    seedModule('reading', ['companion', 'reviewer']);
+    seedAgent('agent-1');
+    const b = await bindAgent({
+      moduleSlug: 'reading',
+      agentId: 'agent-1',
+      role: 'companion',
+      userId: USER,
+    });
+    vi.spyOn(prismaFake.moduleAgentBinding, 'update').mockRejectedValueOnce(
+      p2002('framework_module_agent_single_primary')
+    );
+    await expect(
+      updateBinding({ moduleSlug: 'reading', bindingId: b.id, isPrimary: true, userId: USER })
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('updateBinding: the binding vanishing mid-update (P2025) → NotFoundError, not 500', async () => {
+    seedModule('reading', ['companion']);
+    seedAgent('agent-1');
+    const b = await bindAgent({
+      moduleSlug: 'reading',
+      agentId: 'agent-1',
+      role: 'companion',
+      userId: USER,
+    });
+    vi.spyOn(prismaFake.moduleAgentBinding, 'update').mockRejectedValueOnce(p2025());
+    await expect(
+      updateBinding({ moduleSlug: 'reading', bindingId: b.id, config: { x: 1 }, userId: USER })
+    ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('unbindAgent: the binding vanishing mid-delete (P2025) → NotFoundError, not 500', async () => {
+    seedModule('reading', ['companion']);
+    seedAgent('agent-1');
+    const b = await bindAgent({
+      moduleSlug: 'reading',
+      agentId: 'agent-1',
+      role: 'companion',
+      userId: USER,
+    });
+    vi.spyOn(prismaFake.moduleAgentBinding, 'delete').mockRejectedValueOnce(p2025());
+    await expect(
+      unbindAgent({ moduleSlug: 'reading', bindingId: b.id, userId: USER })
     ).rejects.toBeInstanceOf(NotFoundError);
   });
 });

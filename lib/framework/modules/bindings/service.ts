@@ -79,6 +79,48 @@ async function loadBindingInModule(
   return existing;
 }
 
+/**
+ * Map a Prisma write error on `framework_module_agent` to a domain error, or
+ * rethrow. Two constraint races are turned into clean 4xx instead of a raw 500:
+ *   - **P2002** on the `framework_module_agent_single_primary` partial unique index
+ *     (the DB backing for "≤ 1 primary seat per module") — two concurrent primary
+ *     writes; the loser is rejected rather than leaving two lead seats.
+ *   - **P2002** on the `(moduleId, agentId, role)` unique — the same agent bound to
+ *     the same seat twice.
+ *   - **P2025** — the binding was deleted between the belongs-to-module guard and
+ *     the update/delete (a concurrent unbind); report it as the 404 the guard would.
+ */
+function rethrowBindingWriteError(
+  err: unknown,
+  ctx: { moduleSlug: string; agentId?: string; role?: string }
+): never {
+  if (err instanceof Prisma.PrismaClientKnownRequestError) {
+    if (err.code === 'P2002') {
+      // Prisma's P2002 `meta.target` is the violated index/constraint — a string or
+      // a string[] of field names depending on the driver; normalise before testing.
+      const target = err.meta?.target;
+      const targetStr = Array.isArray(target)
+        ? target.join(',')
+        : typeof target === 'string'
+          ? target
+          : '';
+      if (targetStr.includes('single_primary')) {
+        throw new ValidationError(
+          'Another agent was set as the primary seat for this module concurrently; retry',
+          { isPrimary: ['Only one primary seat is allowed per module'] }
+        );
+      }
+      throw new ValidationError('This agent is already bound to that seat', {
+        role: [`"${ctx.agentId}" is already bound to module "${ctx.moduleSlug}" as "${ctx.role}"`],
+      });
+    }
+    if (err.code === 'P2025') {
+      throw new NotFoundError('Binding was removed concurrently');
+    }
+  }
+  throw err;
+}
+
 // ─── Public API ──────────────────────────────────────────────────────────────
 
 export interface BindAgentArgs {
@@ -124,12 +166,7 @@ export async function bindAgent(args: BindAgentArgs): Promise<ModuleAgentBinding
       });
     });
   } catch (err) {
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-      throw new ValidationError('This agent is already bound to that seat', {
-        role: [`"${agentId}" is already bound to module "${moduleSlug}" as "${role}"`],
-      });
-    }
-    throw err;
+    rethrowBindingWriteError(err, { moduleSlug, agentId, role });
   }
 
   logAdminAction({
@@ -165,23 +202,30 @@ export async function updateBinding(args: UpdateBindingArgs): Promise<ModuleAgen
   const moduleId = await loadModuleId(moduleSlug);
   await loadBindingInModule(moduleId, bindingId);
 
-  const binding = await prisma.$transaction(async (tx) => {
-    if (isPrimary === true) {
-      await tx.moduleAgentBinding.updateMany({
-        where: { moduleId, isPrimary: true, id: { not: bindingId } },
-        data: { isPrimary: false },
+  let binding: ModuleAgentBinding;
+  try {
+    binding = await prisma.$transaction(async (tx) => {
+      if (isPrimary === true) {
+        await tx.moduleAgentBinding.updateMany({
+          where: { moduleId, isPrimary: true, id: { not: bindingId } },
+          data: { isPrimary: false },
+        });
+      }
+      return tx.moduleAgentBinding.update({
+        where: { id: bindingId },
+        data: {
+          ...(isPrimary !== undefined ? { isPrimary } : {}),
+          ...(config !== undefined
+            ? { config: config === null ? Prisma.JsonNull : (config as Prisma.InputJsonValue) }
+            : {}),
+        },
       });
-    }
-    return tx.moduleAgentBinding.update({
-      where: { id: bindingId },
-      data: {
-        ...(isPrimary !== undefined ? { isPrimary } : {}),
-        ...(config !== undefined
-          ? { config: config === null ? Prisma.JsonNull : (config as Prisma.InputJsonValue) }
-          : {}),
-      },
     });
-  });
+  } catch (err) {
+    // A concurrent primary-promote (single-primary index) or a concurrent unbind
+    // (P2025) → clean 4xx instead of a raw 500.
+    rethrowBindingWriteError(err, { moduleSlug });
+  }
 
   logAdminAction({
     userId,
@@ -210,7 +254,12 @@ export async function unbindAgent(args: UnbindAgentArgs): Promise<void> {
   const moduleId = await loadModuleId(moduleSlug);
   const existing = await loadBindingInModule(moduleId, bindingId);
 
-  await prisma.moduleAgentBinding.delete({ where: { id: bindingId } });
+  try {
+    await prisma.moduleAgentBinding.delete({ where: { id: bindingId } });
+  } catch (err) {
+    // Concurrent unbind between the guard and the delete → 404, not a raw 500.
+    rethrowBindingWriteError(err, { moduleSlug });
+  }
 
   logAdminAction({
     userId,
