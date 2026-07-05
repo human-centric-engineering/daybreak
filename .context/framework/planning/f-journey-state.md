@@ -2,7 +2,7 @@
 name: f-journey-state
 feature: 09 · f-journey-state
 epic: Framework v1
-status: in flight (t-1 available · t-2 backlog)
+status: shipped (t-1 #27 · t-2 #28)
 owner: John
 depends_on: f-map (shipped — #16 / #20 / #21, for the published-map the state is interpreted against) · f-bootstrap (shipped, for the `lib/framework/facilitation/` skeleton + boundary)
 spec: framework-architecture.md §5.2 (journey state) · §5.4 (guidance context) · §4.3 (engagement stream = journey log) · §7 (scope) · §8 (relationship overlay) · §11 (erasure) + Appendix A (F2 / F10 / F19 / X1 / X2 / X3)
@@ -209,10 +209,10 @@ Never "integration test against the dev DB" in vitest.
 
 ## Tasks (promoted)
 
-| ID  | Task                                                                                                                                                     | Files                                                                                                                                                                     | Deps | Status    | PR  |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | --------- | --- |
-| t-1 | **Journey-state models + erasure.** The three models (userId hand-FK + optional `journeyId`) + node-state status vocabulary + migration + erasure smoke. | `prisma/schema/framework-facilitation.prisma`, `lib/framework/facilitation/journey/{vocabulary,index}.ts`, `framework_…` migration, `scripts/smoke/erasure.ts`, `tests/…` | —    | available | —   |
-| t-2 | **Access discipline.** `canRead` + `subjectScope` (async, #367-composing) + journey read queries routed through them + the #367 fork-note.               | `lib/framework/shared/{access,index}.ts`, `lib/framework/facilitation/journey/{queries,index}.ts`, `tests/…`                                                              | t-1  | backlog   | —   |
+| ID  | Task                                                                                                                                                     | Files                                                                                                                                                                     | Deps | Status | PR  |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ------ | --- |
+| t-1 | **Journey-state models + erasure.** The three models (userId hand-FK + optional `journeyId`) + node-state status vocabulary + migration + erasure smoke. | `prisma/schema/framework-facilitation.prisma`, `lib/framework/facilitation/journey/{vocabulary,index}.ts`, `framework_…` migration, `scripts/smoke/erasure.ts`, `tests/…` | —    | done   | #27 |
+| t-2 | **Access discipline.** `canRead` + `subjectScope` (async, #367-composing) + journey read queries routed through them + the #367 fork-note.               | `lib/framework/shared/{access,index}.ts`, `lib/framework/facilitation/journey/{queries,index}.ts`, `tests/…`                                                              | t-1  | done   | #28 |
 
 **Sizing (B1 self-check): 3 indicative → 2 promoted.** The board's indicative t-2 (`canRead`) and t-3
 (subject-scope) **fold into one access PR** — `canRead` (the row predicate) and `subjectScope` (its
