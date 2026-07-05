@@ -1,0 +1,132 @@
+/**
+ * `fill_slot` capability (f-slot-capture t-2). Mocks the slot engine (`appendSlotValue`)
+ * and the definition read (`getSlotDefinition`) so no live DB is loaded. Proves the
+ * targeted/retired/open-mint slug decision, the P2002 retry, provenance assembly, the
+ * no-user-context guard, and PII redaction.
+ */
+
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { Prisma } from '@prisma/client';
+
+vi.mock('@/lib/framework/data-slots/values', () => ({ appendSlotValue: vi.fn() }));
+vi.mock('@/lib/framework/data-slots/queries', () => ({ getSlotDefinition: vi.fn() }));
+vi.mock('@/lib/logging', () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
+import { FillSlotCapability } from '@/lib/framework/data-slots/capabilities/fill-slot';
+import { appendSlotValue } from '@/lib/framework/data-slots/values';
+import { getSlotDefinition } from '@/lib/framework/data-slots/queries';
+import type { CapabilityContext } from '@/lib/orchestration/capabilities/types';
+
+const cap = new FillSlotCapability();
+const ctx = (over: Partial<CapabilityContext> = {}): CapabilityContext => ({
+  userId: 'user-1',
+  agentId: 'agent-1',
+  ...over,
+});
+const args = (over: Record<string, unknown> = {}) => ({
+  slotSlug: 'primary_goal',
+  value: 'run a marathon',
+  confidence: 8,
+  reasoningNote: 'the user said so directly',
+  sourceType: 'direct' as const,
+  ...over,
+});
+const definition = (over: Record<string, unknown> = {}) =>
+  ({ slug: 'primary_goal', isActive: true, ...over }) as never;
+const written = (over: Record<string, unknown> = {}) =>
+  ({ slotSlug: 'primary_goal', version: 3, ...over }) as never;
+
+function p2002(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError('unique', { code: 'P2002', clientVersion: 't' });
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(getSlotDefinition).mockResolvedValue(definition());
+  vi.mocked(appendSlotValue).mockResolvedValue(written());
+});
+
+describe('execute', () => {
+  it('refuses with no_user_context for a system-initiated run', async () => {
+    const result = await cap.execute(args(), ctx({ userId: null }));
+    expect(result).toMatchObject({ success: false, error: { code: 'no_user_context' } });
+    expect(appendSlotValue).not.toHaveBeenCalled();
+  });
+
+  it('appends to an active targeted slot and returns the new version, silently', async () => {
+    const result = await cap.execute(args(), ctx({ conversationId: 'conv-9' }));
+
+    expect(appendSlotValue).toHaveBeenCalledWith({
+      userId: 'user-1',
+      slotSlug: 'primary_goal',
+      value: 'run a marathon',
+      confidence: 8,
+      sourceType: 'direct',
+      reasoningNote: 'the user said so directly',
+      provenance: { conversationId: 'conv-9' },
+    });
+    expect(result).toEqual({
+      success: true,
+      data: { slotSlug: 'primary_goal', version: 3, minted: false },
+      skipFollowup: true,
+    });
+  });
+
+  it('carries module/node scope into provenance', async () => {
+    await cap.execute(args(), ctx({ scope: { moduleSlug: 'onboarding', nodeKey: 'intro' } }));
+    expect(vi.mocked(appendSlotValue).mock.calls[0][0].provenance).toEqual({
+      moduleSlug: 'onboarding',
+      nodeKey: 'intro',
+    });
+  });
+
+  it('refuses a retired (inactive) slot with no write', async () => {
+    vi.mocked(getSlotDefinition).mockResolvedValue(definition({ isActive: false }));
+    const result = await cap.execute(args(), ctx());
+    expect(result).toMatchObject({ success: false, error: { code: 'slot_inactive' } });
+    expect(appendSlotValue).not.toHaveBeenCalled();
+  });
+
+  it('open-mints an undefined slug and flags minted', async () => {
+    vi.mocked(getSlotDefinition).mockResolvedValue(null);
+    vi.mocked(appendSlotValue).mockResolvedValue(
+      written({ slotSlug: 'favourite_colour', version: 1 })
+    );
+    const result = await cap.execute(args({ slotSlug: 'favourite_colour' }), ctx());
+    expect(result).toMatchObject({ success: true, data: { minted: true } });
+    expect(appendSlotValue).toHaveBeenCalled();
+  });
+
+  it('retries once on a concurrent-append P2002 and succeeds', async () => {
+    vi.mocked(appendSlotValue).mockRejectedValueOnce(p2002()).mockResolvedValueOnce(written());
+    const result = await cap.execute(args(), ctx());
+    expect(result.success).toBe(true);
+    expect(appendSlotValue).toHaveBeenCalledTimes(2);
+  });
+
+  it('propagates a non-P2002 error (no swallow)', async () => {
+    vi.mocked(appendSlotValue).mockRejectedValue(new Error('db down'));
+    await expect(cap.execute(args(), ctx())).rejects.toThrow('db down');
+    expect(appendSlotValue).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('validation + PII', () => {
+  it('rejects an unknown sourceType', () => {
+    expect(() => cap.validate(args({ sourceType: 'made_up' }))).toThrow();
+  });
+
+  it('declares processesPii and masks the value + reasoningNote in provenance', () => {
+    expect(cap.processesPii).toBe(true);
+    const redacted = cap.redactProvenance(args(), {
+      success: true,
+      data: { slotSlug: 'primary_goal', version: 3, minted: false },
+    });
+    const safe = redacted.args as { value: string; reasoningNote: string; slotSlug: string };
+    expect(safe.slotSlug).toBe('primary_goal');
+    expect(safe.value).not.toContain('marathon');
+    expect(safe.reasoningNote).not.toContain('directly');
+  });
+});
