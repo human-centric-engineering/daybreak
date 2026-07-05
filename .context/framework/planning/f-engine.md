@@ -74,7 +74,7 @@ delete**, and **follow the shipped code, not the rev-16 spec sketch, where they 
 predates the fork — verified against the tree). Decisions (2026-07-05):
 
 1. **`GraphStore`'s first impl is in-memory traversal over the parsed published map, not a recursive
-   CTE — _owner to confirm_ (deviates from F8's letter, honours its binding intent).** F8 commits to a
+   CTE (deviates from F8's letter, honours its binding intent).** F8 commits to a
    `GraphStore` **interface** with "Postgres now, a graph DB is a later swap, not a rewrite", and
    _sketches_ "Prisma + recursive CTEs" as the impl. But the shipped `getPublishedMap(slug)`
    ([`version-service.ts`](../../lib/framework/facilitation/map/version-service.ts)) already
@@ -85,10 +85,10 @@ predates the fork — verified against the tree). Decisions (2026-07-05):
    first-ever `WITH RECURSIVE` (there is no recursive-SQL precedent in-tree). F8's binding commitment —
    the _interface_ + "Postgres now, swap later" — is met; pushing traversal into SQL earns its cost only
    when collective-journey analytics demand deep in-DB pathfinding at scale (F8's own "later" trigger),
-   at which point it is an impl swap behind the interface. **If the owner prefers the literal CTE**, t-1
-   ships the recursive-CTE impl + a smoke script instead (the only change is t-1's internals and its
-   test shape); the interface and every downstream task are identical either way.
-2. **Sizing: 5 indicative → 4 promoted (fold temporal into availability), _owner to confirm_.** The
+   at which point it is a **behind-the-interface impl swap** — t-1's internals and its test shape
+   change, the interface and every downstream task do not. This is settled: t-1 ships the in-memory
+   impl.
+2. **Sizing: 5 indicative → 4 promoted (fold temporal into availability).** The
    board's t-2 (availability = edges + state + slot) and t-3 (temporal + timezone `now`) **fold into one
    availability PR**: `computeAvailability`'s condition evaluator is a single `switch` over the
    `{state|slot|temporal}` discriminated union ([`map/schema.ts`](../../lib/framework/facilitation/map/schema.ts)),
@@ -96,8 +96,8 @@ predates the fork — verified against the tree). Decisions (2026-07-05):
    intermediate (a map with a temporal gate behaves wrong until t-3). The temporal work is the four-kind
    evaluation against a `now` the engine already takes as input; the timezone _resolution_ is a thin
    caller-side concern (decision 5), not a separate write surface. Net 5 → 4, mirroring [[f-module-core]]
-   (4→3) and [[f-journey-state]] (3→2). **Fallback:** if availability bloats past one PR, temporal
-   splits back out to a t-2b.
+   (4→3) and [[f-journey-state]] (3→2). This is settled. **Execution-time escape hatch (not a pending
+   confirmation):** if availability bloats past one PR, temporal splits back out to a t-2b.
 3. **Follow the shipped types — import, never redefine.** The engine **evaluates** the exact shapes
    `f-map` shipped and **writes** the exact tables `f-journey-state` shipped:
    - `MapNode` / `MapEdge` / `MapCondition` / `MapDefinition` from
@@ -121,14 +121,20 @@ predates the fork — verified against the tree). Decisions (2026-07-05):
    journey-traversal event the engine writes sets **both** `userId` and `journeyId` (+ `nodeKey`); the
    `userId` is non-negotiable (a `journeyId`-only row would be a GDPR hole — the f-journey-state
    decision this feature inherits).
-6. **`now` is a resolved instant the engine takes as a pure input; the _caller_ resolves the timezone.**
-   Per §C7 (the one adjacent interface the spec says to carry from Phase 2), a deadline gate for a user
-   abroad needs per-user timezone resolution — but the engine stays pure and timezone-agnostic: it takes
-   an already-resolved `now: Date`. A thin `resolveJourneyNow(journey/user)` helper (or the caller)
-   resolves the zone before calling. **Open question (decision, below):** there is no `timezone` column
-   on `UserJourney` or (verify) `User` today — the resolution source needs picking (user profile field ·
-   journey `contextKey` convention · default UTC). Temporal `at` values are stored zoned-ISO
-   (`offset: true`, [`map/schema.ts`](../../lib/framework/facilitation/map/schema.ts)), which dovetails.
+6. **`now` is a resolved instant the engine takes as a pure input; a thin `resolveJourneyNow` seam
+   reads the timezone from `User.timezone`.** Per §C7 (the one adjacent interface the spec says to carry
+   from Phase 2), a deadline gate for a user abroad needs per-user timezone resolution — but the engine
+   stays pure and timezone-agnostic: it takes an already-resolved `now: Date`. The resolution source is
+   settled: core `User` already carries `timezone String? @default("UTC")` (IANA,
+   [`auth.prisma`](../../prisma/schema/auth.prisma) — the _only_ timezone column in the schema tree, and
+   unused by journey logic today). A thin `resolveJourneyNow(userId, at?)` seam reads it, falling back to
+   UTC when null (the column already defaults `"UTC"`), and hands the pure engine the resolved instant.
+   `UserJourney` has no timezone column and needs none — the source is the journey's user. The seam is a
+   clearly-separated non-pure helper (exactly as `applyEvent` is the non-pure writer); the pure cores
+   never read a clock or the DB. Boundary: `User` is Sunrise-owned, but reading a scalar through its
+   published model interface needs **no core edit and no migration**. Temporal `at` values are stored
+   zoned-ISO (`offset: true`, [`map/schema.ts`](../../lib/framework/facilitation/map/schema.ts)), which
+   dovetails.
 7. **The write path re-uses `computeAvailability` for its entry check — one source of eligibility
    truth.** `applyEvent`'s "entering a node requires it to be available" (§5.3) is answered by the same
    `computeAvailability` the read side uses, not a parallel gating check in the writer. A hallucinated
@@ -184,6 +190,10 @@ predates the fork — verified against the tree). Decisions (2026-07-05):
   ([`modules/liveness.ts`](../../lib/framework/modules/liveness.ts)) is pure and takes `now` "exactly as
   the facilitation engine takes `now`"; `computeAvailability`'s `moduleLiveness` input is its verdict
   (A5) — the engine intersects, never re-derives.
+- **The timezone-resolution source** — `User.timezone` (`String? @default("UTC")`, IANA,
+  [`auth.prisma`](../../prisma/schema/auth.prisma)) is the one timezone column in-tree; the
+  `resolveJourneyNow(userId, at?)` seam (decision 6) reads it (UTC fallback) to produce the resolved
+  `now` the pure evaluator takes. `UserJourney` carries none — the source is the journey's user.
 - **The access + scope seams** — `canRead`/`subjectScope`/`JourneyViewer`/`AccessScope`
   ([`shared/access.ts`](../../lib/framework/shared/access.ts)) and `NodeKey`/`ModuleSlug`/`FrameworkScope`
   ([`shared/scope.ts`](../../lib/framework/shared/scope.ts)) — use these; mint no parallel types.
@@ -218,37 +228,35 @@ vitest sweet spot:
   path) and that a denied read short-circuits.
 - **Write-path fidelity** → **one real-DB smoke** (`scripts/smoke/engine.ts`, mirroring `erasure.ts`):
   seed a graph + journey, drive an `applyEvent`, assert the real `JourneyEvent` row + `UserNodeState`
-  projection, self-clean. This is the one place the transaction touches real Postgres. (Only t-1 would
-  add a second smoke, and only if the owner takes the recursive-CTE path in decision 1.)
+  projection, self-clean. This is the one place the transaction touches real Postgres.
 
 Never "integration test against the dev DB" in vitest.
 
 ## Tasks (promoted)
 
-| ID  | Task                                                                                                                                                                                                                                                                                                                     | Files                                                                      | Deps | Status    | PR  |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- | ---- | --------- | --- |
-| t-1 | **GraphStore.** Interface + in-memory traversal over the parsed published map — `getPublishedGraph`, `reachableFrom`, `neighbours`, `pathsBetween`, prerequisite-cycle + reachability primitives, region granularity (F5). Foundation for t-2 + t-4.                                                                     | `lib/framework/facilitation/engine/{graph-store,index}.ts`, `tests/…`      | —    | available | —   |
-| t-2 | **Availability computation.** `computeAvailability(publishedGraph, nodeStates, moduleLiveness, now)` — typed-edge eval (F3) + all three condition families incl. temporal (F4) + module-liveness intersection (A5) + explainable lock reasons + `validMoves` + `firsts`; pure resolved `now`. _(Folds board t-2 + t-3.)_ | `engine/{availability,conditions}.ts`, `tests/…`                           | t-1  | backlog   | —   |
-| t-3 | **`applyEvent` — the sole writer.** Entry requires availability (reuses t-2); once/repeatable semantics (F6); single-transaction `JourneyEvent` append (`userId` set) + `UserNodeState` upsert (F10); structured rejections (F11); write-path smoke.                                                                     | `engine/apply-event.ts`, `scripts/smoke/engine.ts`, `tests/…`              | t-2  | backlog   | —   |
-| t-4 | **Publish-time invariant validation.** Extend `validatePublishableMap` with prerequisite-edge cycles + unreachable-required (reuse t-1) + live-key-removal warnings (journey-state, F2); standalone/callable for `f-emergence` (18, F17).                                                                                | `engine/invariants.ts`, `map/version-service.ts` (append stage), `tests/…` | t-1  | backlog   | —   |
+| ID  | Task                                                                                                                                                                                                                                                                                                                                                                                                       | Files                                                                      | Deps | Status    | PR  |
+| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ---- | --------- | --- |
+| t-1 | **GraphStore.** Interface + in-memory traversal over the parsed published map — `getPublishedGraph`, `reachableFrom`, `neighbours`, `pathsBetween`, prerequisite-cycle + reachability primitives, region granularity (F5). Foundation for t-2 + t-4.                                                                                                                                                       | `lib/framework/facilitation/engine/{graph-store,index}.ts`, `tests/…`      | —    | available | —   |
+| t-2 | **Availability computation.** `computeAvailability(publishedGraph, nodeStates, moduleLiveness, now)` — typed-edge eval (F3) + all three condition families incl. temporal (F4) + module-liveness intersection (A5) + explainable lock reasons + `validMoves` + `firsts`; pure resolved `now` + the `resolveJourneyNow` seam (reads `User.timezone`, UTC fallback — decision 6). _(Folds board t-2 + t-3.)_ | `engine/{availability,conditions,now}.ts`, `tests/…`                       | t-1  | backlog   | —   |
+| t-3 | **`applyEvent` — the sole writer.** Entry requires availability (reuses t-2); once/repeatable semantics (F6); single-transaction `JourneyEvent` append (`userId` set) + `UserNodeState` upsert (F10); structured rejections (F11); write-path smoke.                                                                                                                                                       | `engine/apply-event.ts`, `scripts/smoke/engine.ts`, `tests/…`              | t-2  | backlog   | —   |
+| t-4 | **Publish-time invariant validation.** Extend `validatePublishableMap` with prerequisite-edge cycles + unreachable-required (reuse t-1) + live-key-removal warnings (journey-state, F2); standalone/callable for `f-emergence` (18, F17).                                                                                                                                                                  | `engine/invariants.ts`, `map/version-service.ts` (append stage), `tests/…` | t-1  | backlog   | —   |
 
 **Sizing (B1 self-check): 5 indicative → 4 promoted.** Temporal (board t-3) folds into availability
 (decision 2). t-4 depends only on t-1 (not t-2/t-3), so it can run in parallel with the t-2→t-3 chain
-once GraphStore lands. **Owner to confirm the fold and the GraphStore-impl call (decision 1) before t-1.**
+once GraphStore lands. **Both the fold and the GraphStore-impl call (decision 1) are settled — t-1
+ships in-memory.**
 
 ### t-1 · GraphStore — topology over the published map
 
 The interface (F8) + its first impl. `getPublishedGraph(slug)` wraps `getPublishedMap`; `reachableFrom`
-/ `neighbours` / `pathsBetween` are graph algorithms over the loaded `MapDefinition`; a cycle-detection
-
-- reachability primitive is exported for t-4. Region nodes are first-class (F5) — traversal + reporting
-  work at region granularity. In-memory over the bounded map (decision 1) unless the owner takes the CTE
-  path. No writer, no state — pure topology.
+/ `neighbours` / `pathsBetween` are graph algorithms over the loaded `MapDefinition`; cycle-detection
+and reachability primitives are exported for t-4. Region nodes are first-class (F5) — traversal +
+reporting work at region granularity. In-memory over the bounded map (decision 1, settled). No writer,
+no state — pure topology.
 
 **Done when:** the `GraphStore` interface + impl expose the F8 ops; traversal is correct over authored
 fixtures incl. regions (F5); cycle + reachability primitives are exported for t-4; pure vitest green;
-**gates green — `/pre-pr` then `/code-review`, both before opening the PR** (B4). _(If CTE path: + a
-`scripts/smoke/engine-graph.ts` proving the recursive query against real Postgres.)_
+**gates green — `/pre-pr` then `/code-review`, both before opening the PR** (B4).
 
 ### t-2 · Availability computation — the explainable picture
 
@@ -257,7 +265,9 @@ fixtures incl. regions (F5); cycle + reachability primitives are exported for t-
 unlocks=any one, tangent=always-open, related_to=ignored for eligibility); the three condition families
 (F4) evaluated against `nodeStates`, slot heads (`getSlotHeads`, `canRead`-guarded — decision 11), and a
 pure resolved `now` (all four temporal kinds — decision 6); intersect with `isModuleLive`'s verdict (A5);
-every locked node carries its reason (§5.3, F12). Pure — no DB writes.
+every locked node carries its reason (§5.3, F12). Pure — no DB writes. The `resolveJourneyNow` seam
+(`engine/now.ts`) reads `User.timezone` (UTC fallback) to produce that `now` **before** the pure
+evaluator runs — `computeAvailability` itself stays a pure `now`-taker.
 
 **Done when:** all four edge semantics + all three families (incl. four temporal kinds) evaluate
 correctly; module-liveness intersection closes a flag-off node; every locked node has an explainable
@@ -306,17 +316,13 @@ mocked-prisma + pure units green; **gates green** (B4).
 
 ## Open questions
 
-- **GraphStore impl (decision 1).** Proceeding with **in-memory traversal** (recommended — simpler,
-  pure, no first-in-repo recursive CTE, fully vitest-coverable) behind the F8 interface. Owner to confirm;
-  if the literal recursive-CTE is preferred, only t-1's internals + its test shape change.
-- **Sizing fold (decision 2).** Proceeding with **temporal folded into availability** (5→4). Owner to
-  confirm; fallback splits temporal back to t-2b if availability bloats past one PR.
-- **Timezone-resolution source (decision 6).** The engine takes a resolved `now`; **where does the
-  per-journey timezone come from?** No `timezone` column on `UserJourney` today (and — verify — likely
-  none on core `User`). Options: a user-profile field · a journey `contextKey`/`meta` convention · default
-  UTC with per-map override. Proceeding with **default UTC + a `resolveJourneyNow` seam** for now (the
-  engine stays pure regardless), picking the real source when the first deadline-driven app needs it.
-  Owner to confirm.
+**Resolved (see reconciliation decisions 1 / 2 / 6):** GraphStore ships **in-memory traversal** behind
+the F8 interface (a recursive-CTE is a later behind-the-interface swap, not a t-1 branch); temporal
+**folds into availability** (5→4, with a t-2b escape hatch only if the PR bloats); and the timezone
+`now` source is **`User.timezone`** (IANA, UTC fallback) read by the `resolveJourneyNow` seam. Each is
+grounded in shipped code (`getPublishedMap` full-materialises the bounded map · `MapCondition` is one
+discriminated union · `User.timezone` exists at `auth.prisma`). One question remains open:
+
 - **`applyEvent` signature granularity.** The spec sketch is `applyEvent(state, event)`, but the real
   entry check needs the map + module-liveness + resolved `now` too. Proceeding with an assembled context
   (`{ map, journey, nodeStates, liveness, now }`, event) — exact shape is a t-3 detail; a higher-level
