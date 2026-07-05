@@ -101,6 +101,10 @@ export async function syncFrameworkCapabilities(): Promise<void> {
 
   // "Did registration run?" — zero registered framework capabilities means a fluke boot
   // (a caught init error / HMR reset), so skip rather than mass-deactivate the built-ins.
+  // Trade-off (as in the module sync): a *genuine* drop to zero — removing the last
+  // built-in from code — then leaves its `ai_capability` row lingering `isActive` with no
+  // handler (a dispatch failure if granted, not a data leak). Accepted because the
+  // framework always ships built-ins; the list only grows.
   if (rows.length === 0) {
     logger.info('syncFrameworkCapabilities: no framework capabilities registered — skipping');
     return;
@@ -110,7 +114,18 @@ export async function syncFrameworkCapabilities(): Promise<void> {
 
   const counts = await executeTransaction(
     async (tx) => {
-      const existing = await tx.aiCapability.findMany({ where: { slug: { in: slugs } } });
+      // Marker-scoped, exactly like the deactivate pass below: only rows THIS sync owns.
+      // A pre-existing row sharing a bare slug (a future Sunrise built-in — those are
+      // bare underscore-slugs like `read_user_memory` — or an admin row) is invisible
+      // here, so the update loop can never hijack it; `createMany`'s `skipDuplicates`
+      // then declines to create over it (the framework cap simply gets no row until the
+      // collision is resolved, rather than silently repointing a foreign one).
+      const existing = await tx.aiCapability.findMany({
+        where: {
+          slug: { in: slugs },
+          metadata: { path: ['framework'], equals: FRAMEWORK_CAPABILITY_MARKER },
+        },
+      });
       const bySlug = new Map(existing.map((row) => [row.slug, row]));
 
       const toCreate = rows.filter((desired) => !bySlug.has(desired.slug));

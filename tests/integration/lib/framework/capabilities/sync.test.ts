@@ -13,8 +13,17 @@ import type { AiCapability } from '@prisma/client';
 
 const { store, prismaFake, resetStore, seedRow } = vi.hoisted(() => {
   const rows = new Map<string, AiCapability>();
-  const matchesFindMany = (r: AiCapability, where: { slug?: { in?: string[] } }): boolean =>
-    where.slug?.in === undefined || where.slug.in.includes(r.slug);
+  const matchesFindMany = (
+    r: AiCapability,
+    where: { slug?: { in?: string[] }; metadata?: { path?: string[]; equals?: unknown } }
+  ): boolean => {
+    if (where.slug?.in !== undefined && !where.slug.in.includes(r.slug)) return false;
+    if (where.metadata) {
+      const meta = (r.metadata ?? {}) as Record<string, unknown>;
+      if (meta.framework !== where.metadata.equals) return false;
+    }
+    return true;
+  };
   const matchesUpdateMany = (
     r: AiCapability,
     where: {
@@ -179,5 +188,22 @@ describe('syncFrameworkCapabilities', () => {
     await syncFrameworkCapabilities();
     expect(store.size).toBe(0);
     expect(clearCache).not.toHaveBeenCalled();
+  });
+
+  it('never hijacks a foreign row that shares a bare slug (marker-scoped reconcile)', async () => {
+    // A Sunrise built-in (no framework marker) happens to own the slug. The sync must
+    // leave it entirely alone — not overwrite its handler/description or force it active.
+    seedRow({
+      slug: 'get_state',
+      description: 'a core built-in that got there first',
+      executionHandler: 'core:get_state',
+      isActive: false,
+      metadata: {},
+    });
+    await syncFrameworkCapabilities();
+    const row = store.get('get_state');
+    expect(row?.description).toBe('a core built-in that got there first');
+    expect(row?.executionHandler).toBe('core:get_state');
+    expect(row?.isActive).toBe(false); // not force-activated
   });
 });
