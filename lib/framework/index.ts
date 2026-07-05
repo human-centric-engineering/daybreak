@@ -32,9 +32,19 @@ import { syncRegisteredModules } from '@/lib/framework/modules/sync';
 import { syncRegisteredSlotDefinitions } from '@/lib/framework/data-slots/sync';
 import { registerRegisteredModuleCapabilities } from '@/lib/framework/modules/capabilities/register';
 import { syncRegisteredModuleCapabilities } from '@/lib/framework/modules/capabilities/sync';
+import {
+  registerFrameworkCapability,
+  registerFrameworkCapabilityHandlers,
+} from '@/lib/framework/capabilities/registry';
+import { syncFrameworkCapabilities } from '@/lib/framework/capabilities/sync';
+import { dataSlotCapabilities } from '@/lib/framework/data-slots/capabilities';
 
 export function initFramework(): void {
   registerContextContributor(MODULE_CONTEXT_TYPE, loadModuleContext);
+  // Framework built-in capabilities (get_state, …) — framework-owned, not leaf- or
+  // module-dependent, so they register here at init. The dispatcher-handler + DB-row
+  // passes run in `syncFramework()` below.
+  for (const capability of dataSlotCapabilities) registerFrameworkCapability(capability);
 }
 
 export async function syncFramework(): Promise<void> {
@@ -45,7 +55,9 @@ export async function syncFramework(): Promise<void> {
   // process (module caps, unlike built-ins, have no lazy self-heal). Requires modules
   // to be registered, which `initLeafApp()` did before `syncFramework()` ran.
   registerRegisteredModuleCapabilities();
+  registerFrameworkCapabilityHandlers();
   await syncRegisteredModules();
   await syncRegisteredSlotDefinitions();
   await syncRegisteredModuleCapabilities();
+  await syncFrameworkCapabilities();
 }
