@@ -72,9 +72,12 @@ export interface GraphStore {
    *  sequence including both endpoints; `[[from]]` when `from === to`; `[]` if
    *  either endpoint is absent or no path exists. */
   pathsBetween(from: NodeKey, to: NodeKey, options?: TraversalOptions): readonly NodeKey[][];
-  /** Distinct cycles among edges of the given type(s), each as the node-key loop
-   *  (closing edge implicit); `[]` if acyclic. Always follows outgoing edges. t-4
-   *  uses this over `['prerequisite']` for the no-prerequisite-cycles invariant. */
+  /** Cycles among edges of the given type(s), each a node-key loop (closing edge
+   *  implicit). **Non-empty iff such a cycle exists** — the acyclicity signal t-4's
+   *  no-prerequisite-cycles invariant needs — returning representative loops (one
+   *  per DFS back-edge, deduped), **not** a full enumeration of every simple cycle
+   *  (a node already settled on another branch is not re-explored). Always follows
+   *  outgoing edges. */
   findCycles(options?: Pick<TraversalOptions, 'edgeTypes'>): readonly NodeKey[][];
   /** The key of the region node containing `key` (its `region` field), or
    *  `undefined`. First-class regions, F5. */
@@ -86,8 +89,10 @@ export interface GraphStore {
 /**
  * Build an in-memory {@link GraphStore} over a parsed map definition. Adjacency and
  * region indices are computed once here; every query reads them. The definition is
- * treated as immutable — the store never mutates it and returns only copies of its
- * internal sets/arrays' *references* to the caller-facing `readonly` shapes.
+ * treated as immutable — the store never mutates it, and read methods hand back its
+ * internal arrays/sets **by reference** as `readonly` shapes (no defensive copy, so
+ * the bounded map is not re-cloned per call); callers must not cast away `readonly`
+ * to mutate them.
  */
 export function inMemoryGraphStore(definition: MapDefinition): GraphStore {
   const nodeByKey = new Map<NodeKey, MapNode>();
@@ -148,8 +153,12 @@ export function inMemoryGraphStore(definition: MapDefinition): GraphStore {
     const path: NodeKey[] = [from];
     const onPath = new Set<NodeKey>([from]);
     const visit = (current: NodeKey): void => {
-      for (const edge of adjacentEdges(current, options)) {
-        const next = endpoint(edge, direction);
+      // Distinct next *nodes*: parallel edges to the same node (a multigraph — e.g.
+      // a `prerequisite` and an `unlocks` between the same pair) yield one path, not
+      // one per edge, since a path is a node-key sequence.
+      const nextNodes = new Set<NodeKey>();
+      for (const edge of adjacentEdges(current, options)) nextNodes.add(endpoint(edge, direction));
+      for (const next of nextNodes) {
         if (!nodeByKey.has(next) || onPath.has(next)) continue;
         path.push(next);
         onPath.add(next);
@@ -219,7 +228,9 @@ function appendTo<K, V>(map: Map<K, V[]>, key: K, value: V): void {
 
 /**
  * Canonical string for a cycle so the same loop found from different entry points
- * dedupes to one: rotate the node-key sequence to start at its smallest member.
+ * dedupes to one: rotate the node-key sequence to start at its smallest member,
+ * then `JSON.stringify` it (not a separator join — node keys are free-form strings,
+ * so any fixed separator could appear inside a key and collide two distinct cycles).
  * (Two rotations of the same directed cycle share this form; a reversed traversal
  * can't occur here — `findCycles` only follows outgoing edges.)
  */
@@ -228,5 +239,5 @@ function canonicaliseCycle(loop: readonly NodeKey[]): string {
   for (let i = 1; i < loop.length; i++) {
     if (loop[i] < loop[minIndex]) minIndex = i;
   }
-  return [...loop.slice(minIndex), ...loop.slice(0, minIndex)].join(' ');
+  return JSON.stringify([...loop.slice(minIndex), ...loop.slice(0, minIndex)]);
 }

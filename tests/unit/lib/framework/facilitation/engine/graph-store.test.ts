@@ -136,6 +136,18 @@ describe('pathsBetween', () => {
     );
     expect(store.pathsBetween('a', 'c').map((p) => p.join('>'))).toEqual(['a>b>c']);
   });
+
+  it('yields one path per node route, not per parallel edge (multigraph)', () => {
+    // Two edges between a→b (a prerequisite and an unlocks); a path is a node
+    // sequence, so a>b>c appears once, not once per parallel edge.
+    const store = inMemoryGraphStore(
+      def(
+        [node('a'), node('b'), node('c')],
+        [edge('a', 'b', 'prerequisite'), edge('a', 'b', 'unlocks'), edge('b', 'c')]
+      )
+    );
+    expect(store.pathsBetween('a', 'c').map((p) => p.join('>'))).toEqual(['a>b>c']);
+  });
 });
 
 describe('findCycles', () => {
@@ -168,6 +180,23 @@ describe('findCycles', () => {
   it('detects a self-loop', () => {
     const store = inMemoryGraphStore(def([node('a')], [edge('a', 'a', 'prerequisite')]));
     expect(store.findCycles({ edgeTypes: ['prerequisite'] })).toEqual([['a']]);
+  });
+
+  it('keeps two distinct cycles distinct even when node keys contain spaces', () => {
+    // Keys with spaces would collide under a space-join canonical form. Cycle 1 is
+    // {a, "b c"}; cycle 2 is {"a b", c} — disjoint, so both must be reported.
+    const store = inMemoryGraphStore(
+      def(
+        [node('a'), node('b c'), node('a b'), node('c')],
+        [
+          edge('a', 'b c', 'prerequisite'),
+          edge('b c', 'a', 'prerequisite'),
+          edge('a b', 'c', 'prerequisite'),
+          edge('c', 'a b', 'prerequisite'),
+        ]
+      )
+    );
+    expect(store.findCycles({ edgeTypes: ['prerequisite'] })).toHaveLength(2);
   });
 });
 
