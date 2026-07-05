@@ -423,10 +423,12 @@ hooks).
 
 ## Open questions
 
-- **`AiAgent` / `AiWorkflow` back-relation necessity (t-1/t-3).** Confirm at build whether
-  Prisma 7 compiles the FK with a one-sided `@relation` (no back-relation field on the core
-  model) or requires the reverse field. Prefer no core edit; if unavoidable, the single array
-  back-relation field is the minimal, behaviour-neutral touch — record which.
+- **`AiAgent` / `AiWorkflow` back-relation necessity (t-1/t-3).** _Resolved in t-1 (PR #33):_
+  **no core edit needed.** `agentId` is a **plain scalar FK** (no Prisma `@relation` on either
+  side); the `ON DELETE CASCADE` to `ai_agent` is hand-written in the migration (the f-slots
+  `SlotValue.userId` pattern). Prisma compiles fine with no reverse field on `AiAgent`, so the
+  boundary-clean hand-FK — not a back-relation — is the shape. **t-3 does the same for
+  `ModuleWorkflowBinding.workflowId → ai_workflow`.**
 - **Interim scope posture (t-2).** The refuse-helper's missing-`moduleSlug` behaviour
   (recommended: allow-when-absent, refuse-on-mismatch) governs safety before f-guidance
   populates scope. Confirm the posture is the one f-guidance will want to _tighten into_
@@ -441,6 +443,24 @@ hooks).
   emission that calls `runModuleWorkflowBindings`. Whichever of 07-t3 / 08 lands the shared
   emit point first owns it; coordinate rather than both defining it (the 08/09 `JourneyEvent`
   pattern).
+
+## Deferred follow-ups
+
+Tracked here rather than left in a PR comment (a deferral needs a home). Action _within this
+feature_ — t-3/t-4 are the natural trigger, not a separate later effort.
+
+- **Consolidate the duplicated route/service plumbing when t-3/t-4 add the 3rd–4th copies
+  (rule of three).** Flagged by t-1 `/code-review` (PR #33): `parseModuleSlug` / `parseBindingId`
+  verbatim-duplicate f-map's `parseMapSlug` (differing only in the noun); the `P2002 →
+ValidationError` narrowing is re-hand-rolled in `bindings/service.ts` and f-map's
+  `version-service.ts`; and "resolve module by slug or 404" appears in both `bindings/service.ts`
+  and `bindings/queries.ts`. Deliberately **not** fixed in t-1 — extracting a shared
+  `parseSlugParam(raw, label)` / `parseCuidParam(raw, label)` (→ `lib/validations/common`) and a
+  `mapUniqueConstraintError(err, …)` helper spans f-map + f-module-bindings, so it wants doing
+  once with enough call sites to shape it right, not churned into the first leaf. **t-3
+  (workflow bindings) and t-4 (knowledge) will each add another `parseXSlug` + P2002 map — that
+  is the 3rd/4th copy; extract the shared helpers then instead of copying a 4th time.** Cost of
+  not doing it: a fix to the slug rule or error message in one leaf silently misses the others.
 
 ## Done when (feature)
 
