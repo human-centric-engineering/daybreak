@@ -126,39 +126,61 @@ GetStateCapability())` / `FillSlotCapability()` for the in-memory handler (the c
 6. **Sensitivity-driven masking-before-storage — net-new (t-3), semantics flagged for
    the owner.** No sensitivity-keyed masking exists anywhere (only the `SLOT_SENSITIVITY`
    key — `standard | sensitive | special_category` — and the generic `redact.ts`
-   primitives). A pure `slotMaskingPolicy(sensitivity, { value, valueJson })` seam,
-   strictest for `special_category`. **Open decision (Ultraplan):** what
-   "masking-before-storage" actually stores — (a) store the plain `value`
-   masked/summarised for `special_category` while the typed `valueJson` holds only the
-   gate-relevant form (gates work without persisting raw special-category prose), or (b)
-   a per-sensitivity exposure policy (store raw, mask on read). Proceeding with the
-   `slotMaskingPolicy` seam + a defensible default; the exact stored form is the owner's
-   call.
+   primitives). **Resolved (mask the prose, keep the minimal typed value):** a pure
+   three-tier `slotMaskingPolicy(sensitivity, { value, valueJson }) → { value, valueJson }`
+   seam that transforms the capture **before `appendSlotValue`**:
+   - `standard` → identity (store as captured).
+   - `sensitive` → store `value` as-is; the audit **trace** is separately masked by
+     `redactProvenance` (decision 5 — a distinct axis; keep them distinct).
+   - `special_category` (strictest) → replace the raw prose `value` with a masked
+     sentinel (`redactedString('special_category')` or a coarse summary) and keep **only**
+     the gate-relevant typed `valueJson`. Raw Article-9 prose never lands at rest; gates
+     read `valueJson`, so they still work. This is genuine data-minimisation (the
+     `SlotValue.value` "plain-language, canonical for conversation" vs `valueJson` "typed,
+     canonical for gates" two-column split makes it viable) and it composes with decision
+     7 (the typed extraction produces the minimal `valueJson` masking then keeps). Pure,
+     so a fork can tighten/loosen per class.
 7. **`fill_slot` #307-enforced typed extraction — net-new mapping (t-3).** The
    enforcement mechanism exists at the LLM layer (`runStructuredCompletion` /
    `responseFormat: { type: 'json_schema' }` — [`evaluations/parse-structured.ts`](../../lib/orchestration/evaluations/parse-structured.ts)),
    but there is **no `dataType → JSON-Schema` mapping and no zod↔json-schema bridge
    in-repo**. Build a small `SLOT_DATA_TYPE → JSON Schema` map (`text→string`,
-   `number→number`, `boolean→boolean`, `date→string+format`, `json→object`) and forward
-   it as the enforced `responseSchema`. **Open decision:** whether `fill_slot` runs a
-   _secondary_ structured extraction (LLM extracts the typed `valueJson` from the source
-   per the schema) or the agent's tool-call arguments already carry the typed value —
-   proceeding with "agent supplies `value` (+ optional `valueJson`); the typed form is
-   validated against the `dataType` schema, and where the source is prose a structured
-   extraction fills it," exact split a t-3 detail. Note `runStructuredCompletion` lives
-   under `evaluations/` — reusing it cross-domain is a framework→orchestration public
-   import, or it moves to a shared LLM util (confirm at t-3).
+   `number→number`, `boolean→boolean`, `date→string+format`, `json→object`) — used on
+   **both** paths below. **Resolved (agent value + local-validate + prose-only
+   extraction fallback):** `fill_slot` is one _static_ tool but slot `dataType` is
+   _per-slot/dynamic_, so the tool schema can't statically enforce it. So the agent
+   supplies `value` (+ optional `valueJson`) in the tool call; `fill_slot` validates the
+   typed form **locally** against the map (a cheap synchronous check — no LLM on the
+   common `text/number/boolean/date/json` path, so silent captures stay silent, D5). A
+   **secondary `runStructuredCompletion`** extraction runs **only** when the typed form is
+   absent/invalid or the source is prose, using the map as the enforced `responseSchema` —
+   #307 enforcement bites exactly where a prose→typed conversion is actually needed.
+   **Resolved (location):** keep `runStructuredCompletion` in
+   [`evaluations/parse-structured.ts`](../../lib/orchestration/evaluations/parse-structured.ts)
+   and import it cross-domain (framework→core **public import**, no core edit) — do **not**
+   move a Sunrise-core file in Daybreak (a merge-conflict surface, against fork
+   discipline). File an [[upstream-asks]] row proposing Sunrise relocate it to
+   `lib/orchestration/llm/` (its only tie is an OTEL `phase` span tag), so the import
+   reads cleanly after the next sync — the same "defer the core move to upstream"
+   treatment as decision 8.
 8. **Per-agent read/write exposure via grant `customConfig` — t-4, avoids a core edit.**
    `AiAgentCapability.customConfig` exists ([`orchestration-agents.prisma`](../../prisma/schema/orchestration-agents.prisma))
    but the dispatcher **never reads it** (`getAgentBinding` consumes only `isEnabled` +
-   `customRateLimit`). So "which groups/scopes an agent may read/write, enforced inside
-   the capability" needs the binding's `customConfig` at execute time. Two paths: (a) the
-   dispatcher surfaces `customConfig` into `CapabilityContext` (a **Sunrise-core
-   dispatcher edit** → an upstream ask), or (b) **the capability re-reads its own
-   `AiAgentCapability` row** (framework reading a core model via `prisma` — no core edit,
-   the module-bindings pattern). Proceeding with **(b)** to stay pure framework-tier;
-   **owner to confirm** — if (a) is preferred, it's a small Sunrise issue + an
-   [[upstream-asks]] row.
+   `customRateLimit`; `CapabilityContext` carries `scope`/`entityContext` but **no**
+   `customConfig`). So "which groups/scopes an agent may read/write, enforced inside the
+   capability" needs the binding's `customConfig` at execute time. **Resolved (b — the
+   in-capability binding read):** the capability re-reads its own binding at execute time
+   — `prisma.aiAgentCapability.findFirst({ where: { agentId: context.agentId, capability:
+{ slug: this.slug } }, select: { customConfig: true } })` (served by
+   `@@unique([agentId, capabilityId])` — one cheap indexed lookup per capture) — then
+   **Zod-parses** the `Json?` column (never `as` on DB/external data, CLAUDE.md) into a
+   defined shape, e.g. `{ read?: { groups?: string[]; scopes?: string[] }; write?: {…} }`,
+   and enforces the allowlist inside the capability. Absent/empty `customConfig` = a
+   **permissive default** (backward-compatible with existing grants). Zero core edit, pure
+   framework-tier, mirrors `f-module-bindings`. File an [[upstream-asks]] row for the
+   cleaner path (a) — Sunrise surfaces binding `customConfig` into `CapabilityContext`
+   alongside the existing `scope` carrier, after which the extra query disappears. t-4's
+   tests cover malformed `customConfig` (Zod-reject).
 9. **Silent in conversation (D5).** Captures ride the tool loop silently — no
    user-visible follow-up turn. `estimate-cost.ts` sets `skipFollowup` on its
    `CapabilityResult`; `get_state` / `fill_slot` do the same so a capture doesn't
@@ -173,9 +195,9 @@ GetStateCapability())` / `FillSlotCapability()` for the in-memory handler (the c
 - **The dispatcher + registry** — `capabilityDispatcher.register()` /
   `dispatch()` (`lib/orchestration/capabilities/dispatcher.ts`), `getCapabilityDefinitions`
   (`registry.ts`, the chat loop's tool source). The module capability path
-  (`modules/capabilities/{register,sync,namespace}.ts`) is the framework-side precedent
-  for registering handlers + syncing `ai_capability` rows — mirror it, minus the
-  `<module>__` namespacing.
+  (`lib/framework/modules/capabilities/{register,sync,namespace}.ts`) is the
+  framework-side precedent for registering handlers + syncing `ai_capability` rows —
+  mirror it, minus the `<moduleSlug>__<tool>` namespacing (hyphens→underscores).
 - **The slot engine** — `appendSlotValue` / `getSlotHeads` +
   `AppendSlotValueInput` / `SlotValueProvenance` ([`data-slots/values.ts`](../../lib/framework/data-slots/values.ts));
   `listSlotDefinitions` ([`data-slots/queries.ts`](../../lib/framework/data-slots/queries.ts));
@@ -197,10 +219,12 @@ vitest runs on `happy-dom` with **no live DB**. Every DB/LLM test here:
 
 - **The capabilities** — mock `@/lib/db/client` and the slot engine (`appendSlotValue` /
   `getSlotHeads` / `listSlotDefinitions`) and `canRead`; unit-test `execute()` paths:
-  `get_state` calls `canRead` **before** `getSlotHeads` (denied → empty, no read),
-  returns the heads; `fill_slot` targeted-validate (unknown slug → error), open-mint,
-  **P2002 → one retry**, `appendSlotValue` called with the right shape. Assert
-  `processesPii` and that `redactProvenance` masks the `value`.
+  `context.userId` is `string | null`, so both caps **null-guard it** and return a
+  structured `no_user_context` error (mirroring `user-memory.ts`); `get_state` calls
+  `canRead` **before** `getSlotHeads` (denied → empty, no read), returns the heads;
+  `fill_slot` targeted-validate (unknown slug → error), open-mint, **P2002 → one retry**,
+  `appendSlotValue` called with the right shape. Assert `processesPii` and that
+  `redactProvenance` masks the `value`.
 - **`slotMaskingPolicy` + the `dataType → JSON-Schema` map** — pure units.
 - **Structured extraction** — mock `runStructuredCompletion`; assert the slot's schema is
   forwarded as the enforced `responseSchema`.
@@ -220,27 +244,30 @@ real-DB append if the mocked units leave a gap (mirroring `smoke:engine`).
 | t-1 | **Framework capability-registration seam + `get_state`.** The generic non-module framework-capability register + `ai_capability` sync wired into `syncFramework()`, proven by `get_state` (`canRead` → `getSlotHeads`, `processesPii`, silent). | `lib/framework/data-slots/capabilities/{get-state,index}.ts`, framework-capability register/sync, `lib/framework/index.ts`, `tests/…` | —    | available | —   |
 | t-2 | **`fill_slot` (the write cap).** Targeted-slug validation / open-mode minting / P2002 retry / `appendSlotValue`; `processesPii` + `redactProvenance`; silent (D5).                                                                              | `lib/framework/data-slots/capabilities/fill-slot.ts`, `tests/…`                                                                       | t-1  | backlog   | —   |
 | t-3 | **Sensitivity masking + #307 typed extraction.** `slotMaskingPolicy` (special_category strictest) applied before storage; `SLOT_DATA_TYPE → JSON-Schema` forwarded to `runStructuredCompletion`.                                                | `data-slots/capabilities/{masking,extract}.ts`, `tests/…`                                                                             | t-2  | backlog   | —   |
-| t-4 | **Per-agent read/write exposure via grant `customConfig`.** The capability reads its `AiAgentCapability.customConfig` (which groups/scopes it may read/write) and enforces it.                                                                  | `data-slots/capabilities/{get-state,fill-slot}.ts`, `tests/…`                                                                         | t-1  | backlog   | —   |
+| t-4 | **Per-agent read/write exposure via grant `customConfig`.** The capability reads its `AiAgentCapability.customConfig` (which groups/scopes it may read/write, Zod-parsed) and enforces it.                                                      | `data-slots/capabilities/{get-state,fill-slot}.ts`, `tests/…`                                                                         | t-2  | backlog   | —   |
 
-**Sizing (B1 self-check): 3 indicative → 4 promoted (SPLIT, owner to confirm).** The
-board's indicative t-1 bundles _both_ capabilities + the (net-new) framework
-registration infra — comfortably over one PR. Split it: **t-1** ships the reusable
+**Sizing (B1 self-check): 3 indicative → 4 promoted (SPLIT — adopted).** The board's
+indicative t-1 bundles _both_ capabilities + the (net-new) framework registration infra
+(~600–900 lines) — over the one-PR target. Split it: **t-1** ships the reusable
 registration seam + the simpler read cap (`get_state`); **t-2** ships the write cap
 (`fill_slot`), whose validate/mint/retry mechanics are a PR on their own. t-3 (masking +
-extraction) and t-4 (exposure) are the board's t-2/t-3. t-4 depends only on t-1 (the
-caps exist by then) and can parallelise. This mirrors [[f-engine]]'s B1 right-sizing (in
-reverse — a split, not a fold) — the point is one-PR tasks, not a fixed count.
+extraction) and t-4 (exposure) are the board's t-2/t-3. **t-4 depends on t-2**, not t-1 —
+it edits _both_ `get-state.ts` and `fill-slot.ts`, so both caps must exist first. This
+mirrors [[f-engine]]'s B1 right-sizing (in reverse — a split, not a fold): the point is
+one-PR tasks, not a fixed count.
 
 ## Boundary & forkability notes
 
-- **Pure framework-tier — one open upstream question.** All new code lives in
-  `lib/framework/data-slots/capabilities/**` + the framework registration pass. It
-  consumes the core capability dispatcher's **public** `register()` (already called by the
-  module path), subclasses the public `BaseCapability`, and writes core `AiCapability` /
-  reads `AiAgentCapability` via the shipped models (as `f-module-bindings` does) — **no
-  core edit**. The **one** possible upstream ask is decision 8 (surfacing binding
-  `customConfig` into `CapabilityContext`), deferred by reading the binding in-capability;
-  if reversed, file a Sunrise issue + an [[upstream-asks]] row.
+- **Pure framework-tier — two deferred upstream asks, both worked around in-tier.** All
+  new code lives in `lib/framework/data-slots/capabilities/**` + the framework
+  registration pass. It consumes the core capability dispatcher's **public** `register()`
+  (already called by the module path), subclasses the public `BaseCapability`, and writes
+  core `AiCapability` / reads `AiAgentCapability` via the shipped models (as
+  `f-module-bindings` does) — **no core edit**. Two [[upstream-asks]] rows are filed for
+  clean-ups Sunrise should own, each deferred by an in-tier workaround now: (7b) relocate
+  `runStructuredCompletion` from `evaluations/` to `llm/` (worked around by a cross-domain
+  public import); (8) surface binding `customConfig` into `CapabilityContext` (worked
+  around by an in-capability binding read). Neither blocks this feature.
 - **Leaf surface stays reserved-empty.** No `lib/app/*`; a leaf gets `get_state` /
   `fill_slot` for free at boot and grants them to its agents.
 - **No migration.** `SlotValue` / `SlotDefinition` (f-slots) + `AiCapability` /
@@ -250,21 +277,28 @@ reverse — a split, not a fold) — the point is one-PR tasks, not a fixed coun
   Sunrise's), proven by `tests/`; a fork boots with them registered but grants them to no
   agent until it chooses to.
 
-## Open questions
+## Resolved decisions (2026-07-05, Ultraplan refinement)
 
-- **Masking-before-storage semantics (decision 6).** What `special_category` actually
-  stores — masked `value` + gate-only `valueJson`, vs store-raw + mask-on-read.
-  Proceeding with the `slotMaskingPolicy` seam + a default; owner to confirm the stored
-  form.
-- **Structured-extraction split (decision 7).** Secondary extraction call vs
-  agent-supplied typed value; and whether `runStructuredCompletion` moves out of
-  `evaluations/` to a shared LLM util. Owner to confirm at t-3.
-- **`customConfig` surfacing (decision 8).** In-capability binding read (no core edit,
-  recommended) vs a dispatcher `CapabilityContext` addition (upstream ask). Owner to
-  confirm.
-- **Sizing 3 → 4 (split).** Proceeding with the split (t-1 registration+get_state · t-2
-  fill_slot); owner to confirm, or keep both caps in t-1 if the registration seam turns
-  out light.
+The four items flagged at claim time are settled (each the best call, changeable later);
+repo-reality claims verified against the tree.
+
+- **Masking (decision 6) → mask the prose, keep the minimal typed value.** The pure
+  three-tier `slotMaskingPolicy` runs before `appendSlotValue`; `special_category` stores
+  a masked-`value` sentinel + gate-only `valueJson`, so raw Article-9 prose never lands at
+  rest and gates still read `valueJson`. Distinct from decision 5's audit-trace masking.
+- **Structured extraction (decision 7) → agent value + local-validate + prose-only
+  fallback.** Local `dataType`-schema check on the common path (no LLM tax on silent
+  captures); a secondary `runStructuredCompletion` only for prose/absent-typed, #307-
+  enforced by the same map. `runStructuredCompletion` stays in `evaluations/` (cross-
+  domain import), with an upstream-ask to relocate it to `llm/`.
+- **`customConfig` (decision 8) → in-capability binding read.** The capability queries its
+  own `AiAgentCapability` row and Zod-parses `customConfig` (permissive default), no core
+  edit; upstream-ask filed for the dispatcher to surface it into `CapabilityContext`.
+- **Sizing → the 3→4 split is adopted**, with **t-4 depending on t-2** (it edits both caps).
+
+One thing to confirm at build time (not a blocker): the exact `customConfig` allowlist
+shape (`{ read?: { groups?, scopes? }; write?: {…} }`) — firmed against `f-guidance`'s
+surface-scoping needs when t-4 lands.
 
 ## Done when (feature)
 
@@ -276,8 +310,9 @@ grantable per-agent with `customConfig` read/write scoping; all registered into 
 dispatcher + `AiCapability` rows by a **reusable framework capability-registration seam**
 `f-guidance` inherits; the whole path proven by mocked-prisma/LLM units + the
 registration-seam test — **with a fresh fork booting the two built-ins registered,
-granted to no agent, nothing to strip.** Pure framework-tier (the one possible upstream
-ask deferred by an in-capability binding read). On the last merge: flip `f-slot-capture`
+granted to no agent, nothing to strip.** Pure framework-tier (two deferred upstream asks —
+`runStructuredCompletion` relocation + dispatcher `customConfig` — both worked around
+in-tier). On the last merge: flip `f-slot-capture`
 → **shipped**, flip **`f-guidance` (12)** from `blocked → available` (its last blocker
 clears), add a Work-completed log line, and append execution lessons to [[planning-retro]].
 
