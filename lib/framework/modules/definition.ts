@@ -18,6 +18,7 @@
 import type { z } from 'zod';
 import type { ModuleSlug } from '@/lib/framework/shared/scope';
 import type { SlotDefinitionInput } from '@/lib/framework/data-slots/definition';
+import type { BaseCapability } from '@/lib/orchestration/capabilities/base-capability';
 
 export interface ModuleDefinition {
   /** Stable identity, referenced everywhere (matches the synced `Module.slug`). */
@@ -64,4 +65,23 @@ export interface ModuleDefinition {
    * binding any agent to it is then rejected. Example: `['companion', 'reviewer']`.
    */
   agentRoles?: string[];
+
+  /**
+   * The capabilities (agent tools) this module contributes (spec §4.2, decision A8).
+   * Each is an ordinary `BaseCapability` authored with a **bare snake_case slug**
+   * (e.g. `save_worksheet`); the framework registers it into the **one global
+   * capability registry** namespaced by module slug (`<module-slug>.<tool>`), so two
+   * modules never collide on a generic tool name. No second capability system.
+   *
+   * Registration is two-layer (both from `syncFramework()`, after modules register):
+   * the in-memory dispatcher handler, and a code-projected `ai_capability` row
+   * (`category: "module"`, `isSystem: true`) so an agent can be granted the tool the
+   * ordinary way. A capability learns _which module scope_ it runs in via the generic
+   * `CapabilityContext.scope` map and refuses out-of-scope automatically (the
+   * framework wraps it; the author writes no scope code).
+   *
+   * Optional — a module with no tools declares none. Bare slugs must be snake_case
+   * (`^[a-z0-9]+(_[a-z0-9]+)*$`) so they namespace to a provider-legal function name.
+   */
+  capabilities?: BaseCapability[];
 }

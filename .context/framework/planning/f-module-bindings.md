@@ -140,16 +140,23 @@ not re-litigated at build time.
    fork must delete". _This is the one reconciliation that visibly reshapes the parent
    plan's task 1 — flagged for confirmation._
 
-2. **Capability _slug_ is namespaced `module-slug.tool`; the LLM-facing function _name_
-   is not.** A8 namespaces the **slug** (`module-slug.tool`) — and the registry is a flat
-   `Map<string, …>` keyed by slug, so a dotted slug works as a key with no core change
-   (`dispatcher.ts:109`). **But** `functionDefinition.name` is passed straight to the
-   provider, and OpenAI's tool-name charset **disallows `.`** (`estimate-cost.ts` keeps
-   slug === function name; we can't here). So: the **slug** carries the namespace (registry
-   uniqueness + audit, A8's collision-prevention intent); the **function name** the LLM
-   sees uses a provider-safe form (e.g. the module prefix with `.`/`-`→`_`, or the bare
-   tool name). Settle the exact transform at t-2 build; note it now so it isn't discovered
-   at the provider boundary.
+2. **Namespacing is ONE provider-legal identifier `<module_>__<tool>`, used as slug,
+   function name, AND handler key (corrected at t-2 build — the spec's dotted example
+   can't be literal).** A8's example is `module-slug.tool`, and the plan first assumed the
+   dotted **slug** could differ from a provider-safe **function name**. That is wrong: the
+   dispatcher looks a handler up by _the tool name the LLM calls_
+   (`dispatch(toolCall.name)`, `streaming-handler.ts:1683`), and `getCapabilityDefinitions`
+   only surfaces a capability whose `ai_capability.slug` is a registered handler — so the
+   **handler key, the DB `slug`, and `functionDefinition.name` must be the same string**
+   (built-ins keep `slug === functionDefinition.name` for exactly this reason). A dotted
+   slug (illegal for OpenAI as a function name) would surface the tool but dispatch it to
+   `unknown_capability`. So the namespace separator is **`__`, not `.`**:
+   `<moduleSlug_underscored>__<toolSlug>` — provider-legal and collision-free (module slugs
+   are strict kebab → no `__` after `-`→`_`; tool slugs strict snake → no `__`; so the `__`
+   joiner is the unambiguous split). It is also admin-unreachable (an underscored slug fails
+   `slugSchema`), which doubly protects the reconcile marker. _(The t-2 `/security-review`
+   recon caught the original split as a feature-breaking bug — module caps would never
+   dispatch; unit tests now assert `slug === functionDefinition.name` to lock the invariant.)_
 
 3. **`scope.moduleSlug` is _populated_ downstream (f-guidance X5); f-module-bindings ships
    the _consuming_ seam.** Recon found `scope` is populated at exactly **one** site today —
@@ -323,14 +330,18 @@ generic `CapabilityContext.scope` map.
   **`module-slug.tool`** (the **slug**; A8 collision-prevention). Two layers, mirroring the
   built-ins:
   - **in-memory handler** — `capabilityDispatcher.register(...)` for each, from a new
-    `registerRegisteredModuleCapabilities()` called in **`initFramework()`** (sync, no DB).
+    `registerRegisteredModuleCapabilities()`. _Built at t-2 in **`syncFramework()`**, not
+    `initFramework()`_ — the leaf's modules aren't registered until `initLeafApp()`, which
+    runs between the two, so there is nothing to read at `initFramework()` time.
   - **DB metadata** — upsert an `AiCapability` row per namespaced slug in a new
     `syncRegisteredModuleCapabilities()` added to **`syncFramework()`** (async), so a grant
     (`AiAgentCapability`) can reference it. Set-based reconcile with the empty-registry no-op
-    ([[planning-retro#B10]], the f-slots boot-reconcile discipline).
-  - **slug vs LLM function name** (reconciliation #2) — the registry key/slug is dotted
-    `module-slug.tool`; the `functionDefinition.name` the LLM sees uses a provider-safe
-    transform (settle the exact form here). Unit-test that the name is provider-legal.
+    ([[planning-retro#B10]]), scoped to the admin-unreachable `category='module' + isSystem`
+    marker; operator columns (rateLimit, requiresApproval, quarantine) written once, never
+    clobbered (the operator/code split — an `ai_capability` row is not a pure code projection).
+  - **one namespaced identifier** (reconciliation #2, corrected) — slug = function name =
+    handler key = `<module_>__<tool>` (the dispatcher keys handlers by the LLM's tool name, so
+    they must be equal). Unit-test `slug === functionDefinition.name`.
 - **`assertInModuleScope(context, moduleSlug)` refuse-helper** — a small framework helper a
   module capability calls at the top of `execute()`: reads `decodeScope(context.scope)`
   (`lib/framework/shared/scope.ts`), and if a `moduleSlug` scope is present and does not
