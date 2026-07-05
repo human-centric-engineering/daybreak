@@ -10,6 +10,7 @@ import { Prisma } from '@prisma/client';
 
 vi.mock('@/lib/framework/data-slots/values', () => ({ appendSlotValue: vi.fn() }));
 vi.mock('@/lib/framework/data-slots/queries', () => ({ getSlotDefinition: vi.fn() }));
+vi.mock('@/lib/framework/data-slots/capabilities/extract', () => ({ extractTypedValue: vi.fn() }));
 vi.mock('@/lib/logging', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
@@ -17,6 +18,7 @@ vi.mock('@/lib/logging', () => ({
 import { FillSlotCapability } from '@/lib/framework/data-slots/capabilities/fill-slot';
 import { appendSlotValue } from '@/lib/framework/data-slots/values';
 import { getSlotDefinition } from '@/lib/framework/data-slots/queries';
+import { extractTypedValue } from '@/lib/framework/data-slots/capabilities/extract';
 import type { CapabilityContext } from '@/lib/orchestration/capabilities/types';
 
 const cap = new FillSlotCapability();
@@ -46,6 +48,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getSlotDefinition).mockResolvedValue(definition());
   vi.mocked(appendSlotValue).mockResolvedValue(written());
+  // Extraction defaults to "found nothing" — the tests that exercise it override.
+  vi.mocked(extractTypedValue).mockResolvedValue(null);
 });
 
 describe('execute', () => {
@@ -123,10 +127,32 @@ describe('typed value + sensitivity masking (t-3)', () => {
     expect(appendArg().valueJson).toBe(8);
   });
 
-  it('drops a typed value that does not match the dataType (no valueJson stored)', async () => {
+  it('drops a typed value that does not match, and stores nothing when extraction also fails', async () => {
     vi.mocked(getSlotDefinition).mockResolvedValue(definition({ dataType: 'number' }));
+    // extractTypedValue defaults to null (mocked) — the best-effort fallback found nothing.
     await cap.execute(args({ valueJson: 'not a number' }), ctx());
     expect(appendArg()).not.toHaveProperty('valueJson');
+  });
+
+  it('falls back to prose→typed extraction when a typed slot gets no valid valueJson', async () => {
+    vi.mocked(getSlotDefinition).mockResolvedValue(definition({ dataType: 'number' }));
+    vi.mocked(extractTypedValue).mockResolvedValue(7);
+    await cap.execute(args({ value: 'about seven', valueJson: undefined }), ctx());
+    expect(extractTypedValue).toHaveBeenCalledWith('number', 'about seven', 'agent-1');
+    expect(appendArg().valueJson).toBe(7);
+  });
+
+  it('does NOT run extraction when the agent already supplied a valid typed value', async () => {
+    vi.mocked(getSlotDefinition).mockResolvedValue(definition({ dataType: 'number' }));
+    await cap.execute(args({ valueJson: 8 }), ctx());
+    expect(extractTypedValue).not.toHaveBeenCalled();
+    expect(appendArg().valueJson).toBe(8);
+  });
+
+  it('does NOT run extraction for a text slot (its typed form is the prose)', async () => {
+    vi.mocked(getSlotDefinition).mockResolvedValue(definition({ dataType: 'text' }));
+    await cap.execute(args(), ctx());
+    expect(extractTypedValue).not.toHaveBeenCalled();
   });
 
   it('special_category text: masks the value and stores no typed prose (data-minimisation)', async () => {

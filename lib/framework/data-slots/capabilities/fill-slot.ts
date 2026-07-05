@@ -16,8 +16,8 @@
  *   concurrent same-slug append (the loser hits `@@unique([userId, slotSlug, version])`);
  *   `fill_slot` catches P2002 once and re-runs off the fresh head.
  *
- * The typed `valueJson` extraction (#307) and sensitivity masking are **t-3**; t-2
- * captures the plain-language `value`.
+ * Sensitivity masking + local typed-value handling landed in **t-3**; the #307-enforced
+ * prose→typed extraction fallback ([`extract.ts`](./extract.ts)) is **t-3b**.
  */
 
 import { z } from 'zod';
@@ -39,6 +39,7 @@ import {
   SLOT_SENSITIVITY,
 } from '@/lib/framework/data-slots/vocabulary';
 import { validateTypedValue } from '@/lib/framework/data-slots/capabilities/typed-value';
+import { extractTypedValue } from '@/lib/framework/data-slots/capabilities/extract';
 import { slotMaskingPolicy } from '@/lib/framework/data-slots/capabilities/masking';
 import { decodeScope } from '@/lib/framework/shared/scope';
 
@@ -174,13 +175,20 @@ export class FillSlotCapability extends BaseCapability<FillSlotArgs, FillSlotDat
 
     // The slot's typing + sensitivity come from its definition (a mint has neither, so
     // it defaults to a text/standard slot). The typed gate value: `text` ⇒ the value
-    // itself; a typed slot ⇒ the agent's `valueJson` if it validates, else null (a t-3b
-    // prose→typed extraction fills that gap). Then sensitivity masking runs BEFORE the
-    // append, so raw special-category prose never lands at rest.
+    // itself; a typed slot ⇒ the agent's `valueJson` if it validates, else a prose→typed
+    // extraction (t-3b) as a best-effort fallback (null if that too fails). Then
+    // sensitivity masking runs BEFORE the append, so raw special-category prose never
+    // lands at rest.
     const dataType = definition?.dataType ?? SLOT_DATA_TYPE.text;
     const sensitivity = definition?.sensitivity ?? SLOT_SENSITIVITY.standard;
-    const typedValue =
+    let typedValue =
       dataType === SLOT_DATA_TYPE.text ? args.value : validateTypedValue(dataType, args.valueJson);
+    if (typedValue === null && dataType !== SLOT_DATA_TYPE.text) {
+      // Prose-only capture of a typed slot: extract the typed form from the value. Fires
+      // only here — the common text / valid-`valueJson` paths never reach it, so silent
+      // captures stay silent (D5) and no LLM cost hits the hot path.
+      typedValue = await extractTypedValue(dataType, args.value, context.agentId);
+    }
     const stored = slotMaskingPolicy(sensitivity, dataType, {
       value: args.value,
       valueJson: typedValue,
