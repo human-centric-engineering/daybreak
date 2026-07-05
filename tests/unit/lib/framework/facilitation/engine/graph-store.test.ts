@@ -171,6 +171,26 @@ describe('findCycles', () => {
   });
 });
 
+describe('dangling edge endpoints (validate.ts’s concern) are skipped, never traversed', () => {
+  // An edge to a non-existent node — a malformed map validate.ts rejects at publish.
+  // Topology stays total: it skips the dangling endpoint rather than throwing.
+  const store = inMemoryGraphStore(
+    def([node('a'), node('b')], [edge('a', 'ghost'), edge('a', 'b')])
+  );
+
+  it('reachableFrom skips the missing endpoint', () => {
+    expect([...store.reachableFrom('a')]).toEqual(['b']);
+  });
+
+  it('findCycles ignores edges into the void', () => {
+    expect(store.findCycles()).toEqual([]);
+  });
+
+  it('pathsBetween never routes through a missing node', () => {
+    expect(store.pathsBetween('a', 'b').map((p) => p.join('>'))).toEqual(['a>b']);
+  });
+});
+
 describe('regions (F5)', () => {
   const store = inMemoryGraphStore(
     def(
