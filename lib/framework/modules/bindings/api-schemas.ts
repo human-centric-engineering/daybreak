@@ -10,8 +10,8 @@
  */
 
 import { z } from 'zod';
-import { slugSchema, cuidSchema } from '@/lib/validations/common';
-import { ValidationError } from '@/lib/api/errors';
+import { cuidSchema } from '@/lib/validations/common';
+import { parseSlugParam, parseCuidParam } from '@/lib/framework/shared/route-params';
 
 /** Per-binding config override — an opaque JSON object (tone hints, etc.). */
 const bindingConfigSchema = z.record(z.string(), z.unknown());
@@ -40,23 +40,13 @@ export const updateBindingBodySchema = z
 
 /**
  * Validate a `[slug]` path param. A malformed slug can never name a real module,
- * so this is a 400 (bad input), not a 404.
+ * so this is a 400 (bad input), not a 404. Thin wrapper over the shared parser.
  */
 export function parseModuleSlug(raw: string): string {
-  const parsed = slugSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ValidationError('Invalid module slug', {
-      slug: ['Must be lowercase alphanumeric with hyphens'],
-    });
-  }
-  return parsed.data;
+  return parseSlugParam(raw, 'module');
 }
 
 /** Validate a `[bindingId]` path param (a cuid); malformed ⇒ 400, not 404. */
 export function parseBindingId(raw: string): string {
-  const parsed = cuidSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ValidationError('Invalid binding id', { bindingId: ['Must be a valid id'] });
-  }
-  return parsed.data;
+  return parseCuidParam(raw, 'binding', 'bindingId');
 }
