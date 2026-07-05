@@ -324,3 +324,25 @@ startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registra
   (editing a Sunrise-owned file — the banner's `keep-mine` case): this ledger is the sanctioned case where the
   fork code is clean framework-tier but its final home is upstream. Cross-ref [B5]/[B7] (fork-first informs
   upstream). _Status: open._
+
+### B15 · The deterministic engine is where code-review pays for itself — budget for a review-fix commit per task
+
+- **Discovery.** Every one of `f-engine`'s four tasks passed `/pre-pr` + `/security-review` clean, then
+  `/code-review` found a **real correctness defect** in the changed logic: t-1 (multigraph `pathsBetween`
+  double-count + a cycle-dedup separator that collided distinct cycles — a stray NUL byte in source), t-2
+  (the two access "faces" `canRead`/`subjectScope` diverging), t-3 (the writer's `complete` double-incrementing
+  under a stale snapshot / concurrency — the `@@unique`-on-create backstop didn't cover the update path). t-4
+  was the exception (review confirmed the reachability model was sound). These were not lint or type issues —
+  they were graph-algorithm and concurrency bugs that only a semantic reviewer (or production) would catch.
+- **Impact.** The deterministic engine is pure logic over graphs + a single-writer transaction; its bugs are
+  invisible to type-check and to mocked unit tests that assert the happy path. `/pre-pr` green is necessary,
+  not sufficient. The recurring shape: a review-fix follow-up commit landed on **3 of 4** tasks.
+- **Feedback.** For algorithm-dense or concurrency-bearing framework work (engine, guidance ranking,
+  scheduling), **plan for `/code-review` to find something and budget the review-fix commit** — run it to full
+  effort (the 8-finder + verify path), and treat a clean review as the surprise, not the default. Two concrete
+  habits that paid off: (1) a real-DB **smoke** for the write path caught nothing the review didn't, but proved
+  the fix end-to-end against Postgres (the `@@unique` upsert semantics a mock can't show); (2) documenting
+  each **semantic interpretation** in-module ("owner to confirm" — edge combination, `state.reached`,
+  reachability optimism) turned latent disagreements into reviewable decisions instead of silent assumptions.
+  Cross-ref [B4] (gates in the Done-when) and [B9] (vitest-no-live-DB — which is exactly why the smoke + review
+  matter for the paths mocks can't reach). _Status: open._
