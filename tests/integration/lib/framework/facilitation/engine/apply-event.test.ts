@@ -13,7 +13,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const { txMock } = vi.hoisted(() => ({
   txMock: {
-    userNodeState: { findUnique: vi.fn(), upsert: vi.fn() },
+    userNodeState: {
+      findUnique: vi.fn(),
+      upsert: vi.fn(),
+      updateMany: vi.fn(),
+      findUniqueOrThrow: vi.fn(),
+    },
     journeyEvent: { create: vi.fn() },
   },
 }));
@@ -33,13 +38,6 @@ const NOW = new Date('2026-07-05T12:00:00Z');
 
 function node(key: string, extra: Partial<MapNode> = {}): MapNode {
   return { key, type: 'milestone', completionMode: 'once', ...extra };
-}
-function nstate(
-  nodeKey: string,
-  status: string,
-  extra: Partial<JourneyNodeState> = {}
-): JourneyNodeState {
-  return { nodeKey, status, firstEnteredAt: null, lastActiveAt: null, ...extra };
 }
 function makeInput(over: {
   transition?: Partial<Transition>;
@@ -68,6 +66,12 @@ beforeEach(() => {
     id: 'e1',
     ...args.data,
   }));
+  txMock.userNodeState.updateMany.mockResolvedValue({ count: 1 });
+  txMock.userNodeState.findUniqueOrThrow.mockResolvedValue({
+    id: 'ns1',
+    status: 'completed',
+    timesCompleted: 1,
+  });
 });
 
 describe('enter', () => {
@@ -166,56 +170,48 @@ describe('enter', () => {
 });
 
 describe('complete', () => {
-  it('closes a once node and increments timesCompleted off the committed row', async () => {
-    txMock.userNodeState.findUnique.mockResolvedValue({
-      timesCompleted: 0,
-      firstEnteredAt: new Date('2026-07-04T00:00:00Z'),
-      completedAt: null,
-    });
-    const result = await applyEvent(
-      makeInput({
-        transition: { kind: 'complete', nodeKey: 'a' },
-        nodeStates: [nstate('a', 'active')],
-      })
-    );
+  it('closes an active node via an atomic conditional update + a node_completed event', async () => {
+    const result = await applyEvent(makeInput({ transition: { kind: 'complete', nodeKey: 'a' } }));
 
     expect(result.ok).toBe(true);
-    expect(txMock.userNodeState.upsert.mock.calls[0][0].update).toMatchObject({
-      status: 'completed',
-      timesCompleted: 1,
-      completedAt: NOW,
-      lastActiveAt: NOW,
+    // Only a still-`active` row transitions — evaluated atomically by the DB, so
+    // racing completes can't double-increment (the write path this replaces upserted
+    // off a stale snapshot). No `upsert` for a complete: it never creates a row.
+    expect(txMock.userNodeState.updateMany).toHaveBeenCalledWith({
+      where: { journeyId: 'j1', nodeKey: 'a', status: 'active' },
+      data: {
+        status: 'completed',
+        timesCompleted: { increment: 1 },
+        lastActiveAt: NOW,
+        completedAt: NOW,
+      },
     });
+    expect(txMock.userNodeState.upsert).not.toHaveBeenCalled();
     expect(txMock.journeyEvent.create.mock.calls[0][0].data.type).toBe(
       ENGINE_EVENT_TYPE.nodeCompleted
     );
   });
 
-  it('increments a repeatable node from its committed count', async () => {
-    txMock.userNodeState.findUnique.mockResolvedValue({
-      timesCompleted: 3,
-      firstEnteredAt: new Date('2026-07-04T00:00:00Z'),
-      completedAt: new Date('2026-07-04T06:00:00Z'),
-    });
+  it('increments once and repeatable identically (the DB increments; no completionMode branch)', async () => {
     await applyEvent(
       makeInput({
         transition: { kind: 'complete', nodeKey: 'a' },
         nodes: [node('a', { completionMode: 'repeatable' })],
-        nodeStates: [nstate('a', 'active')],
       })
     );
-    expect(txMock.userNodeState.upsert.mock.calls[0][0].update.timesCompleted).toBe(4);
+    expect(txMock.userNodeState.updateMany.mock.calls[0][0].data.timesCompleted).toEqual({
+      increment: 1,
+    });
   });
 
-  it('refuses to complete a node that is not active, with no write', async () => {
-    const result = await applyEvent(
-      makeInput({
-        transition: { kind: 'complete', nodeKey: 'a' },
-        nodeStates: [nstate('a', 'available')],
-      })
-    );
+  it('refuses when no row is active — a stale snapshot or a concurrent complete — with no event', async () => {
+    txMock.userNodeState.updateMany.mockResolvedValue({ count: 0 });
+    const result = await applyEvent(makeInput({ transition: { kind: 'complete', nodeKey: 'a' } }));
+
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.rejection.code).toBe('not_active');
-    expect(executeTransaction).not.toHaveBeenCalled();
+    // The conditional update matched 0 rows (no state change) and no event was written.
+    expect(txMock.userNodeState.findUniqueOrThrow).not.toHaveBeenCalled();
+    expect(txMock.journeyEvent.create).not.toHaveBeenCalled();
   });
 });

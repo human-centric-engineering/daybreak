@@ -13,11 +13,13 @@
  *   `repeatable` node increments `timesCompleted` and reopens (its cooldown, if any,
  *   is an edge condition the read side already enforces).
  * - **One transaction** (F10): every accepted transition appends the immutable
- *   `JourneyEvent` (source of truth) **and** upserts the `UserNodeState` projection in
+ *   `JourneyEvent` (source of truth) **and** writes the `UserNodeState` projection in
  *   a single `executeTransaction`, mirroring `appendSlotValue`. The event carries
- *   `userId` on every row (decision 5 — the erasure path). No engine-side retry: the
- *   `@@unique([journeyId, nodeKey])` backstops concurrent upserts and a P2002 rolls
- *   the transaction back for the caller to re-request.
+ *   `userId` on every row (decision 5 — the erasure path). **Race-safe without retry:**
+ *   an `enter` upserts to `active` (idempotent — re-entering yields the same state);
+ *   a `complete` uses an **atomic conditional update** (`active → completed` in one
+ *   `updateMany WHERE status='active'`), so two racing completes can't double-increment
+ *   `timesCompleted` — the loser matches 0 rows and is refused, no write.
  *
  * Scope (decision 8): this is the validated *library* writer. The agent-facing
  * capabilities that call it (`enter_module` / `complete_node`, and the assembler that
@@ -107,6 +109,10 @@ export async function applyEvent(input: ApplyEventInput): Promise<ApplyEventResu
     return refuse('unknown_node', `No node "${nodeKey}" in the published map.`);
   }
 
+  // `enter` is gated here on the caller's snapshot (a fast refusal without opening a
+  // transaction). `complete` is gated **authoritatively inside the transaction** by a
+  // conditional update (below) — its snapshot could be stale in either direction, and
+  // the active→completed transition must be race-safe.
   if (transition.kind === 'enter') {
     const availability = computeAvailability({
       graph,
@@ -126,29 +132,44 @@ export async function applyEvent(input: ApplyEventInput): Promise<ApplyEventResu
         },
       };
     }
-  } else {
-    const current = input.nodeStates.find((s) => s.nodeKey === nodeKey);
-    if (current?.status !== NODE_STATE_STATUS.active) {
-      return refuse('not_active', `Node "${nodeKey}" is not active; enter it before completing.`);
-    }
   }
 
-  const eventType =
-    transition.kind === 'enter' ? ENGINE_EVENT_TYPE.nodeEntered : ENGINE_EVENT_TYPE.nodeCompleted;
-
   return executeTransaction(async (tx) => {
-    // Read the current projection fresh inside the transaction so `timesCompleted`
-    // increments off the committed value, not the caller's snapshot.
-    const current = await tx.userNodeState.findUnique({
-      where: { journeyId_nodeKey: { journeyId, nodeKey } },
-    });
-    const fields = nextProjection(transition.kind, current, now);
+    let nodeState: UserNodeState;
 
-    const nodeState = await tx.userNodeState.upsert({
-      where: { journeyId_nodeKey: { journeyId, nodeKey } },
-      create: { journeyId, nodeKey, ...fields },
-      update: fields,
-    });
+    if (transition.kind === 'complete') {
+      // Optimistic concurrency: only a row that is *still* `active` transitions to
+      // `completed`, evaluated atomically by the DB. Two racing completes therefore
+      // can't double-increment — the loser matches 0 rows. And a `complete` never
+      // *creates* a row: completing a node with no active projection is refused, not
+      // papered over (the `@@unique`-on-create backstop does not cover an update).
+      const updated = await tx.userNodeState.updateMany({
+        where: { journeyId, nodeKey, status: NODE_STATE_STATUS.active },
+        data: {
+          status: NODE_STATE_STATUS.completed,
+          timesCompleted: { increment: 1 }, // once closes at 1; repeatable counts up
+          lastActiveAt: now,
+          completedAt: now,
+        },
+      });
+      if (updated.count === 0) {
+        return refuse('not_active', `Node "${nodeKey}" is not active; enter it before completing.`);
+      }
+      nodeState = await tx.userNodeState.findUniqueOrThrow({
+        where: { journeyId_nodeKey: { journeyId, nodeKey } },
+      });
+    } else {
+      // enter — upsert to active, preserving first-arrival + any prior completion off
+      // the freshly-read row. Re-entering is idempotent (status stays active).
+      const current = await tx.userNodeState.findUnique({
+        where: { journeyId_nodeKey: { journeyId, nodeKey } },
+      });
+      nodeState = await tx.userNodeState.upsert({
+        where: { journeyId_nodeKey: { journeyId, nodeKey } },
+        create: { journeyId, nodeKey, ...enterProjection(current, now) },
+        update: enterProjection(current, now),
+      });
+    }
 
     const event = await tx.journeyEvent.create({
       data: {
@@ -156,7 +177,10 @@ export async function applyEvent(input: ApplyEventInput): Promise<ApplyEventResu
         journeyId,
         nodeKey,
         moduleSlug: node.moduleSlug ?? null,
-        type: eventType,
+        type:
+          transition.kind === 'enter'
+            ? ENGINE_EVENT_TYPE.nodeEntered
+            : ENGINE_EVENT_TYPE.nodeCompleted,
         occurredAt: now,
         ...(transition.payload !== undefined ? { payload: transition.payload } : {}),
       },
@@ -166,28 +190,16 @@ export async function applyEvent(input: ApplyEventInput): Promise<ApplyEventResu
   });
 }
 
-/** The projection fields after a transition, computed off the committed row. */
-function nextProjection(
-  kind: TransitionKind,
-  current: UserNodeState | null,
-  now: Date
-): ProjectionFields {
-  if (kind === 'enter') {
-    return {
-      status: NODE_STATE_STATUS.active,
-      timesCompleted: current?.timesCompleted ?? 0,
-      firstEnteredAt: current?.firstEnteredAt ?? now,
-      lastActiveAt: now,
-      completedAt: current?.completedAt ?? null,
-    };
-  }
-  // complete — `once` closes, `repeatable` reopens; both stamp the latest pass.
+/** The projection fields an `enter` sets — active, preserving first-arrival + any
+ *  prior completion from the committed row. (`complete` uses an atomic conditional
+ *  update instead, so it needs no field computation here.) */
+function enterProjection(current: UserNodeState | null, now: Date): ProjectionFields {
   return {
-    status: NODE_STATE_STATUS.completed,
-    timesCompleted: (current?.timesCompleted ?? 0) + 1,
+    status: NODE_STATE_STATUS.active,
+    timesCompleted: current?.timesCompleted ?? 0,
     firstEnteredAt: current?.firstEnteredAt ?? now,
     lastActiveAt: now,
-    completedAt: now,
+    completedAt: current?.completedAt ?? null,
   };
 }
 
