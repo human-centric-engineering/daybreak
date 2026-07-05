@@ -21,8 +21,10 @@
 // f-module-core t-2); this row stores the inputs, not the verdict.
 //
 // Scope note: config *versioning* (`ModuleVersion`, A10 → f-module-config) and the
-// binding pivots (agents/workflows, A6/A8 → f-module-bindings) are intentionally
-// absent — added by the features that own them, so no unused columns land early.
+// *workflow* binding pivot (`ModuleWorkflowBinding`, A8 → f-module-bindings t-3) are
+// intentionally absent — added by the features that own them, so no unused columns
+// land early. The *agent* binding pivot (`ModuleAgentBinding`, A6) lands here in
+// f-module-bindings t-1, below.
 model Module {
   id              String    @id @default(cuid())
   slug            String    @unique // matches the registered ModuleDefinition.slug
@@ -37,6 +39,44 @@ model Module {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
+  agentBindings ModuleAgentBinding[]
+
   @@index([status])
   @@map("framework_module")
+}
+
+// A binding of an ordinary `AiAgent` into a module *seat* (spec §4.2, decision A6).
+// Agents are never owned by a module — they bind, with a `role` (one of the module's
+// code-declared `agentRoles`) that names the seat. A universal agent is one bound
+// into many modules; a module-specific agent is bound into one. Nothing on `AiAgent`
+// changes (agent admin stays where it is).
+//
+// `moduleId` is a Prisma relation to `Module` (both framework-owned) with
+// `onDelete: Cascade` — delete a module, its bindings go. `agentId` is a PLAIN scalar
+// FK to core `AiAgent` (NO Prisma `@relation`, so a fork table never adds a reverse
+// field to the Sunrise-owned `AiAgent` model — the X6 boundary); the
+// `ON DELETE CASCADE` to `ai_agent` is HAND-WRITTEN in the migration SQL, the same
+// pattern f-slots used for `SlotValue.userId` (B11). So reads that need the agent's
+// display name stitch it in the service (`bindings/queries.ts`), not via `include`.
+//
+// `role` is a free-form `String` (X1), validated against the registered module's
+// `agentRoles` at bind time, not by a DB enum. `isPrimary` marks the module's single
+// lead seat (e.g. the chat companion); the bind service keeps at most one per module.
+// `config` holds per-binding overrides (tone hints, etc.), opaque here.
+model ModuleAgentBinding {
+  id        String   @id @default(cuid())
+  moduleId  String
+  agentId   String // FK to AiAgent.id — no @relation; ON DELETE CASCADE hand-written in the migration
+  role      String // one of the module's declared agentRoles (validated at bind time)
+  isPrimary Boolean  @default(false) // the module's lead seat (e.g. chat companion); ≤ 1 per module
+  config    Json? // per-binding overrides (tone hints, etc.), opaque to the framework
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  module Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([moduleId, agentId, role])
+  @@index([moduleId])
+  @@index([agentId])
+  @@map("framework_module_agent")
 }
