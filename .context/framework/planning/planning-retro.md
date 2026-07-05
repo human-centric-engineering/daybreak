@@ -346,3 +346,24 @@ startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registra
   reachability optimism) turned latent disagreements into reviewable decisions instead of silent assumptions.
   Cross-ref [B4] (gates in the Done-when) and [B9] (vitest-no-live-DB — which is exactly why the smoke + review
   matter for the paths mocks can't reach). _Status: open._
+
+### B16 · A "masking + extraction" task splits cleanly at the LLM boundary — ship the pure map, defer the impure call
+
+- **Discovery.** `f-slot-capture`'s t-3 was promoted as one task: "sensitivity masking **+ #307 typed
+  extraction**." At build time the two halves turned out to sit on opposite sides of a hard seam. The
+  masking + the `SLOT_DATA_TYPE → typed-value` map are **pure and synchronous** — no LLM, no DB. The #307
+  prose→typed **extraction** needs the capturing agent's provider/model resolved into the capability context
+  (which `CapabilityContext` doesn't carry), a cross-domain import of `runStructuredCompletion`, and a `phase`
+  union (`summary|scoring`) that doesn't fit slot capture. t-3 was split mid-build into **t-3 (pure, shipped
+  #44)** and **t-3b (the impure extraction, #45)**, with the shared schema map built in t-3 so t-3b was a thin add.
+- **Impact.** Net positive — but the split was discovered _during_ the task, not at plan time, so the board's
+  t-3 row and decision-7 prose had to be reconciled after the fact. Had the plan spotted the seam, t-3/t-3b
+  would have been promoted as two rows from the start (correct sizing, no mid-flight board churn). The tell was
+  visible in the plan: decision 7 already described "local-validate (no LLM) **vs** a secondary
+  `runStructuredCompletion`" — two mechanisms in one task is the smell.
+- **Feedback.** When a task's description joins a **pure transform** and an **LLM/IO call** with "+", treat the
+  conjunction as a **split candidate** at promotion time: the pure half ships silent + testable with mocked
+  units; the impure half carries provider-resolution + cross-domain wiring + its own failure-mode budget
+  (best-effort, never-fail-the-write). Promote them as separate rows and let the pure one land first — the map
+  it builds is exactly the seam the impure one consumes. Generalises [B1] (sizing self-check): the split axis
+  here isn't _size_, it's the **purity boundary**. _Status: open._
