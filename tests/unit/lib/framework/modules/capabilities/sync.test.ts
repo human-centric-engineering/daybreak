@@ -25,11 +25,12 @@ import type {
 const txMock = {
   aiCapability: {
     findMany: vi.fn(),
-    create: vi.fn(),
+    createMany: vi.fn(),
     update: vi.fn(),
     updateMany: vi.fn(),
   },
 };
+const dispatcherMock = { clearCache: vi.fn() };
 
 vi.mock('@/lib/db/utils', () => ({
   executeTransaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>, _opts?: unknown) =>
@@ -39,6 +40,9 @@ vi.mock('@/lib/db/utils', () => ({
 vi.mock('@/lib/logging', () => ({
   logger: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
 }));
+vi.mock('@/lib/orchestration/capabilities/dispatcher', () => ({
+  capabilityDispatcher: dispatcherMock,
+}));
 
 const { syncRegisteredModuleCapabilities } =
   await import('@/lib/framework/modules/capabilities/sync');
@@ -46,6 +50,8 @@ const { registerModule, __resetModuleRegistryForTests } =
   await import('@/lib/framework/modules/registry');
 const { executeTransaction } = await import('@/lib/db/utils');
 const executeTransactionMock = executeTransaction as ReturnType<typeof vi.fn>;
+
+const MARKER_WHERE = { path: ['framework'], equals: 'module-capability' };
 
 class Tool extends BaseCapability {
   readonly slug: string;
@@ -80,7 +86,7 @@ function row(overrides: Partial<AiCapability> & Pick<AiCapability, 'slug'>): AiC
     category: 'module',
     functionDefinition: { name: 'reading__save_worksheet', description: 'x', parameters: {} },
     executionType: 'internal',
-    executionHandler: 'Tool (module:reading)',
+    executionHandler: 'framework-module:reading/save_worksheet',
     executionConfig: null,
     requiresApproval: false,
     approvalTimeoutMs: null,
@@ -103,47 +109,75 @@ beforeEach(() => {
   txMock.aiCapability.updateMany.mockResolvedValue({ count: 0 });
 });
 
+/** The functionDefinition a wrapped `Tool(slug)` produces, in canonical shape. */
+function fnDef(slug: string, description = `${slug} desc`) {
+  return { name: `reading__${slug}`, description, parameters: {} };
+}
+
 describe('syncRegisteredModuleCapabilities', () => {
-  it('no registered modules is a no-op: no transaction, no writes', async () => {
+  it('no registered modules is a no-op: no transaction, no writes, no cache clear', async () => {
     await syncRegisteredModuleCapabilities();
     expect(executeTransactionMock).not.toHaveBeenCalled();
-    expect(txMock.aiCapability.create).not.toHaveBeenCalled();
+    expect(txMock.aiCapability.createMany).not.toHaveBeenCalled();
+    expect(dispatcherMock.clearCache).not.toHaveBeenCalled();
   });
 
-  it('creates a row for a newly-declared capability with the framework marker', async () => {
+  it('creates a row (batched) for a newly-declared capability with the framework marker', async () => {
     registerModuleWithCaps('reading', [new Tool('save_worksheet')]);
     await syncRegisteredModuleCapabilities();
 
-    expect(txMock.aiCapability.create).toHaveBeenCalledTimes(1);
-    const data = txMock.aiCapability.create.mock.calls[0][0].data;
+    expect(txMock.aiCapability.createMany).toHaveBeenCalledTimes(1);
+    const arg = txMock.aiCapability.createMany.mock.calls[0][0];
+    expect(arg.skipDuplicates).toBe(true);
+    const data = arg.data[0];
     expect(data).toMatchObject({
       slug: 'reading__save_worksheet',
       category: 'module',
       isSystem: true,
       isActive: true,
       executionType: 'internal',
+      executionHandler: 'framework-module:reading/save_worksheet',
+      metadata: { framework: 'module-capability' },
     });
-    // The LLM-facing name is the provider-legal derivation, not the dotted slug.
     expect(data.functionDefinition.name).toBe('reading__save_worksheet');
+    // A write happened → the dispatcher's registry cache is invalidated.
+    expect(dispatcherMock.clearCache).toHaveBeenCalledTimes(1);
   });
 
-  it('does not update an unchanged existing row (no-write-when-unchanged)', async () => {
+  it('does not update an unchanged existing row (no-write-when-unchanged), and does not clear the cache', async () => {
     registerModuleWithCaps('reading', [new Tool('save_worksheet')]);
     txMock.aiCapability.findMany.mockResolvedValue([
       row({
         slug: 'reading__save_worksheet',
         description: 'save_worksheet desc',
-        executionHandler: 'Tool (module:reading)',
+        functionDefinition: fnDef('save_worksheet'),
+      }),
+    ]);
+
+    await syncRegisteredModuleCapabilities();
+    expect(txMock.aiCapability.createMany).not.toHaveBeenCalled();
+    expect(txMock.aiCapability.update).not.toHaveBeenCalled();
+    expect(dispatcherMock.clearCache).not.toHaveBeenCalled();
+  });
+
+  it('treats a jsonb key-reordered functionDefinition as unchanged (canonical compare)', async () => {
+    // Postgres returns jsonb with reordered keys; a raw JSON.stringify diff would see a
+    // false change and rewrite the row every boot. Canonical compare must not.
+    registerModuleWithCaps('reading', [new Tool('save_worksheet')]);
+    txMock.aiCapability.findMany.mockResolvedValue([
+      row({
+        slug: 'reading__save_worksheet',
+        description: 'save_worksheet desc',
+        // Keys deliberately in a different order than the code constructs them.
         functionDefinition: {
-          name: 'reading__save_worksheet',
-          description: 'save_worksheet desc',
           parameters: {},
+          description: 'save_worksheet desc',
+          name: 'reading__save_worksheet',
         },
       }),
     ]);
 
     await syncRegisteredModuleCapabilities();
-    expect(txMock.aiCapability.create).not.toHaveBeenCalled();
     expect(txMock.aiCapability.update).not.toHaveBeenCalled();
   });
 
@@ -170,11 +204,7 @@ describe('syncRegisteredModuleCapabilities', () => {
       row({
         slug: 'reading__save_worksheet',
         description: 'save_worksheet desc',
-        functionDefinition: {
-          name: 'reading__save_worksheet',
-          description: 'save_worksheet desc',
-          parameters: {},
-        },
+        functionDefinition: fnDef('save_worksheet'),
         isActive: false,
       }),
     ]);
@@ -184,14 +214,13 @@ describe('syncRegisteredModuleCapabilities', () => {
     expect(txMock.aiCapability.update.mock.calls[0][0].data).toMatchObject({ isActive: true });
   });
 
-  it('deactivates removed capabilities, scoped to the framework marker', async () => {
+  it('deactivates removed capabilities, scoped to the framework metadata marker', async () => {
     registerModuleWithCaps('reading', [new Tool('save_worksheet')]);
     await syncRegisteredModuleCapabilities();
 
     expect(txMock.aiCapability.updateMany).toHaveBeenCalledWith({
       where: {
-        category: 'module',
-        isSystem: true,
+        metadata: MARKER_WHERE,
         isActive: true,
         slug: { notIn: ['reading__save_worksheet'] },
       },
@@ -207,7 +236,7 @@ describe('syncRegisteredModuleCapabilities', () => {
 
     expect(executeTransactionMock).toHaveBeenCalledTimes(1);
     expect(txMock.aiCapability.updateMany).toHaveBeenCalledWith({
-      where: { category: 'module', isSystem: true, isActive: true },
+      where: { metadata: MARKER_WHERE, isActive: true },
       data: { isActive: false },
     });
   });

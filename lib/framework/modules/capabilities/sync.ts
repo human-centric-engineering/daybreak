@@ -32,15 +32,44 @@ import { executeTransaction } from '@/lib/db/utils';
 import { logger } from '@/lib/logging';
 import { getRegisteredModules } from '@/lib/framework/modules/registry';
 import type { CapabilityFunctionDefinition } from '@/lib/orchestration/capabilities/types';
+import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import { namespaceModuleCapability } from '@/lib/framework/modules/capabilities/namespace';
 
 /** Timeout (ms) for the sync transaction — a ceiling above Prisma's 5s default (#368). */
 const SYNC_TX_TIMEOUT_MS = 20_000;
 
-/** The category + system marker that identifies a framework-owned capability row. */
+/** The category marker on a framework-owned capability row (admin list bucket). */
 const MODULE_CAPABILITY_CATEGORY = 'module';
 /** Module capabilities dispatch in-process via the registry handler. */
 const MODULE_CAPABILITY_EXECUTION_TYPE = 'internal';
+/**
+ * The framework's own stamp on the rows it writes. The deactivate pass scopes on THIS
+ * marker (a `metadata.framework` key only this sync ever sets) rather than on
+ * `category`/`isSystem`, so the reconcile depends on the framework's own write, not on
+ * an invariant enforced in distant files (the admin schema omitting `isSystem`). Even
+ * if a future change let an admin/importer produce `category='module' + isSystem`, this
+ * pass would not touch it — it isn't stamped.
+ */
+const MODULE_CAPABILITY_MARKER = 'module-capability';
+
+/** Deep, key-order-independent JSON string — `functionDefinition` is a `jsonb` column,
+ *  and Postgres does not preserve key order, so a raw `JSON.stringify` diff would see a
+ *  spurious change on every boot. Arrays keep their order (JSON-schema order matters). */
+function canonicalJson(value: unknown): string {
+  const sortKeys = (v: unknown): unknown => {
+    if (Array.isArray(v)) return v.map(sortKeys);
+    if (v && typeof v === 'object') {
+      const obj = v as Record<string, unknown>;
+      return Object.fromEntries(
+        Object.keys(obj)
+          .sort()
+          .map((k) => [k, sortKeys(obj[k])])
+      );
+    }
+    return v;
+  };
+  return JSON.stringify(sortKeys(value));
+}
 
 /** The code-projected columns this sync writes for a module capability's row. */
 interface ModuleCapabilityRow {
@@ -72,11 +101,13 @@ export function collectRegisteredModuleCapabilities(): ModuleCapabilityRow[] {
       bySlug.set(wrapped.slug, {
         slug: wrapped.slug,
         // No human display name on BaseCapability — the namespaced slug is the row's
-        // name (admin sees `reading.save_worksheet`); the LLM sees functionDefinition.name.
+        // name (admin sees `reading__save_worksheet`); the LLM sees functionDefinition.name.
         name: wrapped.slug,
         description: wrapped.functionDefinition.description,
         functionDefinition: wrapped.functionDefinition,
-        executionHandler: `${capability.constructor.name} (module:${mod.slug})`,
+        // A STABLE identifier of the owning module + tool. NOT `constructor.name` —
+        // minified server bundles mangle class names (and it feeds the diff below).
+        executionHandler: `framework-module:${mod.slug}/${capability.slug}`,
       });
     }
   }
@@ -91,7 +122,7 @@ function moduleCapabilityNeedsUpdate(row: AiCapability, desired: ModuleCapabilit
     row.name !== desired.name ||
     row.description !== desired.description ||
     row.executionHandler !== desired.executionHandler ||
-    JSON.stringify(row.functionDefinition) !== JSON.stringify(desired.functionDefinition)
+    canonicalJson(row.functionDefinition) !== canonicalJson(desired.functionDefinition)
   );
 }
 
@@ -112,13 +143,13 @@ export async function syncRegisteredModuleCapabilities(): Promise<void> {
         slugs.length > 0 ? await tx.aiCapability.findMany({ where: { slug: { in: slugs } } }) : [];
       const bySlug = new Map(existing.map((row) => [row.slug, row]));
 
-      // Create newly-declared capabilities — code fields + operator defaults. The
-      // marker pair (category + isSystem) is what scopes the deactivate pass below.
-      let created = 0;
-      for (const desired of rows) {
-        if (bySlug.has(desired.slug)) continue;
-        await tx.aiCapability.create({
-          data: {
+      // Create newly-declared capabilities — code fields + operator defaults + the
+      // framework marker that scopes the deactivate pass below. Batched (createMany),
+      // matching the sibling slot sync.
+      const toCreate = rows.filter((desired) => !bySlug.has(desired.slug));
+      if (toCreate.length > 0) {
+        await tx.aiCapability.createMany({
+          data: toCreate.map((desired) => ({
             slug: desired.slug,
             name: desired.name,
             description: desired.description,
@@ -128,10 +159,12 @@ export async function syncRegisteredModuleCapabilities(): Promise<void> {
             executionHandler: desired.executionHandler,
             isSystem: true,
             isActive: true,
-          },
+            metadata: { framework: MODULE_CAPABILITY_MARKER },
+          })),
+          skipDuplicates: true,
         });
-        created++;
       }
+      const created = toCreate.length;
 
       // Propagate code edits (and re-activation) — only when changed, and only to the
       // code-projected columns, so operator edits (rateLimit, requiresApproval, …) survive.
@@ -156,12 +189,13 @@ export async function syncRegisteredModuleCapabilities(): Promise<void> {
       }
 
       // Deactivate framework-owned rows whose code was removed (retain for audit).
-      // Scoped to the admin-unreachable marker pair so no built-in/admin capability is
-      // touched; `notIn` omitted when no module capabilities remain (avoids `notIn: []`).
+      // Scoped to the framework's OWN `metadata.framework` stamp — a row this sync
+      // wrote — so it can never touch a built-in or admin-created capability regardless
+      // of their category/isSystem. `notIn` omitted when no module capabilities remain
+      // (avoids `notIn: []`).
       const { count: deactivated } = await tx.aiCapability.updateMany({
         where: {
-          category: MODULE_CAPABILITY_CATEGORY,
-          isSystem: true,
+          metadata: { path: ['framework'], equals: MODULE_CAPABILITY_MARKER },
           isActive: true,
           ...(slugs.length > 0 ? { slug: { notIn: slugs } } : {}),
         },
@@ -172,6 +206,14 @@ export async function syncRegisteredModuleCapabilities(): Promise<void> {
     },
     { timeout: SYNC_TX_TIMEOUT_MS }
   );
+
+  // If any row changed, invalidate the dispatcher's DB-registry cache so a request that
+  // landed during the boot window (and cached a registry missing these rows) re-reads
+  // instead of returning `capability_inactive` until the TTL expires. Skipped on a
+  // steady-state no-op boot so we don't thrash a warm cache.
+  if (counts.created + counts.updated + counts.deactivated > 0) {
+    capabilityDispatcher.clearCache();
+  }
 
   logger.info('syncRegisteredModuleCapabilities: framework module capabilities synced', {
     registered: slugs.length,

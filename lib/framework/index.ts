@@ -38,10 +38,14 @@ export function initFramework(): void {
 }
 
 export async function syncFramework(): Promise<void> {
+  // In-memory capability handlers FIRST — pure, no DB dependency. If a DB sync below
+  // throws on a transient boot-time DB error (which `lib/app/bootstrap.ts` tolerates),
+  // the handlers are still registered, so a module capability whose `ai_capability` row
+  // persisted from a prior boot stays dispatchable rather than vanishing for the whole
+  // process (module caps, unlike built-ins, have no lazy self-heal). Requires modules
+  // to be registered, which `initLeafApp()` did before `syncFramework()` ran.
+  registerRegisteredModuleCapabilities();
   await syncRegisteredModules();
   await syncRegisteredSlotDefinitions();
-  // Capabilities: in-memory dispatcher handlers, then the `ai_capability` rows. Both
-  // after the module/slot syncs — modules must be registered (initLeafApp) first.
-  registerRegisteredModuleCapabilities();
   await syncRegisteredModuleCapabilities();
 }
