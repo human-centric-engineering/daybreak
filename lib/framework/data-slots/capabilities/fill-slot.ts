@@ -100,19 +100,28 @@ export class FillSlotCapability extends BaseCapability<FillSlotArgs, FillSlotDat
 
   /**
    * The captured `value` (+ the `reasoningNote`, which quotes it) is user-derived PII, so
-   * both are masked in the durable audit row; the `slotSlug`/`confidence`/`sourceType`
-   * stay so an auditor sees WHAT was written. The LLM still sees the un-redacted result.
+   * both are masked in the durable audit row; `confidence`/`sourceType` stay so an auditor
+   * sees the shape of what was written. A **targeted** slug is a vetted `SlotDefinition`
+   * identifier — safe to keep; a **minted** slug is model-authored free text that can
+   * itself encode PII (e.g. `recently_divorced`), so it is masked too, in both the args
+   * and the result preview. The LLM still sees the un-redacted result.
    */
   redactProvenance(
     args: FillSlotArgs,
     result: CapabilityResult<FillSlotData>
   ): { args: unknown; resultPreview: string } {
+    const minted = result.success && result.data?.minted === true;
     const safeArgs = {
       ...args,
       value: redactedString('slot-value'),
       reasoningNote: redactedString('slot-reasoning'),
+      ...(minted ? { slotSlug: redactedString('minted-slot') } : {}),
     };
-    return { args: safeArgs, resultPreview: JSON.stringify(result) };
+    const safeResult =
+      minted && result.success && result.data
+        ? { ...result, data: { ...result.data, slotSlug: redactedString('minted-slot') } }
+        : result;
+    return { args: safeArgs, resultPreview: JSON.stringify(safeResult) };
   }
 
   async execute(
@@ -137,10 +146,11 @@ export class FillSlotCapability extends BaseCapability<FillSlotArgs, FillSlotDat
     }
     const minted = definition === null;
     if (minted) {
-      logger.info('fill_slot: minting an open-mode slot value', {
-        slotSlug: args.slotSlug,
-        agentId: context.agentId,
-      });
+      // A minted slug is model-authored free text that can encode PII — so it is NOT
+      // logged (durable app logs aren't erasure-covered). The `agentId` is enough to
+      // spot a runaway/abusive agent; the slug itself lives only in the (erasable) slot
+      // row for an authorised operator to inspect.
+      logger.info('fill_slot: minted an open-mode slot value', { agentId: context.agentId });
     }
 
     const scope = decodeScope(context.scope);

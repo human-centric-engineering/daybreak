@@ -118,15 +118,26 @@ describe('validation + PII', () => {
     expect(() => cap.validate(args({ sourceType: 'made_up' }))).toThrow();
   });
 
-  it('declares processesPii and masks the value + reasoningNote in provenance', () => {
+  it('declares processesPii and masks value + reasoningNote, keeping a targeted (vetted) slug', () => {
     expect(cap.processesPii).toBe(true);
     const redacted = cap.redactProvenance(args(), {
       success: true,
       data: { slotSlug: 'primary_goal', version: 3, minted: false },
     });
     const safe = redacted.args as { value: string; reasoningNote: string; slotSlug: string };
-    expect(safe.slotSlug).toBe('primary_goal');
+    expect(safe.slotSlug).toBe('primary_goal'); // targeted slug is a safe identifier
     expect(safe.value).not.toContain('marathon');
     expect(safe.reasoningNote).not.toContain('directly');
+  });
+
+  it('also masks a MINTED slug (model-authored free text) in both args and preview', () => {
+    const minted = args({ slotSlug: 'recently_divorced' });
+    const redacted = cap.redactProvenance(minted, {
+      success: true,
+      data: { slotSlug: 'recently_divorced', version: 1, minted: true },
+    });
+    const safe = redacted.args as { slotSlug: string };
+    expect(safe.slotSlug).not.toContain('divorced');
+    expect(redacted.resultPreview).not.toContain('divorced');
   });
 });
