@@ -241,25 +241,42 @@ Net still 5 PRs. **t-1 is the anchor** (the assembler is the reused seam f-facil
 build it as its final shape). **t-5 depends on t-4** (a surface needs the enriched contributor to inject
 context) and is the **coordination point with Simon's f-module-bindings** — sequence it last.
 
-## Open questions — for Ultraplan refinement
+## Resolved design questions (2026-07-05)
 
-1. **Ranking signal weights (decision 2).** The recency/confidence/low-confidence/declared-preference
-   mix is under-specified in the spec. Ship a **transparent, documented default weighting** (reasons in
-   the payload make it auditable) and flag it "owner to tune" — or does f-guidance need a
-   configurable/pluggable ranking policy now (vs. `f-policies` 17)?
-2. **`get_progress_synopsis` — deterministic digest vs. LLM narration.** Is the synopsis a
-   **structured, deterministic digest** of the event log (pure, testable — preferred, keeps guidance
-   LLM-free), or does it call an LLM to prose-narrate (like f-slot-capture t-3b's extraction)? Default:
-   deterministic digest; the agent narrates from it.
-3. **Interim scope posture (decision 7).** Confirm we **leave `isInModuleScope` allow-on-absent** (X5
-   populates scope; a global refuse-on-absent flip is `f-policies`' call and would break Simon's tests)
-   — or is enforcing-by-default wanted now, coordinated with Simon?
-4. **Surface route shape (decision 6/8).** One generic `POST …/framework/surface/{moduleSlug}/chat`
-   that proxies to `streamChat`, or a thinner "open/resolve surface → returns `{conversationId, agentId,
-scope}`" that the existing consumer stream route then consumes? The former keeps the scope write
-   entirely framework-side; the latter is lighter but risks needing the core route to forward scope.
-5. **`request_transition` confirm-first (decision 4).** Confirmed out of scope (surface/agent UX) — or
-   should the capability expose a `dryRun`/preview mode returning the would-be verdict without writing?
+The five refinement questions are settled here (no configurability shipped that a real requirement
+hasn't yet demanded — each default keeps the layer pure, simple, and deletable):
+
+1. **Ranking weights → a transparent, documented default; NOT a pluggable policy.** `ranking.ts`
+   carries one weighting as named constants at the top of the module (recency of the node's most-relevant
+   slot(s) · `confidence` 1–10 · a boost for low-confidence / recently-changed areas the node would
+   clarify · the advisory `recommended_by` soft-deadline), each ranked option emitting its **reason
+   string** so the ranking is auditable without a config surface. Tests assert **ordering behaviour**
+   (e.g. "a recently-contradicted node outranks a stale one"), never magic coefficients — so the weights
+   stay tunable without churning tests. A pluggable/authored ranking **policy** is deferred to
+   `f-policies` (17) _if a real need appears_; shipping the hook now is the premature abstraction
+   keep-it-simple forbids.
+2. **`get_progress_synopsis` → a deterministic, pure digest. The agent narrates; guidance never calls an
+   LLM.** The synopsis is a structured digest of the event log (milestones reached, recent transitions,
+   open/untouched regions, counts) computed purely from `getJourneyTimeline` + `getNodeStates` — testable,
+   reproducible, and true to the layer's discipline (_engine + guidance are pure; agents narrate_).
+   Prose richness lives at the **narration** layer (the agent renders the digest), so determinism costs
+   nothing in expressiveness — and we avoid re-importing f-slot-capture t-3b's provider-resolution
+   friction into a layer that has no reason to be non-deterministic.
+3. **Interim scope posture → LEAVE `isInModuleScope` allow-on-absent (decision 7). Locked.** t-5
+   populating `scope.moduleSlug` makes the merged predicate enforce for module surfaces naturally; a
+   global refuse-on-absent flip is a **governance** call (`f-policies` 17) and would break Simon's t-2
+   tests. Not this feature's to make — coordinate, don't flip.
+4. **Surface route → one generic framework-owned proxy route (decision 6).** `POST
+…/framework/surface/{moduleSlug}/chat` resolves the bound primary agent, does the resume lookup
+   (decision 8), and proxies to core `streamChat` with `scope` populated. Chosen over the thinner
+   "open→return handles" variant precisely because it keeps the **scope write entirely framework-side** —
+   the lighter variant would eventually need the **core** consumer route to forward `scope` (a forbidden
+   core edit). One route, one boundary, zero core change.
+5. **`request_transition` confirm-first → out of scope; achieved with the existing read caps. No
+   `dryRun`.** `request_transition` stays the pure write mechanism. An agent that wants to confirm first
+   calls **`get_next_steps`** (which already returns the eligible moves + reasons — a natural preview),
+   confirms with the user, then calls `request_transition`. A separate `dryRun`/preview mode would just
+   duplicate `get_next_steps`, so it is not built.
 
 ## Upstream-asks candidates (fork-first — ledger at build)
 
