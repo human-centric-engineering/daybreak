@@ -9,9 +9,10 @@
  * describes operation.
  *
  * Scope grows one field per consuming feature, so no unused surface lands early:
- *   - `slotDefinitions`              → `f-slots` (§6) — added below
- *   - `capabilities` / `agentRoles`  → `f-module-bindings` (A6/A8)
- *   - `events`                       → `f-engagement` (A9)
+ *   - `slotDefinitions`  → `f-slots` (§6) — added below
+ *   - `agentRoles`       → `f-module-bindings` t-1 (A6) — added below
+ *   - `capabilities`     → `f-module-bindings` t-2 (A8)
+ *   - `events`           → `f-engagement` (A9)
  */
 
 import type { z } from 'zod';
@@ -48,4 +49,19 @@ export interface ModuleDefinition {
    * capabilities that read/write these are a later feature (`f-slot-capture`).
    */
   slotDefinitions?: SlotDefinitionInput[];
+
+  /**
+   * The named agent *seats* this module offers (spec §4.2, decision A6). An admin
+   * binds an ordinary `AiAgent` into a seat via a `ModuleAgentBinding` row; the
+   * `role` on that row must be one of the strings declared here, validated at bind
+   * time (`bindings/service.ts`) — a seat is a code-declared contract, not an
+   * operator free-text field. A universal agent is one bound into many modules'
+   * seats; a module-specific agent is bound into one. Nothing on `AiAgent` changes
+   * (A6: agents bind with roles, never owned).
+   *
+   * Free-form strings, not an enum (X1): a new seat is a code edit to this array,
+   * never a migration. Optional — a module with no agent seats declares none, and
+   * binding any agent to it is then rejected. Example: `['companion', 'reviewer']`.
+   */
+  agentRoles?: string[];
 }
