@@ -1,0 +1,273 @@
+---
+name: f-guidance
+feature: 12 · f-guidance
+epic: Framework v1
+status: in flight (both deps shipped — f-engine ✅, f-slot-capture ✅)
+owner: John
+depends_on: f-engine (shipped — #34 / #36 / #37 / #38, for `computeAvailability` / `applyEvent` / `resolveJourneyNow` / `getPublishedGraph`) · f-slot-capture (shipped — #42–#46, for the framework capability-registration seam + `getSlotHeads` recency reads) · f-journey-state (shipped — #27 / #28, for the `canRead`-guarded journey queries) · coordinates-with f-module-bindings (07, in flight — Simon; the `isInModuleScope` reader X5 completes)
+spec: framework-architecture.md §5.4 (guidance — the advisory layer) · §5.1/5.3 (engine it reads) + Appendix A — F12 (guidance consumed only through granted capabilities; ranks already-eligible options) · X5 (surface-scoped conversations) · the context-contributor registry on `buildContext()`
+parent: plan.md
+opened: 2026-07-05
+---
+
+# f-guidance — the advisory layer, its capabilities & chat injection
+
+> Feature-level build plan for **`f-guidance`** (12), the fourth layer of the facilitation
+> anatomy (§5.4) and the **head of the remaining critical path**. Parent:
+> [[plan#12 · `f-guidance` — guidance service, capabilities & chat injection|plan.md]].
+> Binding _how_: [[framework-architecture#5.4 Guidance — "what would serve the user best right now"|spec §5.4]]
+>
+> - Appendix A — **F12** (guidance is consumed **only** through granted capabilities and
+>   **ranks already-eligible options** using the freshest slots), **X5** (conversations are
+>   surface-scoped; continuity travels as state, not threads), and the **context-contributor
+>   registry** on `buildContext()`. Sizing follows the parent plan: **task = one PR** (~200–600 lines).
+
+## Intent
+
+The engine (`f-engine`, shipped) computes **what is possible** — `computeAvailability` returns
+the eligible `validMoves` and a reasoned `perNode` verdict; `applyEvent` is the sole writer of
+state. `f-slot-capture` (shipped) captures **what is known** — the freshest slots. Neither ranks,
+narrates, or reaches a live conversation. **f-guidance is the advisory layer that closes that
+gap**: a pure-cored service (`guidance.ts`) that ranks the engine's already-eligible options using
+recency-weighted slot reads (F12 — _"the engine computes what is possible; guidance ranks what is
+wise; agents narrate — reading from the engine, never guessing"_), a family of **built-in
+capabilities** through which — and only through which — agents consume it, and the **per-turn
+context injection** that is the first moment the experience is _felt_ in a conversation (§5.4).
+
+It is deliberately the layer with the **widest brief** in the spec, so the discipline here is to
+ship exactly the four spec-named responsibilities that are _reactive and structural_ — rank,
+expose, inject, scope — and to leave the additive inputs (similarity, proactive nudges) as
+**labelled seams** their owning features fill, not stubs this feature ships.
+
+## What ships here, and what deliberately does not
+
+**In scope.**
+
+- **`guidance.ts` — the service.** (a) The **input assembler** the pure engine deliberately left
+  to this feature (`apply-event.ts` header names f-guidance as its owner): load the published graph
+  - `canRead`-guarded node-states + `canRead`-guarded slot heads + per-module liveness + resolved
+    `now`, and hand them to `computeAvailability` / `applyEvent`. (b) The **recency-weighted ranking**
+    of the engine's `validMoves` (reasons in the payload), and the linger/move `suggestFocus` call. (c)
+    A **progress-synopsis digest** of the event log scoped for narration.
+- **The guidance capability family** — built-in `BaseCapability`s via the shipped framework
+  capability-registration seam: **read** — `get_journey_state`, `get_next_steps`,
+  `get_progress_synopsis`, `suggest_focus`; **write** — `request_transition` (over the engine's sole
+  writer `applyEvent`).
+- **Per-turn context injection** — enrich the framework's existing `'module'` context contributor
+  (already registered, currently a scaffold) so a module-scoped conversation's prompt carries the
+  module's config-relevant context + the user's journey position + selected fresh slots, kept current
+  per turn — through the existing `registerContextContributor` seam (no core edit).
+- **Surface-scoped conversations (X5)** — a framework-owned chat route that opens a module surface
+  with its **bound primary agent**, sets `contextType`/`contextId`, and **populates `scope.moduleSlug`**
+  — the write half that completes f-module-bindings' scope-refusal seam (`isInModuleScope`).
+
+**Out of scope** (owned elsewhere / a later phase, so no dead surface lands early):
+
+- **pgvector "related places" similarity** — the advisory overlay §5.4 mentions is **Phase 6 /
+  `f-overlays` (19)**. The ranking payload ships a **labelled, empty `related` slot** for it (shape
+  the seam; a fake similarity is exactly the demo-data a fork must delete).
+- **Proactive / outbound guidance (F13)** — the scheduled run of the same ranking over active
+  journeys is **Phase 6**. `guidance.ts`'s ranking is built as a **pure, reusable function** so the
+  future `AiWorkflowSchedule` runner calls it unchanged — but no scheduler, nudge dispatch, or hook
+  wiring ships here.
+- **The facilitation agent family + `FacilitationAgentBinding`** — §5.4 names it, but it is
+  **`f-facilitation-agents` (13)**. This feature ships the **capabilities they will be granted**, not
+  the agents or their binding mechanism.
+- **Governance / policy gating on guidance outputs** → `f-policies` (17). **Admin journey dry-run
+  UI** (the pure functions' natural consumer) → `f-map-editor` (14). **Slot transparency UI** →
+  `f-ops-views` (15).
+
+## Reconciliation with current repo reality — the design decisions
+
+Organising principle, carried from [[f-engine]] / [[f-slot-capture]]: **ship nothing a fork has to
+delete**, and **follow the shipped code, not the rev-16 spec sketch**. Every "assumed landed"
+precedent is verified against the tree (§ _Reuse anchors_). Decisions (2026-07-05):
+
+1. **`guidance.ts` lives in `lib/framework/guidance/` and owns the `computeAvailability` /
+   `applyEvent` input assembler — the seam the engine deliberately left open.** The engine is pure:
+   `computeAvailability(input)` / `applyEvent(input)` take a fully-assembled `AvailabilityInput`
+   (`graph`, `nodeStates`, `slots`, `moduleLiveness`, `now`) and there is **no assembler in-tree** —
+   `apply-event.ts`'s header states outright that "the assembler that loads the graph + state + slots
+   - liveness + `canRead`-guards the reads **are f-guidance / f-facilitation-agents**." So t-1 builds
+     `assembleAvailabilityInputs(viewer, journeyKey, scope?)`: `getPublishedGraph(graphSlug)` +
+     `getNodeStates(viewer, …)` (canRead) + `getSlotHeads(userId)` (canRead subject) + a
+     `Map<slug, ModuleLiveness>` built from `isModuleLive(...)` per module + `resolveJourneyNow(userId)`.
+     This assembler is **the reused seam `f-facilitation-agents` (13) inherits** — build it as its final
+     generic shape.
+
+2. **Ranking = recency-weighted slot scoring over the engine's `validMoves`, reasons in the payload —
+   never re-deciding eligibility.** `computeAvailability` already returns the eligible set
+   (`validMoves`) and every locked node's `lockReasons`. Guidance **only ranks the already-eligible**
+   (F12 enforced by construction — it never re-evaluates a gate). The score reads `getSlotHeads`
+   (already `capturedAt desc`, served by `@@index([userId, capturedAt])`): recency (freshness),
+   `confidence` (1–10), low-confidence/recently-changed areas, and declared preferences; the advisory
+   `recommended_by` temporal condition (conditions.ts — advisory-only, never gates) contributes a soft-
+   deadline nudge. Each ranked option carries a **human-readable reason string**. The payload includes
+   a **`related: []`** field, labelled advisory, that **f-overlays (19)** fills with pgvector hits —
+   shipped empty here.
+
+3. **The capability family uses the shipped framework capability-registration seam (f-slot-capture
+   t-1) — one edit point.** New `lib/framework/guidance/capabilities/*.ts` `BaseCapability` subclasses
+   (template: `data-slots/capabilities/get-state.ts`), array-exported from a barrel, registered by a
+   single loop added to `initFramework()` (`lib/framework/index.ts`) alongside the data-slots loop;
+   `syncFramework()` already picks them up (`registerFrameworkCapabilityHandlers` + `syncFrameworkCapabilities`).
+   **PII posture per cap:** any cap whose output embeds slot-derived content (`get_next_steps`,
+   `suggest_focus`, `get_progress_synopsis`) sets `processesPii = true` and overrides `redactProvenance`
+   (mirroring `get_state`); `get_journey_state` (node statuses + positions, no slot values) does not.
+   Each guards `context.userId === null` → structured `no_user_context` error.
+
+4. **`request_transition` is the write cap over `applyEvent` — split from the reads by the write
+   boundary (the f-slot-capture `get_state`/`fill_slot` discipline).** It assembles the same inputs
+   and calls the engine's **sole writer** `applyEvent({ transition: { userId, journeyId, nodeKey, kind:
+'enter' | 'complete' } })`, returning the new node-state on `ok` or **narrating the `Rejection`'s
+   `lockReasons`** on refusal (`unknown_node` / `not_available` / `not_active`). The spec's "may be
+   user-confirmed first" is a **surface/agent UX concern, not the capability's** — the cap is the
+   mechanism; confirm-first is how an agent chooses to call it (out of scope here). This is the second
+   framework write capability (after `fill_slot`).
+
+5. **Context injection enriches the existing `'module'` contributor — single composed block per
+   `contextType`, no core edit.** The seam is shipped: `registerContextContributor(type, loader)` on
+   core `buildContext()`, and the framework already registers `MODULE_CONTEXT_TYPE = 'module'` →
+   `loadModuleContext` (a scaffold today). t-4 makes that loader compose **module config-context +
+   journey position (`getJourney`/`getNodeStates`) + selected fresh slots (`getSlotHeads`)** into **one
+   body string** — the handler builds exactly **one `=== LOCKED CONTEXT ===` block per turn keyed on
+   `contextType`**, so this is composition-within-one-contributor, **not** multi-block fan-in (which
+   _would_ be a core change / upstream ask). Freshness rides the existing 60 s cache +
+   `invalidateContext(contextType, contextId)` the handler already calls after capability execution.
+   Reuses `guidance.ts`'s assembler/synopsis.
+
+6. **Surface-scoped conversations (X5) ride a NEW framework-owned chat route — the core handler and
+   consumer schema stay untouched.** `ChatRequest.scope` (`Record<string,string>`) is threaded
+   end-to-end and read at `streaming-handler.ts:1609` into `CapabilityContext.scope` — but **nothing
+   populates it**, and the **core** `consumerChatRequestSchema` / `app/api/v1/chat/stream/route.ts`
+   carry no scope field. Editing either is a **Sunrise-core edit (forbidden)**. So t-5 adds a
+   **framework-owned** chat route (under an `app/api/v1/.../framework/` segment) that: resolves the
+   module's **bound primary agent** (`ModuleAgentBinding.isPrimary`, via `modules/bindings/queries.ts`),
+   sets `contextType: 'module'` / `contextId: moduleSlug`, and calls `streamChat({ …, scope:
+encodeScope({ moduleSlug }) })` (`encodeScope` from `shared/scope.ts`). The core handler is reused
+   **unchanged** — the line-1609 read is the sanctioned seam.
+
+7. **The scope-refusal reader is already merged as `isInModuleScope` (NOT `assertInModuleScope`) —
+   correct the name, and do NOT unilaterally flip its posture.** f-module-bindings t-2 (#35, merged)
+   shipped `isInModuleScope(context, moduleSlug)` in `modules/capabilities/namespace.ts`, whose interim
+   posture is **absent scope ⇒ ALLOW** (its comment names f-guidance X5 as what will populate the
+   scope). Once t-5 writes `scope.moduleSlug`, that existing predicate **enforces naturally** for module
+   surfaces — no reader work needed. Flipping the posture to **refuse-on-absent** is a one-line edit
+   (`namespace.ts`) but **breaks Simon's t-2 tests** (they assert allow-on-absent) and is a **governance
+   decision, not this feature's** — leave it, and note the option. _(Correct the stale
+   `assertInModuleScope` references in `plan.md` at the same time.)_
+
+8. **Surface conversation resume is a framework-side lookup, not a core uniqueness constraint.**
+   `AiConversation` has `contextType`/`contextId` (+ a non-unique `@@index`) but **no** uniqueness on
+   `(agentId, contextType, contextId)` and **no** find-by-context resume (resume is by explicit
+   `conversationId` only). Adding a unique constraint = a **core migration (forbidden)**. So the
+   framework route does a lightweight lookup — most-recent active `AiConversation` for `(userId,
+agentId, contextType, contextId)` → resume, else let the handler create — keeping "one live surface
+   per (user, module)" a framework-side convention over the unchanged core model.
+
+## Reuse anchors found in-tree
+
+- **The engine** — `computeAvailability(AvailabilityInput) → { perNode, validMoves, firsts }` +
+  `applyEvent(ApplyEventInput) → { ok, nodeState, event } | { ok:false, rejection }`
+  ([`facilitation/engine/availability.ts`](../../lib/framework/facilitation/engine/availability.ts) /
+  [`apply-event.ts`](../../lib/framework/facilitation/engine/apply-event.ts)); `resolveJourneyNow`
+  ([`engine/now.ts`](../../lib/framework/facilitation/engine/now.ts)); `getPublishedGraph`
+  ([`engine/published-graph.ts`](../../lib/framework/facilitation/engine/published-graph.ts)). Import
+  the specific module, not the barrel, in pure tests (B12).
+- **Journey reads (canRead-guarded)** — `getJourney` / `getNodeStates` / `getJourneyTimeline`
+  ([`facilitation/journey/queries.ts`](../../lib/framework/facilitation/journey/queries.ts)); the
+  `JourneyViewer` / `AccessScope` / `canRead` seam
+  ([`shared/access.ts`](../../lib/framework/shared/access.ts)).
+- **Slot reads** — `getSlotHeads` (recency-ordered) + `getSlotGroupsScopes` (group/scope join)
+  ([`data-slots/values.ts`](../../lib/framework/data-slots/values.ts) /
+  [`queries.ts`](../../lib/framework/data-slots/queries.ts)); `SlotValue` fields (`confidence` 1–10,
+  `capturedAt`, `valueJson`, `provenance.{moduleSlug,nodeKey}`).
+- **Module liveness** — `isModuleLive(module, flags, now, entitlement?)`
+  ([`modules/liveness.ts`](../../lib/framework/modules/liveness.ts)).
+- **The capability seam** — `registerFrameworkCapability` / `registerFrameworkCapabilityHandlers` /
+  `syncFrameworkCapabilities` ([`capabilities/registry.ts`](../../lib/framework/capabilities/registry.ts) /
+  [`sync.ts`](../../lib/framework/capabilities/sync.ts)); `BaseCapability` +
+  [`data-slots/capabilities/get-state.ts`](../../lib/framework/data-slots/capabilities/get-state.ts) as
+  the read-cap template; `CapabilityContext` (`userId` nullable, `agentId`, `conversationId`, `scope`).
+- **The context seam** — `registerContextContributor` / `invalidateContext`
+  ([`orchestration/chat/context-builder.ts`](../../lib/orchestration/chat/context-builder.ts));
+  `MODULE_CONTEXT_TYPE` + `loadModuleContext`
+  ([`framework/modules/context.ts`](../../lib/framework/modules/context.ts)); registered in
+  `initFramework()` ([`lib/framework/index.ts`](../../lib/framework/index.ts)).
+- **Scope + bindings** — `encodeScope` / `decodeScope` / `SCOPE_KEYS`
+  ([`shared/scope.ts`](../../lib/framework/shared/scope.ts)); `isInModuleScope`
+  ([`modules/capabilities/namespace.ts`](../../lib/framework/modules/capabilities/namespace.ts));
+  `ModuleAgentBinding.isPrimary` + `modules/bindings/queries.ts`; the core `streamChat` handler +
+  `ChatRequest.scope` seam ([`orchestration/chat/streaming-handler.ts`](../../lib/orchestration/chat/streaming-handler.ts):1609).
+
+## Test strategy (vitest — no live DB) — stated up front (B9)
+
+vitest runs on `happy-dom` with **no live DB**; every DB/engine call is mocked:
+
+- **`guidance.ts` ranking core** — a **pure** function over `(validMoves, perNode, slotHeads, now)`;
+  unit-test recency/confidence weighting, reason strings, the empty `related` slot, deterministic
+  ordering, and the low-confidence / recently-changed / declared-preference signals. Import the
+  specific module (B12).
+- **The assembler** — mock `getPublishedGraph` / `getNodeStates` / `getSlotHeads` / `isModuleLive` /
+  `resolveJourneyNow`; assert it `canRead`-guards (a denied read → empty/guarded), builds the liveness
+  map, and passes a well-formed `AvailabilityInput`.
+- **The capabilities** — mock `guidance.ts` + journey queries + `applyEvent`; unit-test each
+  `execute()`: `no_user_context` guard, the success payload shape, `processesPii` + `redactProvenance`
+  masking slot content where applicable, and `request_transition` narrating an `applyEvent` `Rejection`
+  without a DB write.
+- **The context contributor** — mock the assembler/synopsis; assert `loadModuleContext` composes
+  **one** body from module + journey + slots, and degrades to the scaffold string on a failing read.
+- **Surface route + X5** — mock `streamChat` + the binding query; assert the route resolves the
+  primary agent, sets `contextType`/`contextId`, and calls `streamChat` with `scope.moduleSlug`
+  populated (the write that makes `isInModuleScope` enforce). Plus the **boundary test**: stripping the
+  framework leaves `buildContext()` with one fewer contributor (proves the seam stayed clean).
+
+## Tasks (promoted)
+
+| ID  | Task                                                                                                                                                                                                                                                                                                                                 | Files                                                                                                                                                      | Deps | Status  | PR  |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ------- | --- |
+| t-1 | **`guidance.ts` — assembler + ranking + synopsis (anchor).** `assembleAvailabilityInputs` (the seam the engine left open; canRead-guarded) + the pure recency-weighted ranking of `validMoves` (reasons + empty advisory `related` slot) + the linger/move focus call + the event-log progress-synopsis digest. No capabilities yet. | `lib/framework/guidance/guidance.ts`, `lib/framework/guidance/ranking.ts`, `tests/…`                                                                       | —    | backlog | —   |
+| t-2 | **The guidance read capability family.** `get_journey_state` · `get_next_steps` · `get_progress_synopsis` · `suggest_focus` — built-in `BaseCapability`s over `guidance.ts` + journey queries; `processesPii` where slot content surfaces; registered via the framework capability seam.                                             | `lib/framework/guidance/capabilities/{get-journey-state,get-next-steps,get-progress-synopsis,suggest-focus,index}.ts`, `lib/framework/index.ts`, `tests/…` | t-1  | backlog | —   |
+| t-3 | **`request_transition` — the write capability.** Over the engine's sole writer `applyEvent` (enter/complete); narrates the `Rejection` on refusal; no DB write on a refused move. Split from t-2 by the read/write boundary.                                                                                                         | `lib/framework/guidance/capabilities/request-transition.ts`, `tests/…`                                                                                     | t-1  | backlog | —   |
+| t-4 | **Per-turn context injection + boundary test.** Enrich the `'module'` contributor to compose module config + journey position + fresh slots into one per-turn block (existing `registerContextContributor` seam, no core edit); the framework-strip boundary test on `buildContext()`.                                               | `lib/framework/modules/context.ts` (or a new `guidance/context.ts`), `lib/framework/index.ts`, `tests/…`                                                   | t-1  | backlog | —   |
+| t-5 | **Surface-scoped conversations (X5).** A framework-owned chat route that opens a module surface with its bound primary agent, sets `contextType`/`contextId`, resolves resume, and **populates `scope.moduleSlug`** (`encodeScope`) — completing f-module-bindings' `isInModuleScope` enforcement. Coordinate with Simon (07).       | `app/api/v1/.../framework/**/route.ts`, `lib/framework/guidance/surface.ts`, `tests/…`                                                                     | t-4  | backlog | —   |
+
+**Sizing (B1 self-check): board's 5 indicative → 5 promoted, with one fold + one split.** The board's
+t-5 "boundary test" is **commit-sized** → folded into **t-4** (the contributor task it verifies). The
+board's t-2 "capability family (5 caps)" is **over the one-PR target at ~5×(cap+tests)** → **split by
+the read/write boundary** into **t-2** (4 read caps) and **t-3** (`request_transition`, the write cap
+over the engine's sole writer) — the same discipline that split f-slot-capture's `get_state`/`fill_slot`.
+Net still 5 PRs. **t-1 is the anchor** (the assembler is the reused seam f-facilitation-agents inherits;
+build it as its final shape). **t-5 depends on t-4** (a surface needs the enriched contributor to inject
+context) and is the **coordination point with Simon's f-module-bindings** — sequence it last.
+
+## Open questions — for Ultraplan refinement
+
+1. **Ranking signal weights (decision 2).** The recency/confidence/low-confidence/declared-preference
+   mix is under-specified in the spec. Ship a **transparent, documented default weighting** (reasons in
+   the payload make it auditable) and flag it "owner to tune" — or does f-guidance need a
+   configurable/pluggable ranking policy now (vs. `f-policies` 17)?
+2. **`get_progress_synopsis` — deterministic digest vs. LLM narration.** Is the synopsis a
+   **structured, deterministic digest** of the event log (pure, testable — preferred, keeps guidance
+   LLM-free), or does it call an LLM to prose-narrate (like f-slot-capture t-3b's extraction)? Default:
+   deterministic digest; the agent narrates from it.
+3. **Interim scope posture (decision 7).** Confirm we **leave `isInModuleScope` allow-on-absent** (X5
+   populates scope; a global refuse-on-absent flip is `f-policies`' call and would break Simon's tests)
+   — or is enforcing-by-default wanted now, coordinated with Simon?
+4. **Surface route shape (decision 6/8).** One generic `POST …/framework/surface/{moduleSlug}/chat`
+   that proxies to `streamChat`, or a thinner "open/resolve surface → returns `{conversationId, agentId,
+scope}`" that the existing consumer stream route then consumes? The former keeps the scope write
+   entirely framework-side; the latter is lighter but risks needing the core route to forward scope.
+5. **`request_transition` confirm-first (decision 4).** Confirmed out of scope (surface/agent UX) — or
+   should the capability expose a `dryRun`/preview mode returning the would-be verdict without writing?
+
+## Upstream-asks candidates (fork-first — ledger at build)
+
+- **Consumer chat scope carrier.** X5 shadows the consumer chat route only because
+  `consumerChatRequestSchema` / `app/api/v1/chat/stream/route.ts` can't carry `scope` (core-owned).
+  Propose Sunrise let the consumer schema accept a validated opaque `scope` map, after which the
+  framework route needn't shadow the core one. Ledger against the same seam as f-module-bindings' scope
+  work.
+- **Surface conversation resume by `(contextType, contextId)`.** The framework-side most-recent-active
+  lookup (decision 8) exists only because core resume is `conversationId`-only. Propose a core
+  find-or-resume-by-context option so surfaces needn't reimplement it.
