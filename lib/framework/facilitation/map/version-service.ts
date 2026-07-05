@@ -22,6 +22,7 @@ import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { mapDefinitionSchema } from '@/lib/framework/facilitation/map/schema';
 import type { MapDefinition } from '@/lib/framework/facilitation/map/schema';
 import { validateMapFormat } from '@/lib/framework/facilitation/map/validate';
+import { validateGraphInvariants } from '@/lib/framework/facilitation/engine/invariants';
 
 type Tx = Prisma.TransactionClient;
 
@@ -31,14 +32,16 @@ const ENTITY_TYPE = 'facilitation_graph';
 
 /**
  * The publish-time validation chain: Zod shape → within-snapshot referential
- * integrity. Throws `ValidationError` with field-keyed messages on the first
- * failing stage. **This is the seam `f-engine` extends** — it appends a
- * graph-invariant stage (prerequisite cycles, unreachable-required) after the
- * format checks. Kept synchronous while every stage is pure; when f-engine adds a
- * stage that needs I/O (e.g. confirming a referenced module exists) this becomes
- * `async` and the three internal callers below gain an `await`. That ripple stays
- * internal: the public service API (`createGraph` / `publishDraft` / `rollback`,
- * all already async) is unchanged — the stability the routes and f-engine rely on.
+ * integrity → graph invariants. Throws `ValidationError` with field-keyed messages
+ * on the first failing stage. **`f-engine` filled the seam here** (t-4):
+ * `validateGraphInvariants` appends the conditional graph-invariant stage
+ * (prerequisite cycles, unreachable nodes) after the static format checks — the
+ * checks that need typed-edge traversal, which only the engine can decide (map/
+ * validate.ts owns the static ones). Still synchronous: the blocking invariants are
+ * pure. The live-key-removal *warning* (`checkLiveKeyImpact`) is deliberately NOT in
+ * this throwing chain — it is non-blocking and needs journey-state I/O, so the
+ * publish surface calls it separately; this keeps the public service API
+ * (`createGraph` / `publishDraft` / `rollback`) unchanged.
  */
 export function validatePublishableMap(definition: unknown): MapDefinition {
   const parsed = mapDefinitionSchema.safeParse(definition);
@@ -51,6 +54,12 @@ export function validatePublishableMap(definition: unknown): MapDefinition {
   if (!format.ok) {
     throw new ValidationError('Map definition has referential errors', {
       definition: format.errors.map((e) => e.message),
+    });
+  }
+  const invariants = validateGraphInvariants(parsed.data);
+  if (!invariants.ok) {
+    throw new ValidationError('Map definition violates a graph invariant', {
+      definition: invariants.errors.map((e) => e.message),
     });
   }
   return parsed.data;

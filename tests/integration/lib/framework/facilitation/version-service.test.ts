@@ -204,6 +204,28 @@ describe('validatePublishableMap', () => {
       expect((err as ValidationError).message).toMatch(/referential/i);
     }
   });
+
+  it('throws ValidationError on a graph-invariant violation (f-engine t-4 stage)', () => {
+    // A prerequisite cycle passes schema + referential checks but fails the appended
+    // graph-invariant stage — the seam f-engine filled.
+    const cyclic = mapDefinitionSchema.parse({
+      nodes: [
+        { key: 'a', type: 'milestone' },
+        { key: 'b', type: 'milestone' },
+      ],
+      edges: [
+        { from: 'a', to: 'b', type: 'prerequisite' },
+        { from: 'b', to: 'a', type: 'prerequisite' },
+      ],
+    });
+    try {
+      validatePublishableMap(cyclic);
+      throw new Error('expected throw');
+    } catch (err) {
+      expect(err).toBeInstanceOf(ValidationError);
+      expect((err as ValidationError).message).toMatch(/invariant/i);
+    }
+  });
 });
 
 describe('createGraph', () => {
