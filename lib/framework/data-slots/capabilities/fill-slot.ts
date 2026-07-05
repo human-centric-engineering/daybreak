@@ -33,7 +33,13 @@ import { redactedString } from '@/lib/security/redact';
 import { appendSlotValue } from '@/lib/framework/data-slots/values';
 import type { AppendSlotValueInput } from '@/lib/framework/data-slots/values';
 import { getSlotDefinition } from '@/lib/framework/data-slots/queries';
-import { SLOT_SOURCE_TYPE } from '@/lib/framework/data-slots/vocabulary';
+import {
+  SLOT_SOURCE_TYPE,
+  SLOT_DATA_TYPE,
+  SLOT_SENSITIVITY,
+} from '@/lib/framework/data-slots/vocabulary';
+import { validateTypedValue } from '@/lib/framework/data-slots/capabilities/typed-value';
+import { slotMaskingPolicy } from '@/lib/framework/data-slots/capabilities/masking';
 import { decodeScope } from '@/lib/framework/shared/scope';
 
 const fillSlotSchema = z.object({
@@ -47,6 +53,9 @@ const fillSlotSchema = z.object({
   reasoningNote: z.string().min(1),
   /** How the value was captured (classifier — X1 free string, validated to the vocab). */
   sourceType: z.enum(SLOT_SOURCE_TYPE),
+  /** Optional typed form of the value, matching the slot's `dataType` (number/boolean/
+   *  date/json). Validated locally; ignored if it doesn't match. Omit for text slots. */
+  valueJson: z.unknown().optional(),
 });
 type FillSlotArgs = z.infer<typeof fillSlotSchema>;
 
@@ -91,6 +100,10 @@ export class FillSlotCapability extends BaseCapability<FillSlotArgs, FillSlotDat
           description: 'How the value was captured.',
           enum: Object.values(SLOT_SOURCE_TYPE),
         },
+        valueJson: {
+          description:
+            'Optional typed form of the value (a number, boolean, ISO date string, or object) for slots that gate on a typed value. Omit for plain text.',
+        },
       },
       required: ['slotSlug', 'value', 'confidence', 'reasoningNote', 'sourceType'],
     },
@@ -101,24 +114,30 @@ export class FillSlotCapability extends BaseCapability<FillSlotArgs, FillSlotDat
   /**
    * The captured `value` (+ the `reasoningNote`, which quotes it) is user-derived PII, so
    * both are masked in the durable audit row; `confidence`/`sourceType` stay so an auditor
-   * sees the shape of what was written. A **targeted** slug is a vetted `SlotDefinition`
-   * identifier — safe to keep; a **minted** slug is model-authored free text that can
-   * itself encode PII (e.g. `recently_divorced`), so it is masked too, in both the args
-   * and the result preview. The LLM still sees the un-redacted result.
+   * sees the shape of what was written. The slug is kept ONLY on a **confirmed targeted
+   * success** (a vetted `SlotDefinition` identifier — safe): a **minted** slug is
+   * model-authored free text that can itself encode PII (e.g. `recently_divorced`), so it
+   * is masked. Crucially, we mask on **every non-targeted-success** result too — including
+   * a thrown DB error, which the streaming handler reports as a generic `execution_error`
+   * where we can no longer tell a minted slug from a targeted one — because keeping an
+   * unconfirmed slug would leak a minted one into the durable trace. Losing the (safe)
+   * targeted slug on a `slot_inactive` refusal is the cheap price. The LLM still sees the
+   * un-redacted result.
    */
   redactProvenance(
     args: FillSlotArgs,
     result: CapabilityResult<FillSlotData>
   ): { args: unknown; resultPreview: string } {
-    const minted = result.success && result.data?.minted === true;
+    const slugIsVettedTargeted = result.success && result.data?.minted === false;
     const safeArgs = {
       ...args,
       value: redactedString('slot-value'),
       reasoningNote: redactedString('slot-reasoning'),
-      ...(minted ? { slotSlug: redactedString('minted-slot') } : {}),
+      ...(args.valueJson !== undefined ? { valueJson: redactedString('slot-value-json') } : {}),
+      ...(slugIsVettedTargeted ? {} : { slotSlug: redactedString('minted-slot') }),
     };
     const safeResult =
-      minted && result.success && result.data
+      !slugIsVettedTargeted && result.success && result.data
         ? { ...result, data: { ...result.data, slotSlug: redactedString('minted-slot') } }
         : result;
     return { args: safeArgs, resultPreview: JSON.stringify(safeResult) };
@@ -153,11 +172,26 @@ export class FillSlotCapability extends BaseCapability<FillSlotArgs, FillSlotDat
       logger.info('fill_slot: minted an open-mode slot value', { agentId: context.agentId });
     }
 
+    // The slot's typing + sensitivity come from its definition (a mint has neither, so
+    // it defaults to a text/standard slot). The typed gate value: `text` ⇒ the value
+    // itself; a typed slot ⇒ the agent's `valueJson` if it validates, else null (a t-3b
+    // prose→typed extraction fills that gap). Then sensitivity masking runs BEFORE the
+    // append, so raw special-category prose never lands at rest.
+    const dataType = definition?.dataType ?? SLOT_DATA_TYPE.text;
+    const sensitivity = definition?.sensitivity ?? SLOT_SENSITIVITY.standard;
+    const typedValue =
+      dataType === SLOT_DATA_TYPE.text ? args.value : validateTypedValue(dataType, args.valueJson);
+    const stored = slotMaskingPolicy(sensitivity, dataType, {
+      value: args.value,
+      valueJson: typedValue,
+    });
+
     const scope = decodeScope(context.scope);
     const input: AppendSlotValueInput = {
       userId: context.userId,
       slotSlug: args.slotSlug,
-      value: args.value,
+      value: stored.value,
+      ...(stored.valueJson !== null ? { valueJson: stored.valueJson } : {}),
       confidence: args.confidence,
       sourceType: args.sourceType,
       reasoningNote: args.reasoningNote,

@@ -62,6 +62,7 @@ describe('execute', () => {
       userId: 'user-1',
       slotSlug: 'primary_goal',
       value: 'run a marathon',
+      valueJson: 'run a marathon', // a text slot's typed form IS the value (so gates compare it)
       confidence: 8,
       sourceType: 'direct',
       reasoningNote: 'the user said so directly',
@@ -113,6 +114,40 @@ describe('execute', () => {
   });
 });
 
+describe('typed value + sensitivity masking (t-3)', () => {
+  const appendArg = () => vi.mocked(appendSlotValue).mock.calls[0][0];
+
+  it('stores an agent-supplied typed value that matches the slot dataType', async () => {
+    vi.mocked(getSlotDefinition).mockResolvedValue(definition({ dataType: 'number' }));
+    await cap.execute(args({ value: 'eight out of ten', valueJson: 8 }), ctx());
+    expect(appendArg().valueJson).toBe(8);
+  });
+
+  it('drops a typed value that does not match the dataType (no valueJson stored)', async () => {
+    vi.mocked(getSlotDefinition).mockResolvedValue(definition({ dataType: 'number' }));
+    await cap.execute(args({ valueJson: 'not a number' }), ctx());
+    expect(appendArg()).not.toHaveProperty('valueJson');
+  });
+
+  it('special_category text: masks the value and stores no typed prose (data-minimisation)', async () => {
+    vi.mocked(getSlotDefinition).mockResolvedValue(
+      definition({ dataType: 'text', sensitivity: 'special_category' })
+    );
+    await cap.execute(args({ value: 'discloses a health condition' }), ctx());
+    expect(appendArg().value).not.toContain('health');
+    expect(appendArg()).not.toHaveProperty('valueJson');
+  });
+
+  it('special_category typed: masks the prose but keeps the typed gate value', async () => {
+    vi.mocked(getSlotDefinition).mockResolvedValue(
+      definition({ dataType: 'number', sensitivity: 'special_category' })
+    );
+    await cap.execute(args({ value: 'a sensitive score of 3', valueJson: 3 }), ctx());
+    expect(appendArg().value).not.toContain('sensitive');
+    expect(appendArg().valueJson).toBe(3);
+  });
+});
+
 describe('validation + PII', () => {
   it('rejects an unknown sourceType', () => {
     expect(() => cap.validate(args({ sourceType: 'made_up' }))).toThrow();
@@ -139,5 +174,16 @@ describe('validation + PII', () => {
     const safe = redacted.args as { slotSlug: string };
     expect(safe.slotSlug).not.toContain('divorced');
     expect(redacted.resultPreview).not.toContain('divorced');
+  });
+
+  it('masks the slug on a FAILED result (a thrown write cannot confirm the slug was vetted)', () => {
+    // The streaming handler reports a thrown execute() as a generic execution_error, with
+    // NO minted flag — a minted slug decided before the DB error would otherwise leak.
+    const redacted = cap.redactProvenance(args({ slotSlug: 'recently_divorced' }), {
+      success: false,
+      error: { code: 'execution_error', message: 'db down' },
+    });
+    const safe = redacted.args as { slotSlug: string };
+    expect(safe.slotSlug).not.toContain('divorced');
   });
 });
