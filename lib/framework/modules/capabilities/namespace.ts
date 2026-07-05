@@ -122,6 +122,15 @@ export function namespaceModuleCapability(
         `to a provider-legal tool name`
     );
   }
+  // LOAD-BEARING — do not remove as "redundant with dispatcher.register()". The wrapper
+  // below always defines its own `redactProvenance` (it delegates), so the dispatcher's
+  // own PII guard (`isRedactorOverridden`, an own-property check on the instance's
+  // prototype) passes UNCONDITIONALLY for every wrapped module capability. This
+  // re-assertion against the *inner* capability is therefore the ONLY thing preventing a
+  // `processesPii` module tool from silently persisting un-redacted PII to durable audit
+  // rows. The clean fix is a core `register(cap, { slug, guard })` seam so no wrapper is
+  // needed — Sunrise #398 / `.context/framework/upstream-asks.md`; delete this only when
+  // delegating to that seam.
   if (inner.processesPii && inner.redactProvenance === BaseCapability.prototype.redactProvenance) {
     throw new Error(
       `Module "${moduleSlug}" capability "${inner.slug}" declares processesPii=true but ` +
