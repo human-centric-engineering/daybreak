@@ -16,14 +16,7 @@ import {
 import type { MapCondition } from '@/lib/framework/facilitation/map/schema';
 
 function state(status: string, extra: Partial<NodeStateView> = {}): NodeStateView {
-  return {
-    status,
-    timesCompleted: 0,
-    firstEnteredAt: null,
-    lastActiveAt: null,
-    completedAt: null,
-    ...extra,
-  };
+  return { status, firstEnteredAt: null, lastActiveAt: null, ...extra };
 }
 
 function ctx(over: Partial<ConditionContext> = {}): ConditionContext {

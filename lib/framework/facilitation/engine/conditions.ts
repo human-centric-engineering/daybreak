@@ -23,14 +23,14 @@ import type { MapCondition } from '@/lib/framework/facilitation/map/schema';
 import type { NodeKey } from '@/lib/framework/shared/scope';
 import { NODE_STATE_STATUS } from '@/lib/framework/facilitation/journey/vocabulary';
 
-/** The node-state fields the evaluator (and availability) read — a `UserNodeState`
- *  row structurally satisfies this (the `ModuleLivenessFields` pattern). */
+/** The node-state fields the evaluator + availability actually read — a
+ *  `UserNodeState` row structurally satisfies this (the `ModuleLivenessFields`
+ *  pattern: only the fields that drive a verdict). `status` gates completion/reached;
+ *  `lastActiveAt` serves the cooldown; `firstEnteredAt` serves first-arrival. */
 export interface NodeStateView {
   status: string;
-  timesCompleted: number;
   firstEnteredAt: Date | null;
   lastActiveAt: Date | null;
-  completedAt: Date | null;
 }
 
 /** The current head of one slot the evaluator reads — a `SlotValue` row structurally

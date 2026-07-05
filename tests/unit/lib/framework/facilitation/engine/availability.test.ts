@@ -31,15 +31,7 @@ function nstate(
   status: string,
   extra: Partial<JourneyNodeState> = {}
 ): JourneyNodeState {
-  return {
-    nodeKey,
-    status,
-    timesCompleted: 0,
-    firstEnteredAt: null,
-    lastActiveAt: null,
-    completedAt: null,
-    ...extra,
-  };
+  return { nodeKey, status, firstEnteredAt: null, lastActiveAt: null, ...extra };
 }
 
 const NOW = new Date('2026-07-05T12:00:00Z');
@@ -54,7 +46,7 @@ function run(
     graph: inMemoryGraphStore({ nodes, edges }),
     nodeStates: states,
     slots: opts.slots ?? [],
-    moduleLiveness: opts.moduleLiveness ?? (() => undefined),
+    moduleLiveness: opts.moduleLiveness ?? new Map(),
     now: opts.now ?? NOW,
   });
 }
@@ -138,6 +130,36 @@ describe('edge conditions (F4)', () => {
     const later = run(nodes, edges, states, { now: new Date('2026-07-11T00:00:00Z') });
     expect(later.perNode.get('b')?.available).toBe(true);
   });
+
+  it('wires slot heads into a slot-family edge condition', () => {
+    const gate: MapCondition = { family: 'slot', slug: 'readiness', op: 'gte', value: 7 };
+    const nodes = [node('a'), node('b')];
+    const edges = [edge('a', 'b', 'prerequisite', gate)];
+    const states = [nstate('a', 'completed')];
+
+    const noSlot = run(nodes, edges, states);
+    expect(noSlot.perNode.get('b')?.available).toBe(false);
+    expect(noSlot.perNode.get('b')?.lockReasons).toEqual([
+      { kind: 'condition', from: 'a', edgeType: 'prerequisite', condition: gate },
+    ]);
+
+    const withSlot = run(nodes, edges, states, {
+      slots: [{ slotSlug: 'readiness', valueJson: 8, confidence: 9 }],
+    });
+    expect(withSlot.perNode.get('b')?.available).toBe(true);
+  });
+
+  it('wires node state into a state-family edge condition', () => {
+    const gate: MapCondition = { family: 'state', milestone: 'm', reached: true };
+    const nodes = [node('a'), node('m'), node('b')];
+    const edges = [edge('a', 'b', 'prerequisite', gate)];
+
+    const milestoneOpen = run(nodes, edges, [nstate('a', 'completed')]);
+    expect(milestoneOpen.perNode.get('b')?.available).toBe(false);
+
+    const milestoneDone = run(nodes, edges, [nstate('a', 'completed'), nstate('m', 'completed')]);
+    expect(milestoneDone.perNode.get('b')?.available).toBe(true);
+  });
 });
 
 describe('module liveness intersection (A5)', () => {
@@ -145,20 +167,21 @@ describe('module liveness intersection (A5)', () => {
 
   it('locks a journey-open node whose module is not live', () => {
     const dead: ModuleLiveness = { live: false, reason: 'flag' };
-    const r = run([moduleNode], [], [], { moduleLiveness: () => dead });
+    const r = run([moduleNode], [], [], { moduleLiveness: new Map([['mod', dead]]) });
     expect(r.perNode.get('m')?.available).toBe(false);
     expect(r.perNode.get('m')?.lockReasons).toEqual([
       { kind: 'module', moduleSlug: 'mod', reason: 'flag' },
     ]);
   });
 
-  it('leaves it open when the module is live (or unknown to the lookup)', () => {
+  it('leaves it open when the module is live (or absent from the map)', () => {
+    const live = new Map<string, ModuleLiveness>([['mod', { live: true }]]);
+    expect(run([moduleNode], [], [], { moduleLiveness: live }).perNode.get('m')?.available).toBe(
+      true
+    );
+    // Absent from the map ⇒ treated as live (no module gate).
     expect(
-      run([moduleNode], [], [], { moduleLiveness: () => ({ live: true }) }).perNode.get('m')
-        ?.available
-    ).toBe(true);
-    expect(
-      run([moduleNode], [], [], { moduleLiveness: () => undefined }).perNode.get('m')?.available
+      run([moduleNode], [], [], { moduleLiveness: new Map() }).perNode.get('m')?.available
     ).toBe(true);
   });
 });
@@ -183,7 +206,7 @@ describe('explainability — every failing gate is listed', () => {
     const nodes = [node('p'), node('m', { type: 'module', moduleSlug: 'mod' })];
     const edges = [edge('p', 'm', 'prerequisite')];
     const dead: ModuleLiveness = { live: false, reason: 'status' };
-    const r = run(nodes, edges, [], { moduleLiveness: () => dead });
+    const r = run(nodes, edges, [], { moduleLiveness: new Map([['mod', dead]]) });
     expect(r.perNode.get('m')?.lockReasons).toEqual([
       { kind: 'module', moduleSlug: 'mod', reason: 'status' },
       { kind: 'prerequisite', from: 'p' },

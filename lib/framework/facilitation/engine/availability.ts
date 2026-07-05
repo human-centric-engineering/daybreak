@@ -21,7 +21,10 @@
  * - `unlocks` — an OR gate: if any incoming `unlocks` edges exist, **at least one**
  *   must be satisfied.
  * - `tangent` — an always-open side path: a satisfied incoming `tangent` edge opens
- *   the node **regardless** of prerequisite/unlock gates.
+ *   the node **regardless** of prerequisite/unlock gates. It is purely *additive* —
+ *   an *unsatisfied* tangent never locks, so a node whose only inbound edge is a
+ *   tangent is open from the start (you cannot gate a node behind a tangent alone;
+ *   use a prerequisite/unlock for that). Owner to confirm this reading.
  * - `related_to` — advisory only; **never** consulted for eligibility.
  * - An edge `S → N` is *satisfied* when its condition holds (F4) **and** its source is
  *   `completed` (for prerequisite/unlocks) or merely reached (for the always-open
@@ -56,9 +59,10 @@ export interface AvailabilityInput {
   nodeStates: readonly JourneyNodeState[];
   /** The user's current slot heads (from `getSlotHeads`, `canRead`-guarded). */
   slots: readonly SlotReadingView[];
-  /** Module liveness by module slug (built from `isModuleLive`, A5). A node whose
-   *  module is absent from the lookup is treated as live (no module gate). */
-  moduleLiveness: (moduleSlug: string) => ModuleLiveness | undefined;
+  /** Module liveness by module slug (each built from `isModuleLive`, A5). A module
+   *  absent from the map is treated as live (no module gate) — the `Map.get` →
+   *  `undefined` default. A plain map, matching the `nodeStates`/`slots` inputs. */
+  moduleLiveness: ReadonlyMap<string, ModuleLiveness>;
   /** The resolved instant (from `resolveJourneyNow`). */
   now: Date;
 }
@@ -88,28 +92,37 @@ export interface AvailabilityResult {
   firsts: readonly NodeKey[];
 }
 
+/** The loop-invariant inputs `verdictFor` reads — bundled so the per-node call
+ *  doesn't thread five loose positional values (two same-typed maps included). */
+interface EvalContext {
+  graph: GraphStore;
+  stateByKey: ReadonlyMap<NodeKey, JourneyNodeState>;
+  slotBySlug: ReadonlyMap<string, SlotReadingView>;
+  moduleLiveness: ReadonlyMap<string, ModuleLiveness>;
+  now: Date;
+}
+
 /** Compute the explainable availability picture. Pure. */
 export function computeAvailability(input: AvailabilityInput): AvailabilityResult {
-  const { graph, now } = input;
-  const stateByKey = new Map<NodeKey, JourneyNodeState>(
-    input.nodeStates.map((s) => [s.nodeKey, s])
-  );
-  const slotBySlug = new Map<string, SlotReadingView>(input.slots.map((s) => [s.slotSlug, s]));
+  const ec: EvalContext = {
+    graph: input.graph,
+    stateByKey: new Map(input.nodeStates.map((s) => [s.nodeKey, s])),
+    slotBySlug: new Map(input.slots.map((s) => [s.slotSlug, s])),
+    moduleLiveness: input.moduleLiveness,
+    now: input.now,
+  };
 
   const perNode = new Map<NodeKey, NodeVerdict>();
-  for (const node of graph.nodes()) {
-    perNode.set(
-      node.key,
-      verdictFor(node, graph, stateByKey, slotBySlug, input.moduleLiveness, now)
-    );
+  for (const node of ec.graph.nodes()) {
+    perNode.set(node.key, verdictFor(node, ec));
   }
 
   const validMoves: NodeKey[] = [];
   const firsts: NodeKey[] = [];
-  for (const node of graph.nodes()) {
+  for (const node of ec.graph.nodes()) {
     if (!perNode.get(node.key)?.available) continue;
     validMoves.push(node.key);
-    if (node.onFirstArrival !== undefined && stateByKey.get(node.key)?.firstEnteredAt == null) {
+    if (node.onFirstArrival !== undefined && ec.stateByKey.get(node.key)?.firstEnteredAt == null) {
       firsts.push(node.key);
     }
   }
@@ -117,38 +130,31 @@ export function computeAvailability(input: AvailabilityInput): AvailabilityResul
   return { perNode, validMoves, firsts };
 }
 
-function verdictFor(
-  node: MapNode,
-  graph: GraphStore,
-  stateByKey: Map<NodeKey, JourneyNodeState>,
-  slotBySlug: Map<string, SlotReadingView>,
-  moduleLiveness: AvailabilityInput['moduleLiveness'],
-  now: Date
-): NodeVerdict {
+function verdictFor(node: MapNode, ec: EvalContext): NodeVerdict {
   const reasons: LockReason[] = [];
   const ctx: ConditionContext = {
-    nodeState: (key) => stateByKey.get(key),
-    slot: (slug) => slotBySlug.get(slug),
-    now,
-    target: stateByKey.get(node.key),
+    nodeState: (key) => ec.stateByKey.get(key),
+    slot: (slug) => ec.slotBySlug.get(slug),
+    now: ec.now,
+    target: ec.stateByKey.get(node.key),
   };
-  const satisfied = (edge: MapEdge): boolean => edgeSatisfied(edge, stateByKey, ctx);
+  const satisfied = (edge: MapEdge): boolean => edgeSatisfied(edge, ec.stateByKey, ctx);
 
-  // 1. Module liveness (A5) — a module node's module must be live.
+  // 1. Module liveness (A5) — a module node's module must be live (absent ⇒ live).
   if (node.type === 'module' && node.moduleSlug !== undefined) {
-    const liveness = moduleLiveness(node.moduleSlug);
+    const liveness = ec.moduleLiveness.get(node.moduleSlug);
     if (liveness !== undefined && !liveness.live) {
       reasons.push({ kind: 'module', moduleSlug: node.moduleSlug, reason: liveness.reason });
     }
   }
 
   // 2. Once-close (F6) — a completed one-off node is closed.
-  const state = stateByKey.get(node.key);
-  const closedOnce = node.completionMode === 'once' && isCompleted(state);
-  if (closedOnce) reasons.push({ kind: 'completed' });
+  if (node.completionMode === 'once' && isCompleted(ec.stateByKey.get(node.key))) {
+    reasons.push({ kind: 'completed' });
+  }
 
   // 3. Structural gate over incoming eligibility edges (F3; related_to excluded).
-  const incoming = graph
+  const incoming = ec.graph
     .neighbours(node.key, { direction: 'in' })
     .filter((e) => e.type !== 'related_to');
   const prerequisites = incoming.filter((e) => e.type === 'prerequisite');
@@ -157,14 +163,14 @@ function verdictFor(
 
   let structurallyOpen: boolean;
   if (tangents.some(satisfied)) {
-    structurallyOpen = true; // an always-open side path bypasses the gates.
+    structurallyOpen = true; // a satisfied always-open side path bypasses the gates.
   } else {
     const prerequisitesMet = prerequisites.every(satisfied);
     const unlockMet = unlocks.length === 0 || unlocks.some(satisfied);
     structurallyOpen = prerequisitesMet && unlockMet;
     if (!prerequisitesMet) {
       for (const edge of prerequisites) {
-        if (!satisfied(edge)) reasons.push(unsatisfiedReason(edge, stateByKey));
+        if (!satisfied(edge)) reasons.push(unsatisfiedReason(edge, ec.stateByKey));
       }
     }
     if (!unlockMet) {
@@ -172,6 +178,10 @@ function verdictFor(
     }
   }
 
+  // A locked structural gate always pushed a reason above (the `locked ⇒ ≥1 reason`
+  // invariant), so `reasons.length === 0` implies structurally open; the explicit
+  // `&& structurallyOpen` is a deliberate backstop that keeps a hypothetical
+  // reasonless structural lock closed (fail-safe), not redundant belt-and-braces.
   const available = reasons.length === 0 && structurallyOpen;
   return { available, lockReasons: reasons };
 }
@@ -181,7 +191,7 @@ function verdictFor(
  *  source need only be reached (its "always open from here"). */
 function edgeSatisfied(
   edge: MapEdge,
-  stateByKey: Map<NodeKey, JourneyNodeState>,
+  stateByKey: ReadonlyMap<NodeKey, JourneyNodeState>,
   ctx: ConditionContext
 ): boolean {
   const source = stateByKey.get(edge.from);
@@ -192,7 +202,10 @@ function edgeSatisfied(
 
 /** The reason a prerequisite edge is unsatisfied: an incomplete source, else the
  *  unmet condition (the only other way `edgeSatisfied` can fail). */
-function unsatisfiedReason(edge: MapEdge, stateByKey: Map<NodeKey, JourneyNodeState>): LockReason {
+function unsatisfiedReason(
+  edge: MapEdge,
+  stateByKey: ReadonlyMap<NodeKey, JourneyNodeState>
+): LockReason {
   if (!isCompleted(stateByKey.get(edge.from))) {
     return { kind: 'prerequisite', from: edge.from };
   }
