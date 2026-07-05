@@ -20,11 +20,11 @@
 // availability is COMPUTED, never stored (`isModuleLive()` — status × flag × window,
 // f-module-core t-2); this row stores the inputs, not the verdict.
 //
-// Scope note: config *versioning* (`ModuleVersion`, A10 → f-module-config) and the
-// *workflow* binding pivot (`ModuleWorkflowBinding`, A8 → f-module-bindings t-3) are
-// intentionally absent — added by the features that own them, so no unused columns
-// land early. The *agent* binding pivot (`ModuleAgentBinding`, A6) lands here in
-// f-module-bindings t-1, below.
+// Scope note: config *versioning* (`ModuleVersion`, A10 → f-module-config) is
+// intentionally absent — added by the feature that owns it, so no unused columns land
+// early. The *agent* binding pivot (`ModuleAgentBinding`, A6) and the *workflow*
+// binding pivot (`ModuleWorkflowBinding`, §4.2) both land here in f-module-bindings
+// (t-1 and t-3 respectively), below.
 model Module {
   id              String    @id @default(cuid())
   slug            String    @unique // matches the registered ModuleDefinition.slug
@@ -39,10 +39,54 @@ model Module {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  agentBindings ModuleAgentBinding[]
+  agentBindings    ModuleAgentBinding[]
+  workflowBindings ModuleWorkflowBinding[]
 
   @@index([status])
   @@map("framework_module")
+}
+
+// A binding of a module *lifecycle event* to a published `AiWorkflow` (spec §4.2):
+// "when event X happens in this module, run workflow Y". A thin trigger row —
+// analogous to `AiWorkflowTrigger` (a third-party event → workflow) and
+// `AiWorkflowSchedule` (a cron tick → workflow), but the source is an internal
+// module-lifecycle event (`module.entered`, `module.completed`, …). The dispatch
+// (`runModuleWorkflowBindings`) reuses the existing execution machinery unchanged:
+// create a PENDING `AiWorkflowExecution` pinned to the workflow's published version,
+// then `drainEngine(...)` — no new engine, no new run path.
+//
+// `moduleId` is a Prisma relation to `Module` (both framework-owned) with
+// `onDelete: Cascade`. `workflowId` and `createdBy` are PLAIN scalar FKs to core
+// tables (NO Prisma `@relation`, so a fork table never adds a reverse field to the
+// Sunrise-owned `AiWorkflow` / `User` models — the X6 boundary); their FKs are
+// HAND-WRITTEN in the migration SQL (the f-slots `SlotValue.userId` pattern, B11):
+// `workflowId → ai_workflow ON DELETE CASCADE` (delete the workflow, its bindings go)
+// and `createdBy → "user" ON DELETE SET NULL` (retain the binding when its author is
+// erased — the CLAUDE.md onDelete policy for retained config: nullable + SetNull,
+// mirroring `AiWorkflowTrigger.creator`). So a dispatch that needs the workflow's
+// definition loads it explicitly in the service, not via `include`.
+//
+// `eventType` is a free-form `String` (X1), matched against the event the source
+// fires; role/event vocabularies are code, never a DB enum. `inputTemplate` is the
+// operator's static input (the `AiWorkflowSchedule.inputTemplate` precedent), merged
+// under the live event envelope at dispatch. `enabled` gates firing without deleting.
+model ModuleWorkflowBinding {
+  id            String   @id @default(cuid())
+  moduleId      String
+  eventType     String // the module-lifecycle event that fires this (free-form, X1)
+  workflowId    String // FK to AiWorkflow.id — no @relation; ON DELETE CASCADE hand-written in the migration
+  inputTemplate Json? // operator's static input, merged under the event envelope at dispatch
+  enabled       Boolean  @default(true) // gate firing without deleting the binding
+  createdBy     String? // FK to User.id — no @relation; ON DELETE SET NULL hand-written (retain on erasure)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  module Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([moduleId, eventType, workflowId])
+  @@index([moduleId])
+  @@index([workflowId])
+  @@map("framework_module_workflow")
 }
 
 // A binding of an ordinary `AiAgent` into a module *seat* (spec §4.2, decision A6).
