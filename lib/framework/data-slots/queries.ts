@@ -20,3 +20,13 @@ import { prisma } from '@/lib/db/client';
 export async function listSlotDefinitions(): Promise<SlotDefinition[]> {
   return prisma.slotDefinition.findMany({ orderBy: { slug: 'asc' } });
 }
+
+/**
+ * One slot definition by its (unique) slug, or `null` if none is declared — the
+ * targeted-vs-open decision `fill_slot` keys on (a defined slug is targeted; an
+ * undefined slug is an open-mode mint). Returns inactive rows too, so the caller can
+ * distinguish "retired" from "never declared".
+ */
+export async function getSlotDefinition(slug: string): Promise<SlotDefinition | null> {
+  return prisma.slotDefinition.findUnique({ where: { slug } });
+}
