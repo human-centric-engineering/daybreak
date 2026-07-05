@@ -25,6 +25,8 @@ import type {
 } from '@/lib/orchestration/capabilities/types';
 import { redactedString } from '@/lib/security/redact';
 import { getSlotHeads } from '@/lib/framework/data-slots/values';
+import { getSlotGroupsScopes } from '@/lib/framework/data-slots/queries';
+import { loadExposureConfig, facetAllows } from '@/lib/framework/data-slots/capabilities/exposure';
 import { canRead, type JourneyViewer } from '@/lib/framework/shared/access';
 
 const getStateSchema = z.object({
@@ -109,6 +111,14 @@ export class GetStateCapability extends BaseCapability<GetStateArgs, GetStateDat
       return this.success({ slots: [] });
     }
 
+    // Per-agent read exposure (t-4): a grant's `customConfig` may allowlist which slot
+    // groups/scopes this agent may read. A malformed config fails closed; an absent one is
+    // permissive.
+    const exposure = await loadExposureConfig(context.agentId, this.slug);
+    if (!exposure.ok) {
+      return this.error("This agent's slot-access configuration is invalid.", 'invalid_exposure');
+    }
+
     const heads = await getSlotHeads(
       subject,
       args.slotSlugs !== undefined && args.slotSlugs.length > 0
@@ -116,8 +126,22 @@ export class GetStateCapability extends BaseCapability<GetStateArgs, GetStateDat
         : undefined
     );
 
+    // Filter the heads to the allowed groups/scopes only when a read allowlist is set —
+    // the permissive common path skips the definition join entirely. A head whose slug has
+    // no definition (an open mint) has no group/scope, so a restrictive allowlist drops it.
+    const readFacet = exposure.config.read;
+    let visible = heads;
+    if (readFacet !== undefined) {
+      const defs = await getSlotGroupsScopes(heads.map((h) => h.slotSlug));
+      const bySlug = new Map(defs.map((d) => [d.slug, d]));
+      visible = heads.filter((h) => {
+        const d = bySlug.get(h.slotSlug);
+        return facetAllows(readFacet, d?.group ?? null, d?.scope ?? null);
+      });
+    }
+
     return this.success({
-      slots: heads.map((h) => ({
+      slots: visible.map((h) => ({
         slug: h.slotSlug,
         value: h.value,
         confidence: h.confidence,

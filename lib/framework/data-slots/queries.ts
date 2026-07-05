@@ -30,3 +30,21 @@ export async function listSlotDefinitions(): Promise<SlotDefinition[]> {
 export async function getSlotDefinition(slug: string): Promise<SlotDefinition | null> {
   return prisma.slotDefinition.findUnique({ where: { slug } });
 }
+
+/** A slot's group/scope — the two axes a per-agent exposure allowlist gates on (t-4). */
+export type SlotGroupScope = Pick<SlotDefinition, 'slug' | 'group' | 'scope'>;
+
+/**
+ * The `group`/`scope` of each named slug that has a definition — the batch join
+ * `get_state` needs to filter a user's heads against an agent's read allowlist (t-4,
+ * decision 8). Only queried when an allowlist is actually configured (the permissive
+ * common path skips it). Slugs with no definition (open mints) are simply absent from the
+ * result, so the caller treats them as having no group/scope. An empty input short-circuits.
+ */
+export async function getSlotGroupsScopes(slugs: string[]): Promise<SlotGroupScope[]> {
+  if (slugs.length === 0) return [];
+  return prisma.slotDefinition.findMany({
+    where: { slug: { in: slugs } },
+    select: { slug: true, group: true, scope: true },
+  });
+}
