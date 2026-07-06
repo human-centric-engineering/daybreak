@@ -60,7 +60,9 @@ Managed taxonomy. Each tag has a slug (stable cross-environment key), a name, an
 The resolver (`resolveAgentDocumentAccess` in `lib/orchestration/knowledge/resolveAgentDocumentAccess.ts`) maps an agent's `knowledgeAccessMode` to an effective doc set:
 
 - `full` → no filter; all docs.
-- `restricted` → (docs explicitly granted) ∪ (docs carrying any granted tag) ∪ (system-scoped seed docs).
+- `restricted` → (docs explicitly granted) ∪ (docs carrying any granted tag) ∪ (docs/tags added by any registered access contributor) ∪ (system-scoped seed docs).
+
+Access contributors (`registerAgentAccessContributor` in `lib/orchestration/knowledge/agent-access-contributors.ts`) let a subsystem add documents/tags to a `restricted` agent's effective set, composed live at resolve time — they only ever _widen_ a restricted agent (a `full` agent is not consulted) and a throwing contributor is ignored. The registry is empty by default (no behaviour change); Daybreak registers one to give a module's bound agents its knowledge scope.
 
 Tags have no required semantic meaning — they're labels. "Internal", "HR-confidential", "Onboarding" are all valid. Operators can create tags inline from the upload zone (type a non-matching name → "Create '…'" row).
 
