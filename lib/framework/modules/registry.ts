@@ -38,6 +38,16 @@ export function getRegisteredModules(): ModuleDefinition[] {
 }
 
 /**
+ * The registered definition for a slug, or `undefined` if no module with that slug is
+ * registered in code (e.g. a retired `framework_module` row whose code was removed).
+ * The source of a module's `configSchema` for validation + form rendering
+ * (f-module-config).
+ */
+export function getRegisteredModule(slug: string): ModuleDefinition | undefined {
+  return modules.get(slug);
+}
+
+/**
  * Test-only: clear the registry so each test starts from a known-empty state.
  * Not exported from the domain barrel (`./index`).
  */
