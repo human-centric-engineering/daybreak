@@ -229,23 +229,23 @@ when you pull an upstream release. (Contrast the marketing pages, which Sunrise
 _does_ keep improving — those stay sync-safe via the thin-shim in
 [§6](#6-landing-page--routes), not by editing the platform file in place.) The stable
 contract the platform depends on is each file's _export_ (`appEnvSchema`,
-`registerAppRateLimits`, `initAppCapabilities`, `initAppNav`,
+`registerAppRateLimits`, `initAppCapabilities`, `initLeafAdminNav`,
 `registerAppDriftProbes`, the `publicNavItems` / `footerNavItems` /
 `footerLegalItems` lists, `emailOverrides`) — which the core imports — **not**
 the body, which is yours. Keep the export name and signature;
 everything inside is free to change. (Detailed examples live here in this guide,
 not in the files, precisely so the files stay small and conflict-free.)
 
-| Edit this file                    | To register                                   | Auto-wired by (runtime)                         |
-| --------------------------------- | --------------------------------------------- | ----------------------------------------------- |
-| `lib/app/env.ts`                  | server env vars (`appEnvSchema`)              | `lib/env.ts` startup parse (server)             |
-| `lib/app/rate-limit.ts`           | rate-limit tiers / rules                      | rate-limit middleware (middleware runtime)      |
-| `lib/app/capabilities.ts`         | agent capabilities (tools)                    | the capability registry (server route-handler)  |
-| `lib/app/context-contributors.ts` | prompt-context loaders (`buildContext` types) | the chat context builder (server route-handler) |
-| `lib/app/admin-nav.ts`            | admin sidebar sections                        | `admin-sidebar.tsx` (client)                    |
-| `lib/app/db-drift.ts`             | Prisma-unmodelled DB objects                  | `scripts/db/check-drift.ts` (CI / `/pre-pr`)    |
-| `lib/app/public-nav.ts`           | public nav / footer link lists                | `public-nav.tsx`, `public-footer.tsx` (client)  |
-| `lib/app/emails.ts`               | auth email template overrides                 | `lib/email/registry.ts` (server)                |
+| Edit this file                    | To register                                   | Auto-wired by (runtime)                          |
+| --------------------------------- | --------------------------------------------- | ------------------------------------------------ |
+| `lib/app/env.ts`                  | server env vars (`appEnvSchema`)              | `lib/env.ts` startup parse (server)              |
+| `lib/app/rate-limit.ts`           | rate-limit tiers / rules                      | rate-limit middleware (middleware runtime)       |
+| `lib/app/capabilities.ts`         | agent capabilities (tools)                    | the capability registry (server route-handler)   |
+| `lib/app/context-contributors.ts` | prompt-context loaders (`buildContext` types) | the chat context builder (server route-handler)  |
+| `lib/app/leaf-admin-nav.ts`       | admin sidebar sections (your leaf's)          | `admin-sidebar.tsx` (client), via `admin-nav.ts` |
+| `lib/app/db-drift.ts`             | Prisma-unmodelled DB objects                  | `scripts/db/check-drift.ts` (CI / `/pre-pr`)     |
+| `lib/app/public-nav.ts`           | public nav / footer link lists                | `public-nav.tsx`, `public-footer.tsx` (client)   |
+| `lib/app/emails.ts`               | auth email template overrides                 | `lib/email/registry.ts` (server)                 |
 
 **Why four files and not one bootstrap call?** Next.js bundles middleware,
 server route-handlers, and the client as three separate module realms — a
@@ -322,10 +322,14 @@ the core `buildContext` switch. The chat context builder runs it once before its
 first lookup; built-in types (e.g. `pattern`) take precedence. See
 [`.context/orchestration/chat.md`](./.context/orchestration/chat.md).
 
-**Admin sidebar sections — `lib/app/admin-nav.ts`.** Fill in the auto-wired
-`initAppNav()` with `registerNavSection({ … })` calls; the admin sidebar renders
-your sections after the core ones. Keep this file client-safe (registrar + icon
-imports only — no server code). Use a `title` distinct from the core sections.
+**Admin sidebar sections — `lib/app/leaf-admin-nav.ts`.** Fill in the auto-wired
+`initLeafAdminNav()` with `registerNavSection({ … })` calls; the admin sidebar
+renders your sections after the core (and Daybreak's "Framework") ones. Keep this
+file client-safe (registrar + icon imports only — no server code). Use a `title`
+distinct from the existing sections. (Daybreak fills `lib/app/admin-nav.ts` to
+register its own "Framework" section and then calls `initLeafAdminNav()`, so you
+edit the reserved `leaf-admin-nav.ts` seam it delegates to — never `admin-nav.ts`
+itself, which would conflict on a Daybreak upgrade.)
 
 **Database drift probes — `lib/app/db-drift.ts`.** Register the Prisma-_unmodelled_
 DB objects your app adds — hand-written FK constraints, custom indexes (GIN/HNSW),

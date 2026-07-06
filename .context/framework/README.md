@@ -55,16 +55,23 @@ reserves for its own forks.**
   **Sunrise** migration
 - Daybreak registers its framework pieces into Sunrise's seams **from within
   `lib/framework/`** (driven by `initFramework()`) — exactly as Sunrise
-  registers its own built-ins from core. It does **not** do so by filling
-  `lib/app/*` (see next).
+  registers its own built-ins from core. The **two exceptions** are the
+  `lib/app/*` **bridges** Daybreak fills: `bootstrap.ts` (server boot →
+  `initFramework()`) and `admin-nav.ts` (client sidebar → the framework nav
+  section). A framework registration that must run in a realm `initFramework()`
+  can't reach — server-boot, or the client sidebar — has nowhere else to go; each
+  delegates to a reserved leaf hook (`leaf-bootstrap.ts` / `leaf-admin-nav.ts`).
+  Otherwise Daybreak does **not** fill `lib/app/*` (see next).
 
 **Reserved for the leaf app — Daybreak keeps these empty:**
 
-- `lib/app/*` scaffolds (`capabilities.ts`, `context-contributors.ts`,
-  `modules.ts`, `admin-nav.ts`, …) — Sunrise ships these empty; Daybreak keeps
-  them empty (and may add new empty framework-concept scaffolds like
-  `lib/app/modules.ts`) for the **leaf app** to fill. Daybreak filling one would
-  collide with the leaf's own registrations on a Daybreak upgrade.
+- `lib/app/*` **leaf** scaffolds (`capabilities.ts`, `context-contributors.ts`,
+  `modules.ts`, `leaf-bootstrap.ts`, `leaf-admin-nav.ts`, …) — Sunrise ships these
+  empty; Daybreak keeps them empty (and may add new empty framework-concept
+  scaffolds like `lib/app/modules.ts`) for the **leaf app** to fill. Daybreak
+  filling one would collide with the leaf's own registrations on a Daybreak
+  upgrade. (The `bootstrap.ts` / `admin-nav.ts` bridges above are the deliberate
+  exception — Daybreak fills those, and the leaf uses their `leaf-*` counterparts.)
 - `.context/app/`, `prisma/schema/app.prisma` + `app_…` migrations,
   `app/brand-theme.css`, `NEXT_PUBLIC_APP_NAME` — the leaf's surface.
 

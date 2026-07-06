@@ -8,27 +8,22 @@
  * @see components/admin/framework/modules-table.tsx
  */
 
-import type { Module } from '@prisma/client';
+import type { ModuleListItem } from '@/lib/framework/modules/view';
 import { describe, it, expect } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ModulesTable } from '@/components/admin/framework/modules-table';
 
-function makeModule(overrides: Partial<Module> = {}): Module {
+function makeModule(overrides: Partial<ModuleListItem> = {}): ModuleListItem {
   return {
     id: `mod-${overrides.slug ?? 'x'}`,
     slug: 'demo',
     name: 'Demo Module',
     status: 'active',
-    featureFlagName: null,
-    availableFrom: null,
-    availableUntil: null,
     audience: 'all',
-    config: {},
     isRegistered: true,
-    createdAt: new Date('2026-01-01T00:00:00Z'),
-    updatedAt: new Date('2026-02-01T00:00:00Z'),
+    updatedAt: '2026-02-01T00:00:00.000Z',
     ...overrides,
   };
 }

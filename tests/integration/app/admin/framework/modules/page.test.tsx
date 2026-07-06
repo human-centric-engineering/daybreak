@@ -9,7 +9,7 @@
  * @see app/admin/framework/modules/page.tsx
  */
 
-import type { Module } from '@prisma/client';
+import type { ModuleListItem } from '@/lib/framework/modules/view';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 
@@ -27,20 +27,19 @@ vi.mock('@/lib/logging', () => ({
   },
 }));
 
-function makeModule(slug: string, name: string, over: Partial<Module> = {}): Module {
+function makeModule(
+  slug: string,
+  name: string,
+  over: Partial<ModuleListItem> = {}
+): ModuleListItem {
   return {
     id: `mod-${slug}`,
     slug,
     name,
     status: 'active',
-    featureFlagName: null,
-    availableFrom: null,
-    availableUntil: null,
     audience: 'all',
-    config: {},
     isRegistered: true,
-    createdAt: new Date('2026-01-01T00:00:00Z'),
-    updatedAt: new Date('2026-02-01T00:00:00Z'),
+    updatedAt: '2026-02-01T00:00:00.000Z',
     ...over,
   };
 }

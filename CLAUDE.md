@@ -47,9 +47,14 @@
 >
 > **Reserved for leaf apps (Daybreak keeps these EMPTY — do NOT fill):**
 >
-> - The `lib/app/*` scaffolds (`env.ts`, `capabilities.ts`, `context-contributors.ts`,
->   `admin-nav.ts`, …) — Sunrise ships them empty; Daybreak keeps them empty for the app.
->   Filling one collides with a leaf's registrations on a Daybreak upgrade.
+> - The `lib/app/*` **leaf** scaffolds (`env.ts`, `capabilities.ts`, `context-contributors.ts`,
+>   `leaf-bootstrap.ts`, `leaf-admin-nav.ts`, …) — Sunrise ships them empty; Daybreak keeps them
+>   empty for the app. Filling one collides with a leaf's registrations on a Daybreak upgrade.
+>   **Exception — the two `lib/app/*` _bridges_ Daybreak DOES fill:** `bootstrap.ts` (server boot →
+>   `initFramework()`) and `admin-nav.ts` (client sidebar → the framework nav section). A framework
+>   registration that must run in a realm `initFramework()` can't reach — server-boot, or the
+>   client sidebar — has nowhere else to go; each bridge delegates to a reserved leaf hook
+>   (`leaf-bootstrap.ts` / `leaf-admin-nav.ts`) so the leaf's own registrations never collide.
 > - `prisma/schema/app.prisma` + `app_…` migrations, `app/brand-theme.css`, and **`.context/app/`**
 >
 > **Sunrise-owned (do NOT edit; extend through a seam instead):**

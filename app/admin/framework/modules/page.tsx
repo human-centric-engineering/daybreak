@@ -1,9 +1,9 @@
 import type { Metadata } from 'next';
-import type { Module } from '@prisma/client';
 
 import { ModulesTable } from '@/components/admin/framework/modules-table';
 import { FieldHelp } from '@/components/ui/field-help';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
+import type { ModuleListItem } from '@/lib/framework/modules/view';
 import { logger } from '@/lib/logging';
 
 export const metadata: Metadata = {
@@ -21,11 +21,11 @@ export const metadata: Metadata = {
  * renders an empty state so the page stays usable (the `capabilities` page
  * precedent).
  */
-async function getModules(): Promise<Module[]> {
+async function getModules(): Promise<ModuleListItem[]> {
   try {
     const res = await serverFetch('/api/v1/admin/framework/modules');
     if (!res.ok) return [];
-    const body = await parseApiResponse<Module[]>(res);
+    const body = await parseApiResponse<ModuleListItem[]>(res);
     if (!body.success) return [];
     return body.data;
   } catch (err) {

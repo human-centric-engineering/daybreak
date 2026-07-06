@@ -11,7 +11,7 @@
  * lifecycle management all live on the detail page.
  */
 
-import type { Module } from '@prisma/client';
+import type { ModuleListItem } from '@/lib/framework/modules/view';
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Search } from 'lucide-react';
@@ -43,8 +43,17 @@ function statusVariant(status: string): 'default' | 'secondary' | 'outline' {
   }
 }
 
+/**
+ * Format an ISO date string as a stable `YYYY-MM-DD` (UTC). Deterministic across
+ * server and client render, so it can't trigger a hydration mismatch the way a
+ * locale/timezone-dependent `toLocaleDateString()` would in this SSR'd component.
+ */
+function formatDate(iso: string): string {
+  return new Date(iso).toISOString().slice(0, 10);
+}
+
 interface ModulesTableProps {
-  initialModules: Module[];
+  initialModules: ModuleListItem[];
 }
 
 export function ModulesTable({ initialModules }: ModulesTableProps) {
@@ -116,7 +125,7 @@ export function ModulesTable({ initialModules }: ModulesTableProps) {
                     )}
                   </TableCell>
                   <TableCell className="text-muted-foreground text-sm">
-                    {new Date(m.updatedAt).toLocaleDateString()}
+                    {formatDate(m.updatedAt)}
                   </TableCell>
                 </TableRow>
               ))

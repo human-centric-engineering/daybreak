@@ -18,14 +18,16 @@
  * `lib/app/*` file Daybreak fills (after `bootstrap.ts`); `lib/app/**` is the
  * sanctioned core→framework bridge (the ESLint boundary exempts it).
  *
- * NOTE — `@/lib/framework/admin-nav` is imported STATICALLY (unlike the boot
- * bridge's dynamic import): nav registration is synchronous — it must run at
- * module-eval, before the sidebar reads the registry during render, so it cannot
- * `await` a dynamic import. A static specifier is safe here because the
- * reference lives only in Daybreak's filled copy (vanilla Sunrise ships the
- * empty version, with no framework import) and every Daybreak leaf fork has the
- * `lib/framework/` folder, so it always resolves. `lib/framework/admin-nav.ts`
- * is deliberately client-safe for exactly this path.
+ * NOTE — `@/lib/framework/admin-nav` is imported STATICALLY, and this is FORCED,
+ * not a style choice: nav registration must be synchronous (the `'use client'`
+ * sidebar reads the registry during render and cannot `await`), so the dynamic
+ * `import()` the boot bridge (`bootstrap.ts`) uses is simply not available here.
+ * The static specifier is safe because this filled bridge lives only in Daybreak
+ * — vanilla Sunrise ships the empty version with no framework import, and every
+ * Daybreak leaf fork has the `lib/framework/` folder, so it always resolves.
+ * (`bootstrap.ts` reaches for dynamic import because its boot path is async and
+ * can afford it — not because a static import would be unsafe there.)
+ * `lib/framework/admin-nav.ts` is deliberately kept client-safe for this path.
  */
 
 import { initFrameworkNav } from '@/lib/framework/admin-nav';
