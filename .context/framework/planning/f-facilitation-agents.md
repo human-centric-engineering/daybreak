@@ -2,7 +2,7 @@
 name: f-facilitation-agents
 feature: 13 · f-facilitation-agents
 epic: Framework v1
-status: in flight (dep f-guidance shipped ✅)
+status: shipped (t-1 #68 · t-2 #70) — mechanism-only; t-3 seed dropped
 owner: John
 depends_on: f-guidance (shipped — #49 / #51 / #52 / #57 / #59 / #61, for the guidance capability family agents are granted + the t-5 surface pattern this mirrors) · f-module-bindings (shipped — #33 / #35 / #50 / #53, for the `ModuleAgentBinding` pattern this mirrors)
 spec: framework-architecture.md §5.4 (the facilitation agent family — "AiAgent rows bound to the facilitation layer through the same binding pattern as modules; one binding mechanism, two scopes") · §4.2 (the binding pattern it mirrors) · §5.5 (the facilitator/supervisor persona) + Appendix A — #303 (`isSystem:false` seed scaffold) · #304 (`runtimePromptManaged` honesty flag)
