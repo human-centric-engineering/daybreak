@@ -469,3 +469,24 @@ startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registra
   [[f-facilitation-agents]]) — decisions where guessing risks the wrong build, not decisions with a
   conventional right answer. A plan that resolves its own tractable questions is build-ready; one that parks
   them all just moves the work later. _Status: open._
+
+### B21 · A family-of-agents feature is mechanism-only by default — ship the binding + surface + role→cap reference, not seeded personas
+
+- **Discovery.** [[f-facilitation-agents]]'s board sketch and the rev-16 spec both implied a **seeded** facilitation
+  family (six `isSystem:false` agents + role→cap grants + bindings, the #303 scaffold). But the spec's own framing —
+  "they are `AiAgent` rows" — makes an agent **per-deployment config** (persona, model, voice, guardrails). Seeding a
+  family imposes Daybreak's persona/model choices on every fork, is demo-ish content the fork immediately re-personas,
+  and drags in a seed→`ai_capability`-boot-sync ordering wrinkle. The owner chose **mechanism-only**: ship the binding
+  - the `FACILITATION_ROLES` vocabulary + the surface + the documented **role→recommended-capabilities reference**, and
+    let a fork create its own agents and bind them. That dropped the conditional seed task entirely, making the feature an
+    honest 2 PRs instead of a padded 3.
+- **Impact.** Positive. The mechanism is complete and immediately usable with nothing for a fork to delete — the
+  clearest expression yet of the plan's own **"ship nothing a fork has to delete"** organising principle, applied to
+  agents rather than tables. It also kept both PRs a faithful mirror of the reviewed-secure module-binding + module-surface
+  pattern, which is why both semantic reviews came back clean on both tasks.
+- **Feedback.** When a feature's deliverable is "a family of agents" (facilitation, emergence judges, any seeded
+  persona set), **default the plan to mechanism-only**: the binding + the role/seat vocabulary + the surface + a
+  documented role→capability reference. Treat "seed a default family" as a **separate, conditional, owner-gated** task
+  (a product-content decision, per [[#B20 · Resolve a plan's open design questions inline, not via a separate refinement pass|B20]]'s
+  "genuine product-scope fork" carve-out), not a promoted one — and if the owner declines it, drop it rather than
+  carrying dead scope. Agents are config; the framework ships the machinery, the fork brings the personas. _Status: open._
