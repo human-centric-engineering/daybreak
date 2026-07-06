@@ -87,18 +87,29 @@ of scope** (owned by the features that consume them, so no dead surface lands ea
   f-module-bindings builds only the **module** binding tables. A7 is honoured by _not_
   building a polymorphic `FrameworkAgentBinding`.
 
-## The fourth pure framework-tier feature — no upstream issue
+## Mostly framework-tier — one upstream seam (corrected at t-4)
 
-Like `f-module-core` / `f-map` / `f-slots`, **`f-module-bindings` touches no Sunrise core
-seam.** Every piece — the binding models, the registration, the scope helper, the admin
-routes — lives in the **framework tier** (`lib/framework/modules/`,
-`app/api/v1/admin/framework/modules/…`) and only _consumes_ core through the allowed
-framework→core direction (the capability dispatcher, `resolveAgentDocumentAccess`,
-`drainEngine`, `logAdminAction`, `@/lib/api/errors`). The one core seam it _reads_ —
-`CapabilityContext.scope` — already landed generically in Sunrise v0.5.0 (`f-seams` /
-#372); this feature only writes/reads the framework-side keys through
-`lib/framework/shared/scope.ts`, adding **zero framework vocabulary to core** (X6). So
-**this feature files no upstream issue** and carries no cross-repo follow-up.
+t-1 / t-2 / t-3 touched **no Sunrise core seam** — the binding models, registration,
+scope helper, and admin routes all live in the **framework tier**
+(`lib/framework/modules/`, `app/api/v1/admin/framework/modules/…`) and only _consume_
+core through the allowed framework→core direction (the capability dispatcher,
+`drainEngine`, `logAdminAction`, `@/lib/api/errors`). The scope seam
+(`CapabilityContext.scope`) had already landed generically in Sunrise v0.5.0 (`f-seams`
+/ #372); those tasks add **zero framework vocabulary to core** (X6).
+
+**t-4 is the exception, and it's the correct shape, not an accident.** Making a module's
+knowledge scope actually _enforced_ requires the core knowledge resolver
+(`resolveAgentDocumentAccess`, Sunrise-owned) to consider a module's contribution — and
+the correct behaviour (module scope **∪** direct operator grants, composed live so
+neither clobbers the other) can only be done _inside_ that resolver, never by
+materialising module grants onto the provenance-less per-agent pivot (a shared row can't
+be cleanly released on unbind). So t-4 adds a **generic** core seam —
+`registerAgentAccessContributor` — that the framework registers into (the same shape as
+`registerContextContributor`; no framework vocabulary, no core→framework import, empty
+registry = prior behaviour). This is the mainline **fork-first-informs-upstream** move,
+not the nuance-exception: the seam is built and proven in the fork, then proposed to
+Sunrise (see the [`upstream-asks.md`](../upstream-asks.md) ledger). So **t-4 files one
+upstream issue**; t-1–t-3 file none.
 
 ## Reconciliation with current repo reality
 
@@ -416,26 +427,87 @@ hooks).
   `drainEngine` with the pinned version, skipping unpublished ones; disabled bindings don't
   fire; **gates green** (retro B4).
 
-### t-4 · Knowledge grants — the module's corner of the material (thin)
+### t-4 · Knowledge scope — a module's corner of the material (built; standalone, not folded)
 
-§4.2: "no new mechanism at all." Reuse `resolveAgentDocumentAccess` + the grant pivots.
+§4.2: "no new mechanism at all" — reuse the enforcement (`resolveAgentDocumentAccess`), not
+materialise grants. The build-time investigation into _correct behaviour_ reshaped this task
+substantially (it did **not** fold into t-1, and it is **not** thin — it carries a core seam);
+the reasoning is recorded because it's the load-bearing part.
 
-- **`lib/framework/modules/knowledge/`** — a thin service that, given a module and its bound
-  agents, applies **document/tag grants** to those agents through the existing pivots
-  (`AiAgentKnowledgeDocument` / `AiAgentKnowledgeTag`), flipping each agent to
-  `knowledgeAccessMode: 'restricted'` where appropriate, and calls **`invalidateAgentAccess(agentId)`**
-  after every mutation (the resolver memoises for 60s). Optionally a module-declared knowledge
-  scope (tags/docs) on `ModuleDefinition` if the shape warrants — **decide at build**; the
-  minimum is an API to grant a bound agent the module's docs/tags.
-- **Admin API** under `app/api/v1/admin/framework/modules/[slug]/knowledge/` — grant/revoke
-  a document or tag for the module's bound agents; `withAdminAuth`, Zod, audit.
-- **Fold decision (B1):** if this lands commit-sized (very likely, since the mechanism is
-  entirely pre-existing), **fold into t-1** and drop t-4. Kept separate here for legibility;
-  collapse at build time.
-- **Done when:** a module's bound agent can be granted the module's documents/tags through
-  the API, the grant is enforced at search time by the **existing** `resolveAgentDocumentAccess`
-  path (no new enforcement code), the access cache is invalidated on mutation; **gates green**
-  (retro B4). _Or_ folded into t-1 with the same guarantees.
+**The behaviour (settled with the design owner):** a module **owns a durable knowledge scope**
+(a set of documents/tags), symmetric with its agent seats / capabilities / workflow bindings.
+Every agent **bound** to the module **inherits** search access to that scope; unbinding
+releases it; and this **coexists non-destructively** with the operator's own direct per-agent
+grants (the stock Sunrise agent-knowledge UI) — neither source clobbers the other. That
+coexistence is the whole crux.
+
+**Why it can't be materialised (why the naive "thin fan-out" is wrong).** The core enforcement
+pivot `AiAgentKnowledgeDocument` is `@@id([agentId, documentId])` — one row per (agent, doc),
+**no provenance**, and X6-sealed. If a module grant and a direct operator grant name the same
+doc for the same agent, that is the _same row_: releasing it on unbind kills the operator's
+grant; keeping it leaks. **Any copy-down scheme either clobbers or leaks.** So module scope must
+be composed **live at resolve time**, never stored on the agent.
+
+**The shape built:**
+
+- **Core seam (generic, minimal, upstream-bound):**
+  [`lib/orchestration/knowledge/agent-access-contributors.ts`](../../../lib/orchestration/knowledge/agent-access-contributors.ts)
+  — `registerAgentAccessContributor(key, fn)` (a keyed registry, same shape as
+  `registerContextContributor`), and a ~15-line union in `resolveAgentDocumentAccess`'s
+  restricted branch that awaits contributors in parallel and folds their `{ documentIds, tagIds }`
+  into the set (tagIds ride the existing tag-expansion). Contributors **only widen a restricted
+  agent** — a `full` agent short-circuits before them, so module scope never narrows access. A
+  throwing contributor is logged and ignored (the resolver keeps its never-throws contract).
+  Empty registry ⇒ byte-for-byte prior behaviour. **No framework vocabulary, no core→framework
+  import** → boundary CI green.
+- **Two fork pivots** (`ModuleKnowledgeDocument` / `ModuleKnowledgeTag`, mirroring the core's own
+  two grant pivots) recording the scope; `documentId`/`tagId` are plain scalar hand-FKs to
+  `ai_knowledge_document` / `knowledge_tag` (`ON DELETE CASCADE`, the t-1 pattern), `moduleId` a
+  Prisma relation. Migration + B13 strip.
+- **`resolveModuleKnowledgeForAgent(agentId)`** (`lib/framework/modules/knowledge/contributor.ts`)
+  — the registered contributor: computes an agent's module-derived docs/tags **live** from
+  `ModuleAgentBinding ⋈` the pivots. Registered in `initFramework()` (in-memory; queries only when
+  the resolver calls it). So a newly-bound agent inherits on its next search, an unbound agent
+  drops it — **no reconcile, no hook into shipped t-1**, because nothing is materialised.
+- **`knowledgeAccessMode` is never flipped** (a correction to this plan's earlier text). The agent
+  owns its mode; the module contributes scope. A module granting a doc must not silently narrow a
+  `full` agent to restricted — and needn't, since a `full` agent already sees the doc. A companion
+  agent that _should_ be restricted is seeded that way by f-facilitation-agents (13).
+- **Service + admin API** (`.../knowledge/route.ts`, `GET`/`POST`/`DELETE`) grant/revoke a document
+  **or** a tag (exactly one), `withAdminAuth`, Zod, audit; every mutation invalidates
+  `invalidateAgentAccess` for the module's currently-bound agents (the resolver caches 60s).
+- **Upstream:** files the Sunrise issue for `registerAgentAccessContributor`, backed by this
+  working impl; ledgered in [`upstream-asks.md`](../upstream-asks.md). Views → f-ops-views (15).
+- **Fold decision (B1): did NOT fold.** The mechanism was _not_ "entirely pre-existing" as assumed
+  — correct enforcement required the core seam — so t-4 is its own PR, ~t-3-sized. The B1 "fold if
+  commit-sized" bet was based on a wrong premise; the investigation corrected it.
+- **Done when:** an admin can add/remove documents/tags to a module's knowledge scope; a
+  **restricted** agent bound to the module inherits that scope at search time via the core resolver
+  (composed live, unioned with its direct grants, never clobbering them); the access cache is
+  invalidated on mutation; the Sunrise seam issue is filed; **gates green** (retro B4).
+
+**Cache-invalidation coordination (surfaced by t-4 `/code-review` — deferrals need a home).**
+The resolver caches the composed access set per-agent for 60s, so any path that changes what a
+contributor reads must call `invalidateAgentAccess`. t-4 wired the two application sites that
+mutate the inputs (grant/revoke in `knowledge/service.ts`; bind/unbind in `bindings/service.ts`).
+Two paths are deliberately **not** covered and are recorded here so a future owner doesn't miss them:
+
+- **Module hard-delete → `f-ops-views` (15).** `moduleId onDelete: Cascade` means deleting a `Module`
+  row drops its bindings + knowledge pivots at the DB layer with **no application code running**, so
+  no site can evict the affected agents' caches — a ≤60s fail-to-revoke window. There is **no
+  module-hard-delete path today** (f-module-core shipped a read API only). **When f-ops-views (or any
+  admin) adds delete-module, it MUST `invalidateAllAgentAccess()` (or invalidate the module's bound
+  agents) as part of the delete.** Belt-and-braces alternative if this proves fiddly: shorten the
+  resolver TTL, or have the resolver not cache contributor output (recompute live) — a Sunrise-side
+  call, since it's the core cache. (Core doc/tag deletes already call `invalidateAllAgentAccess`, so
+  a deleted _document/tag_ is safe; only _module_ deletion is the gap.)
+- **Module soft-retire (`isRegistered=false`) — retain, by decision.** Retiring a module (code removed,
+  row kept for audit) leaves its bindings + knowledge pivots intact, and the contributor filters on
+  **binding existence, not `isRegistered`** — so a bound restricted agent keeps inheriting a retired
+  module's scope. This is **intended**: retire is an audit flag, not a revocation; to revoke, unbind
+  the agents or delete the module. Stated so it's a designed behaviour, not an accident. (If a future
+  feature wants retire to also revoke knowledge, the contributor gains an `isRegistered` join — a
+  one-line change, deliberately not made now.)
 
 ## Boundary & forkability notes
 
@@ -475,8 +547,10 @@ hooks).
   transform (prefix with separators normalised, or bare tool name) and confirm no collision
   across two modules' identically-named tools once the prefix is normalised out of the
   function name.
-- **t-4 fold vs standalone.** Decide at build whether knowledge grants warrant a PR or fold
-  into t-1 (B1). Leaning fold.
+- **t-4 fold vs standalone.** _Resolved: standalone._ The premise for folding ("mechanism
+  entirely pre-existing, so commit-sized") was wrong — correct enforcement of a durable module
+  scope that coexists with direct grants required a generic core seam
+  (`registerAgentAccessContributor`) + two fork pivots + a live contributor, ~t-3-sized. Its own PR.
 - **Event-source coordination (t-3).** f-engagement (08) owns the module-lifecycle event
   emission that calls `runModuleWorkflowBindings`. Whichever of 07-t3 / 08 lands the shared
   emit point first owns it; coordinate rather than both defining it (the 08/09 `JourneyEvent`

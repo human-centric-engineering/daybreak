@@ -119,10 +119,14 @@ const { prismaFake, store, resetStore } = vi.hoisted(() => {
 
 vi.mock('@/lib/db/client', () => ({ prisma: prismaFake }));
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({ logAdminAction: vi.fn() }));
+vi.mock('@/lib/orchestration/knowledge/resolveAgentDocumentAccess', () => ({
+  invalidateAgentAccess: vi.fn(),
+}));
 
 import { bindAgent, updateBinding, unbindAgent } from '@/lib/framework/modules/bindings/service';
 import { registerModule, __resetModuleRegistryForTests } from '@/lib/framework/modules/registry';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
+import { invalidateAgentAccess } from '@/lib/orchestration/knowledge/resolveAgentDocumentAccess';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { z } from 'zod';
 
@@ -169,6 +173,8 @@ describe('bindAgent', () => {
 
     expect(binding).toMatchObject({ agentId: 'agent-1', role: 'companion', isPrimary: false });
     expect(store.bindings.size).toBe(1);
+    // The agent now inherits the module's knowledge scope → its resolver cache is evicted.
+    expect(invalidateAgentAccess).toHaveBeenCalledWith('agent-1');
     expect(logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'module_agent_binding.create', entityId: binding.id })
     );
@@ -435,6 +441,9 @@ describe('unbindAgent', () => {
     await unbindAgent({ moduleSlug: 'reading', bindingId: b.id, userId: USER });
 
     expect(store.bindings.size).toBe(0);
+    // Unbinding revokes the module's knowledge scope → evict the agent's cache now
+    // (fail-to-revoke guard), not after the resolver's 60s TTL.
+    expect(invalidateAgentAccess).toHaveBeenCalledWith('agent-1');
     expect(logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'module_agent_binding.delete', entityId: b.id })
     );

@@ -12,6 +12,13 @@
  * core `AiAgent` model), so the FK + `ON DELETE CASCADE` live in the migration SQL;
  * every write emits a `logAdminAction` audit entry (spec §7). Reads live in
  * `./queries` (they stitch the agent's display fields, which `include` can't).
+ *
+ * **A binding change now feeds knowledge access (t-4).** Since `resolveModuleKnowledgeForAgent`
+ * derives a restricted agent's searchable documents from its module bindings and the
+ * knowledge resolver caches that per-agent for 60s, `bindAgent` / `unbindAgent` must
+ * evict the affected agent's cache — otherwise an unbound agent keeps the module's
+ * knowledge until the TTL lapses (a fail-to-revoke window). `updateBinding` does not
+ * change module membership, so it does not affect knowledge access and needs no eviction.
  */
 
 import { Prisma } from '@prisma/client';
@@ -19,6 +26,7 @@ import type { ModuleAgentBinding } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
+import { invalidateAgentAccess } from '@/lib/orchestration/knowledge/resolveAgentDocumentAccess';
 import { mapPrismaWriteError } from '@/lib/framework/shared/prisma-errors';
 import { getRegisteredModules } from '@/lib/framework/modules/registry';
 
@@ -160,6 +168,10 @@ export async function bindAgent(args: BindAgentArgs): Promise<ModuleAgentBinding
     rethrowBindingWriteError(err, { moduleSlug, agentId, role });
   }
 
+  // The agent now inherits this module's knowledge scope — evict its cached access
+  // set so the next search reflects it immediately (fail-closed either way).
+  invalidateAgentAccess(agentId);
+
   logAdminAction({
     userId,
     action: 'module_agent_binding.create',
@@ -251,6 +263,10 @@ export async function unbindAgent(args: UnbindAgentArgs): Promise<void> {
     // Concurrent unbind between the guard and the delete → 404, not a raw 500.
     rethrowBindingWriteError(err, { moduleSlug });
   }
+
+  // The agent loses this module's knowledge scope — evict its cached access set now
+  // so the revocation takes effect immediately, not after the 60s TTL.
+  invalidateAgentAccess(existing.agentId);
 
   logAdminAction({
     userId,

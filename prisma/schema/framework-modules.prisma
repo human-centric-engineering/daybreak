@@ -39,11 +39,61 @@ model Module {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  agentBindings    ModuleAgentBinding[]
-  workflowBindings ModuleWorkflowBinding[]
+  agentBindings      ModuleAgentBinding[]
+  workflowBindings   ModuleWorkflowBinding[]
+  knowledgeDocuments ModuleKnowledgeDocument[]
+  knowledgeTags      ModuleKnowledgeTag[]
 
   @@index([status])
   @@map("framework_module")
+}
+
+// A module's durable *knowledge scope* (spec §4.2, "no new mechanism at all"). A
+// module OWNS a set of knowledge documents/tags; every agent bound to the module
+// inherits search access to that set. Two thin pivots mirror the core's own
+// per-agent grant pivots (`AiAgentKnowledgeDocument` / `AiAgentKnowledgeTag`).
+//
+// The scope is NOT materialised onto agents. Enforcement stays the core
+// `resolveAgentDocumentAccess` resolver, which unions a generic access-contributor's
+// output into a restricted agent's document set (`registerAgentAccessContributor`,
+// a core seam). The framework registers `resolveModuleKnowledgeForAgent`, which
+// computes an agent's module-derived docs/tags LIVE from `ModuleAgentBinding` ⋈ these
+// rows — so a bound agent inherits the scope with no copy, an unbound agent loses it
+// automatically, and direct operator grants on the same agent are never clobbered.
+// A `full`-mode agent already searches everything, so the contributor is a no-op for
+// it (the module scope never narrows access, only widens a restricted agent's).
+//
+// `moduleId` is a Prisma relation to `Module` (both framework-owned, `onDelete:
+// Cascade`). `documentId` / `tagId` are PLAIN scalar FKs to the core
+// `ai_knowledge_document` / `knowledge_tag` tables (NO Prisma `@relation`, so a fork
+// table never adds a reverse field to a Sunrise-owned model — the X6 boundary); their
+// `ON DELETE CASCADE` is hand-written in the migration (the f-slots `SlotValue.userId`
+// pattern), so deleting a document/tag drops its module grants. The admin actor is
+// recorded via `logAdminAction`, not a column (as t-1 did — no runtime use for it).
+model ModuleKnowledgeDocument {
+  id         String   @id @default(cuid())
+  moduleId   String
+  documentId String // FK to AiKnowledgeDocument.id — no @relation; ON DELETE CASCADE hand-written in the migration
+  createdAt  DateTime @default(now())
+
+  module Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([moduleId, documentId])
+  @@index([documentId])
+  @@map("framework_module_knowledge_document")
+}
+
+model ModuleKnowledgeTag {
+  id        String   @id @default(cuid())
+  moduleId  String
+  tagId     String // FK to KnowledgeTag.id — no @relation; ON DELETE CASCADE hand-written in the migration
+  createdAt DateTime @default(now())
+
+  module Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([moduleId, tagId])
+  @@index([tagId])
+  @@map("framework_module_knowledge_tag")
 }
 
 // A binding of a module *lifecycle event* to a published `AiWorkflow` (spec §4.2):
