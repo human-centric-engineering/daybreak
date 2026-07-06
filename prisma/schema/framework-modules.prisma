@@ -20,11 +20,10 @@
 // availability is COMPUTED, never stored (`isModuleLive()` — status × flag × window,
 // f-module-core t-2); this row stores the inputs, not the verdict.
 //
-// Scope note: config *versioning* (`ModuleVersion`, A10 → f-module-config) and the
-// *workflow* binding pivot (`ModuleWorkflowBinding`, A8 → f-module-bindings t-3) are
-// intentionally absent — added by the features that own them, so no unused columns
-// land early. The *agent* binding pivot (`ModuleAgentBinding`, A6) lands here in
-// f-module-bindings t-1, below.
+// Scope note: config *versioning* (`ModuleVersion`, A10) landed with f-module-config
+// t-1 (below) — every operator config save snapshots one. The *agent* binding pivot
+// (`ModuleAgentBinding`, A6) and the *workflow* binding pivot (`ModuleWorkflowBinding`,
+// §4.2) both land here in f-module-bindings (t-1 and t-3 respectively), below.
 model Module {
   id              String    @id @default(cuid())
   slug            String    @unique // matches the registered ModuleDefinition.slug
@@ -39,10 +38,137 @@ model Module {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  agentBindings ModuleAgentBinding[]
+  agentBindings      ModuleAgentBinding[]
+  workflowBindings   ModuleWorkflowBinding[]
+  knowledgeDocuments ModuleKnowledgeDocument[]
+  knowledgeTags      ModuleKnowledgeTag[]
+  versions           ModuleVersion[]
 
   @@index([status])
   @@map("framework_module")
+}
+
+// A point-in-time snapshot of a module's operator `config` (spec §4.1, decision A10).
+// Mirrors `AiAgentVersion` (NOT the workflow/map draft-buffer): the live values are
+// `Module.config`, and every operator config save writes a `ModuleVersion` capturing
+// the config *as of* that save. So the newest version always equals the live row,
+// history is first-class ("what changed, who changed it"), and rollback is a *restore*
+// — write a prior snapshot back onto `Module.config` and snapshot it forward as a new
+// version (history is never rewound). There is deliberately no `draftConfig` /
+// `publishedVersionId` on `Module`: config is a fill-and-save form, not a long-lived
+// draft (f-module-config.md reconciliation 1).
+//
+// `moduleId` is a Prisma relation to `Module` (both framework-owned, `onDelete:
+// Cascade` — delete a module, its version history goes). `createdBy` is a PLAIN scalar
+// FK to core `User` (NO Prisma `@relation`, so a fork table never adds a reverse field
+// to the Sunrise-owned `User` model — the X6 boundary); its `ON DELETE SET NULL` is
+// HAND-WRITTEN in the migration SQL (the retained-config-author policy — a version is
+// audit that outlives its author's erasure, mirroring `ModuleWorkflowBinding.createdBy`).
+model ModuleVersion {
+  id            String   @id @default(cuid())
+  moduleId      String
+  version       Int // monotonic per module, from 1
+  snapshot      Json // the full Module.config as of this version (point-in-time)
+  changeSummary String?  @db.Text
+  createdBy     String? // FK to User.id — no @relation; ON DELETE SET NULL hand-written in the migration
+  createdAt     DateTime @default(now())
+
+  module Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([moduleId, version])
+  @@index([moduleId])
+  @@map("framework_module_version")
+}
+
+// A module's durable *knowledge scope* (spec §4.2, "no new mechanism at all"). A
+// module OWNS a set of knowledge documents/tags; every agent bound to the module
+// inherits search access to that set. Two thin pivots mirror the core's own
+// per-agent grant pivots (`AiAgentKnowledgeDocument` / `AiAgentKnowledgeTag`).
+//
+// The scope is NOT materialised onto agents. Enforcement stays the core
+// `resolveAgentDocumentAccess` resolver, which unions a generic access-contributor's
+// output into a restricted agent's document set (`registerAgentAccessContributor`,
+// a core seam). The framework registers `resolveModuleKnowledgeForAgent`, which
+// computes an agent's module-derived docs/tags LIVE from `ModuleAgentBinding` ⋈ these
+// rows — so a bound agent inherits the scope with no copy, an unbound agent loses it
+// automatically, and direct operator grants on the same agent are never clobbered.
+// A `full`-mode agent already searches everything, so the contributor is a no-op for
+// it (the module scope never narrows access, only widens a restricted agent's).
+//
+// `moduleId` is a Prisma relation to `Module` (both framework-owned, `onDelete:
+// Cascade`). `documentId` / `tagId` are PLAIN scalar FKs to the core
+// `ai_knowledge_document` / `knowledge_tag` tables (NO Prisma `@relation`, so a fork
+// table never adds a reverse field to a Sunrise-owned model — the X6 boundary); their
+// `ON DELETE CASCADE` is hand-written in the migration (the f-slots `SlotValue.userId`
+// pattern), so deleting a document/tag drops its module grants. The admin actor is
+// recorded via `logAdminAction`, not a column (as t-1 did — no runtime use for it).
+model ModuleKnowledgeDocument {
+  id         String   @id @default(cuid())
+  moduleId   String
+  documentId String // FK to AiKnowledgeDocument.id — no @relation; ON DELETE CASCADE hand-written in the migration
+  createdAt  DateTime @default(now())
+
+  module Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([moduleId, documentId])
+  @@index([documentId])
+  @@map("framework_module_knowledge_document")
+}
+
+model ModuleKnowledgeTag {
+  id        String   @id @default(cuid())
+  moduleId  String
+  tagId     String // FK to KnowledgeTag.id — no @relation; ON DELETE CASCADE hand-written in the migration
+  createdAt DateTime @default(now())
+
+  module Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([moduleId, tagId])
+  @@index([tagId])
+  @@map("framework_module_knowledge_tag")
+}
+
+// A binding of a module *lifecycle event* to a published `AiWorkflow` (spec §4.2):
+// "when event X happens in this module, run workflow Y". A thin trigger row —
+// analogous to `AiWorkflowTrigger` (a third-party event → workflow) and
+// `AiWorkflowSchedule` (a cron tick → workflow), but the source is an internal
+// module-lifecycle event (`module.entered`, `module.completed`, …). The dispatch
+// (`runModuleWorkflowBindings`) reuses the existing execution machinery unchanged:
+// create a PENDING `AiWorkflowExecution` pinned to the workflow's published version,
+// then `drainEngine(...)` — no new engine, no new run path.
+//
+// `moduleId` is a Prisma relation to `Module` (both framework-owned) with
+// `onDelete: Cascade`. `workflowId` and `createdBy` are PLAIN scalar FKs to core
+// tables (NO Prisma `@relation`, so a fork table never adds a reverse field to the
+// Sunrise-owned `AiWorkflow` / `User` models — the X6 boundary); their FKs are
+// HAND-WRITTEN in the migration SQL (the f-slots `SlotValue.userId` pattern, B11):
+// `workflowId → ai_workflow ON DELETE CASCADE` (delete the workflow, its bindings go)
+// and `createdBy → "user" ON DELETE SET NULL` (retain the binding when its author is
+// erased — the CLAUDE.md onDelete policy for retained config: nullable + SetNull,
+// mirroring `AiWorkflowTrigger.creator`). So a dispatch that needs the workflow's
+// definition loads it explicitly in the service, not via `include`.
+//
+// `eventType` is a free-form `String` (X1), matched against the event the source
+// fires; role/event vocabularies are code, never a DB enum. `inputTemplate` is the
+// operator's static input (the `AiWorkflowSchedule.inputTemplate` precedent), merged
+// under the live event envelope at dispatch. `enabled` gates firing without deleting.
+model ModuleWorkflowBinding {
+  id            String   @id @default(cuid())
+  moduleId      String
+  eventType     String // the module-lifecycle event that fires this (free-form, X1)
+  workflowId    String // FK to AiWorkflow.id — no @relation; ON DELETE CASCADE hand-written in the migration
+  inputTemplate Json? // operator's static input, merged under the event envelope at dispatch
+  enabled       Boolean  @default(true) // gate firing without deleting the binding
+  createdBy     String? // FK to User.id — no @relation; ON DELETE SET NULL hand-written (retain on erasure)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  module Module @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@unique([moduleId, eventType, workflowId])
+  @@index([moduleId])
+  @@index([workflowId])
+  @@map("framework_module_workflow")
 }
 
 // A binding of an ordinary `AiAgent` into a module *seat* (spec §4.2, decision A6).

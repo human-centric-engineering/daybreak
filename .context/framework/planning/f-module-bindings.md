@@ -2,12 +2,13 @@
 name: f-module-bindings
 feature: 07 · f-module-bindings
 epic: Framework v1
-status: in flight
+status: shipped
 owner: Simon Holmes
 depends_on: f-module-core (shipped — #10 / #11 / #12)
 spec: framework-architecture.md §4.2 (bindings, not ownership), Appendix A (A6 role bindings · A7 two parallel tables · A8 namespaced capabilities + generic scope), X1 / X6
 parent: plan.md
 opened: 2026-07-05
+shipped: 2026-07-06 (t-1 #33 · t-2 #35 · t-3 #50 · t-4 #53)
 ---
 
 # f-module-bindings — agent / workflow / knowledge bindings
@@ -87,18 +88,29 @@ of scope** (owned by the features that consume them, so no dead surface lands ea
   f-module-bindings builds only the **module** binding tables. A7 is honoured by _not_
   building a polymorphic `FrameworkAgentBinding`.
 
-## The fourth pure framework-tier feature — no upstream issue
+## Mostly framework-tier — one upstream seam (corrected at t-4)
 
-Like `f-module-core` / `f-map` / `f-slots`, **`f-module-bindings` touches no Sunrise core
-seam.** Every piece — the binding models, the registration, the scope helper, the admin
-routes — lives in the **framework tier** (`lib/framework/modules/`,
-`app/api/v1/admin/framework/modules/…`) and only _consumes_ core through the allowed
-framework→core direction (the capability dispatcher, `resolveAgentDocumentAccess`,
-`drainEngine`, `logAdminAction`, `@/lib/api/errors`). The one core seam it _reads_ —
-`CapabilityContext.scope` — already landed generically in Sunrise v0.5.0 (`f-seams` /
-#372); this feature only writes/reads the framework-side keys through
-`lib/framework/shared/scope.ts`, adding **zero framework vocabulary to core** (X6). So
-**this feature files no upstream issue** and carries no cross-repo follow-up.
+t-1 / t-2 / t-3 touched **no Sunrise core seam** — the binding models, registration,
+scope helper, and admin routes all live in the **framework tier**
+(`lib/framework/modules/`, `app/api/v1/admin/framework/modules/…`) and only _consume_
+core through the allowed framework→core direction (the capability dispatcher,
+`drainEngine`, `logAdminAction`, `@/lib/api/errors`). The scope seam
+(`CapabilityContext.scope`) had already landed generically in Sunrise v0.5.0 (`f-seams`
+/ #372); those tasks add **zero framework vocabulary to core** (X6).
+
+**t-4 is the exception, and it's the correct shape, not an accident.** Making a module's
+knowledge scope actually _enforced_ requires the core knowledge resolver
+(`resolveAgentDocumentAccess`, Sunrise-owned) to consider a module's contribution — and
+the correct behaviour (module scope **∪** direct operator grants, composed live so
+neither clobbers the other) can only be done _inside_ that resolver, never by
+materialising module grants onto the provenance-less per-agent pivot (a shared row can't
+be cleanly released on unbind). So t-4 adds a **generic** core seam —
+`registerAgentAccessContributor` — that the framework registers into (the same shape as
+`registerContextContributor`; no framework vocabulary, no core→framework import, empty
+registry = prior behaviour). This is the mainline **fork-first-informs-upstream** move,
+not the nuance-exception: the seam is built and proven in the fork, then proposed to
+Sunrise (see the [`upstream-asks.md`](../upstream-asks.md) ledger). So **t-4 files one
+upstream issue**; t-1–t-3 file none.
 
 ## Reconciliation with current repo reality
 
@@ -248,12 +260,12 @@ definition, inputData, userId, versionId)`** (`scheduling/scheduler.ts:102`) ove
 
 ## Tasks (promoted)
 
-| ID  | Task                                                                                                                                                                       | Files                                                                                                                                                                                                                     | Deps | Status        | PR  |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ------------- | --- |
-| t-1 | **Agent bindings**: `ModuleDefinition.agentRoles` + `ModuleAgentBinding` model + `Module` relation + bind-time role validation + admin binding API (+ this plan)           | `lib/framework/modules/definition.ts`, `prisma/schema/framework-modules.prisma`, `framework_…` migration, `lib/framework/modules/bindings/*`, `app/api/v1/admin/framework/modules/[slug]/agents/**`, `tests/…`, this plan | —    | **available** | —   |
-| t-2 | **Module capabilities → registry + scope seam**: `ModuleDefinition.capabilities` + namespaced registration (in-memory + DB metadata) + `assertInModuleScope` refuse-helper | `lib/framework/modules/definition.ts`, `lib/framework/modules/capabilities/*`, `lib/framework/index.ts`, `lib/framework/modules/sync.ts`, `tests/…`                                                                       | t-1  | backlog       | —   |
-| t-3 | **Workflow bindings**: `ModuleWorkflowBinding` model (mirror `AiWorkflowTrigger`) + admin API + resolve-bindings→`drainEngine` dispatch function                           | `prisma/schema/framework-modules.prisma`, `framework_…` migration, `lib/framework/modules/workflow-bindings/*`, `app/api/v1/admin/framework/modules/[slug]/workflows/**`, `tests/…`                                       | t-1  | backlog       | —   |
-| t-4 | **Knowledge grants**: grant a module's docs/tags to its bound agents via the existing restricted-access system + cache invalidation                                        | `lib/framework/modules/knowledge/*`, `app/api/v1/admin/framework/modules/[slug]/knowledge/**`, `tests/…`                                                                                                                  | t-1  | backlog       | —   |
+| ID  | Task                                                                                                                                                                       | Files                                                                                                                                                                                                                     | Deps | Status   | PR  |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | -------- | --- |
+| t-1 | **Agent bindings**: `ModuleDefinition.agentRoles` + `ModuleAgentBinding` model + `Module` relation + bind-time role validation + admin binding API (+ this plan)           | `lib/framework/modules/definition.ts`, `prisma/schema/framework-modules.prisma`, `framework_…` migration, `lib/framework/modules/bindings/*`, `app/api/v1/admin/framework/modules/[slug]/agents/**`, `tests/…`, this plan | —    | **done** | #33 |
+| t-2 | **Module capabilities → registry + scope seam**: `ModuleDefinition.capabilities` + namespaced registration (in-memory + DB metadata) + `assertInModuleScope` refuse-helper | `lib/framework/modules/definition.ts`, `lib/framework/modules/capabilities/*`, `lib/framework/index.ts`, `lib/framework/modules/sync.ts`, `tests/…`                                                                       | t-1  | **done** | #35 |
+| t-3 | **Workflow bindings**: `ModuleWorkflowBinding` model (mirror `AiWorkflowTrigger`) + admin API + resolve-bindings→`drainEngine` dispatch function                           | `prisma/schema/framework-modules.prisma`, `framework_…` migration, `lib/framework/modules/workflow-bindings/*`, `app/api/v1/admin/framework/modules/[slug]/workflows/**`, `tests/…`                                       | t-1  | **done** | #50 |
+| t-4 | **Knowledge grants**: grant a module's docs/tags to its bound agents via the existing restricted-access system + cache invalidation                                        | `lib/framework/modules/knowledge/*`, `app/api/v1/admin/framework/modules/[slug]/knowledge/**`, `tests/…`                                                                                                                  | t-1  | **done** | #53 |
 
 **Four promoted PRs** (matches the parent plan's indicative `~4`). Honest sizing caveats
 ([[planning-retro#B1]]):
@@ -365,18 +377,44 @@ hooks).
 - **`prisma/schema/framework-modules.prisma`** — **`ModuleWorkflowBinding`** (mirror
   `AiWorkflowTrigger`): `id`, `moduleId`, `eventType String`, `workflowId`,
   `inputTemplate Json?` (the `AiWorkflowSchedule` precedent), `enabled Boolean @default(true)`,
-  timestamps; `module Module @relation(onDelete: Cascade)` + `Module.workflowBindings`
-  back-relation; `workflow AiWorkflow @relation(...)` + back-relation caveat as in t-1;
-  `@@unique([moduleId, eventType, workflowId])`, `@@index([moduleId])`,
-  `@@map("framework_module_workflow")`. Migration + DROP-INDEX strip (B13).
+  **`createdBy String?`**, timestamps; `module Module @relation(onDelete: Cascade)` +
+  `Module.workflowBindings` back-relation; `@@unique([moduleId, eventType, workflowId])`,
+  `@@index([moduleId])`, `@@index([workflowId])`, `@@map("framework_module_workflow")`. Migration
+  - B13 strip. **Built (PR for t-3):**
+  * **`workflowId` is a plain scalar hand-FK to `ai_workflow` (`ON DELETE CASCADE`)** — no Prisma
+    `@relation`, no reverse field on the core `AiWorkflow` model, exactly the t-1 pattern; the
+    back-relation open question is settled (no core edit).
+  * **`createdBy` added (beyond the sketch above)** — a plain scalar hand-FK to `user`
+    (`ON DELETE SET NULL`, nullable; the CLAUDE.md retained-config policy). Both `AiWorkflowTrigger`
+    and `AiWorkflowSchedule` carry `createdBy` and pass it as the triggered execution's `userId`;
+    the mirror needs it so a module-event run is attributed to the operator who wired it (the
+    execution row's cost/display owner) rather than `null`. So the migration hand-writes **two**
+    FKs (`workflowId`→CASCADE, `createdBy`→SET NULL) plus the Prisma-emitted `moduleId` cascade.
 - **`lib/framework/modules/workflow-bindings/`** — the service (`bindWorkflow` /
-  `unbindWorkflow` / `listModuleWorkflowBindings`) **and** the dispatch function
-  **`runModuleWorkflowBindings(moduleSlug, eventType, payload)`**: resolve enabled bindings
-  for `(moduleSlug, eventType)`, and for each, follow the standard pattern — load the
-  workflow + its `publishedVersion`, render `inputTemplate` against `payload`, create a
-  `PENDING`/`RUNNING` `AiWorkflowExecution` pinning `publishedVersion.id`, then
-  `void drainEngine(execution.id, { id, slug }, definition, inputData, userId, versionId)`.
-  Skips (with a `logger.warn`) a binding whose workflow has no published version.
+  `updateWorkflowBinding` / `unbindWorkflow`, `./service`), the reads (`listModuleWorkflowBindings`,
+  `./queries`, stitching the workflow's display fields + a `hasPublishedVersion` "will it fire"
+  flag — no `@relation`, so a batched stitch, not `include`), **and** the dispatch function
+  **`runModuleWorkflowBindings(moduleSlug, eventType, payload)`** (`./dispatch`): resolve enabled
+  bindings for `(moduleId, eventType)`, batch-load the workflows + `publishedVersion`, and for each
+  follow the standard pattern — create a `PENDING` `AiWorkflowExecution` pinning
+  `publishedVersion.id` (userId = the binding's `createdBy`, `triggerSource: 'module-event'`), then
+  `void drainEngine(...)`. **Built (PR for t-3):**
+  - **Input shape:** `inputData = { ...inputTemplate, event: { moduleSlug, eventType, payload } }` —
+    the operator's static template at top level, the live event under an `event` envelope that
+    **wins on key collision** (a workflow always finds the event at `input.event`).
+  - **`triggerSource` is the fixed literal `'module-event'`**, not `module:<eventType>` — the column
+    is `VarChar(50)` and `eventType` is free-form up to 100 chars, so a derived value could overflow;
+    the eventType travels in `inputData.event` instead. Attribution-only, matching the column's
+    intent.
+  - **Skips (never aborts the fan-out), each `logger.warn`'d with a reason:** unknown module (clean
+    no-op — the event source is decoupled from the registry), no matching enabled binding,
+    `workflow_not_found`, `workflow_inactive`, `no_published_version`, `invalid_definition`
+    (malformed published snapshot), and a per-binding `execution_create_failed` (one failed insert
+    doesn't stop the others). Returns a `{ matched, dispatched, skipped[] }` summary for
+    observability/testing.
+  - **`eventType` is NOT validated against a declared vocabulary** (unlike agent `role` vs
+    `agentRoles`) — the module-lifecycle event vocabulary (`ModuleDefinition.events`) is
+    **f-engagement** (08); until it exists `eventType` is free-form shape-only (X1).
 - **Admin API** under `app/api/v1/admin/framework/modules/[slug]/workflows/` — `GET`/`POST`/
   `DELETE`/`PATCH` bindings; `withAdminAuth`, Zod bodies, audit. (Views → f-ops-views.)
 - **Event source — coordination note (no hard dep edge):** nothing _calls_
@@ -390,26 +428,87 @@ hooks).
   `drainEngine` with the pinned version, skipping unpublished ones; disabled bindings don't
   fire; **gates green** (retro B4).
 
-### t-4 · Knowledge grants — the module's corner of the material (thin)
+### t-4 · Knowledge scope — a module's corner of the material (built; standalone, not folded)
 
-§4.2: "no new mechanism at all." Reuse `resolveAgentDocumentAccess` + the grant pivots.
+§4.2: "no new mechanism at all" — reuse the enforcement (`resolveAgentDocumentAccess`), not
+materialise grants. The build-time investigation into _correct behaviour_ reshaped this task
+substantially (it did **not** fold into t-1, and it is **not** thin — it carries a core seam);
+the reasoning is recorded because it's the load-bearing part.
 
-- **`lib/framework/modules/knowledge/`** — a thin service that, given a module and its bound
-  agents, applies **document/tag grants** to those agents through the existing pivots
-  (`AiAgentKnowledgeDocument` / `AiAgentKnowledgeTag`), flipping each agent to
-  `knowledgeAccessMode: 'restricted'` where appropriate, and calls **`invalidateAgentAccess(agentId)`**
-  after every mutation (the resolver memoises for 60s). Optionally a module-declared knowledge
-  scope (tags/docs) on `ModuleDefinition` if the shape warrants — **decide at build**; the
-  minimum is an API to grant a bound agent the module's docs/tags.
-- **Admin API** under `app/api/v1/admin/framework/modules/[slug]/knowledge/` — grant/revoke
-  a document or tag for the module's bound agents; `withAdminAuth`, Zod, audit.
-- **Fold decision (B1):** if this lands commit-sized (very likely, since the mechanism is
-  entirely pre-existing), **fold into t-1** and drop t-4. Kept separate here for legibility;
-  collapse at build time.
-- **Done when:** a module's bound agent can be granted the module's documents/tags through
-  the API, the grant is enforced at search time by the **existing** `resolveAgentDocumentAccess`
-  path (no new enforcement code), the access cache is invalidated on mutation; **gates green**
-  (retro B4). _Or_ folded into t-1 with the same guarantees.
+**The behaviour (settled with the design owner):** a module **owns a durable knowledge scope**
+(a set of documents/tags), symmetric with its agent seats / capabilities / workflow bindings.
+Every agent **bound** to the module **inherits** search access to that scope; unbinding
+releases it; and this **coexists non-destructively** with the operator's own direct per-agent
+grants (the stock Sunrise agent-knowledge UI) — neither source clobbers the other. That
+coexistence is the whole crux.
+
+**Why it can't be materialised (why the naive "thin fan-out" is wrong).** The core enforcement
+pivot `AiAgentKnowledgeDocument` is `@@id([agentId, documentId])` — one row per (agent, doc),
+**no provenance**, and X6-sealed. If a module grant and a direct operator grant name the same
+doc for the same agent, that is the _same row_: releasing it on unbind kills the operator's
+grant; keeping it leaks. **Any copy-down scheme either clobbers or leaks.** So module scope must
+be composed **live at resolve time**, never stored on the agent.
+
+**The shape built:**
+
+- **Core seam (generic, minimal, upstream-bound):**
+  [`lib/orchestration/knowledge/agent-access-contributors.ts`](../../../lib/orchestration/knowledge/agent-access-contributors.ts)
+  — `registerAgentAccessContributor(key, fn)` (a keyed registry, same shape as
+  `registerContextContributor`), and a ~15-line union in `resolveAgentDocumentAccess`'s
+  restricted branch that awaits contributors in parallel and folds their `{ documentIds, tagIds }`
+  into the set (tagIds ride the existing tag-expansion). Contributors **only widen a restricted
+  agent** — a `full` agent short-circuits before them, so module scope never narrows access. A
+  throwing contributor is logged and ignored (the resolver keeps its never-throws contract).
+  Empty registry ⇒ byte-for-byte prior behaviour. **No framework vocabulary, no core→framework
+  import** → boundary CI green.
+- **Two fork pivots** (`ModuleKnowledgeDocument` / `ModuleKnowledgeTag`, mirroring the core's own
+  two grant pivots) recording the scope; `documentId`/`tagId` are plain scalar hand-FKs to
+  `ai_knowledge_document` / `knowledge_tag` (`ON DELETE CASCADE`, the t-1 pattern), `moduleId` a
+  Prisma relation. Migration + B13 strip.
+- **`resolveModuleKnowledgeForAgent(agentId)`** (`lib/framework/modules/knowledge/contributor.ts`)
+  — the registered contributor: computes an agent's module-derived docs/tags **live** from
+  `ModuleAgentBinding ⋈` the pivots. Registered in `initFramework()` (in-memory; queries only when
+  the resolver calls it). So a newly-bound agent inherits on its next search, an unbound agent
+  drops it — **no reconcile, no hook into shipped t-1**, because nothing is materialised.
+- **`knowledgeAccessMode` is never flipped** (a correction to this plan's earlier text). The agent
+  owns its mode; the module contributes scope. A module granting a doc must not silently narrow a
+  `full` agent to restricted — and needn't, since a `full` agent already sees the doc. A companion
+  agent that _should_ be restricted is seeded that way by f-facilitation-agents (13).
+- **Service + admin API** (`.../knowledge/route.ts`, `GET`/`POST`/`DELETE`) grant/revoke a document
+  **or** a tag (exactly one), `withAdminAuth`, Zod, audit; every mutation invalidates
+  `invalidateAgentAccess` for the module's currently-bound agents (the resolver caches 60s).
+- **Upstream:** files the Sunrise issue for `registerAgentAccessContributor`, backed by this
+  working impl; ledgered in [`upstream-asks.md`](../upstream-asks.md). Views → f-ops-views (15).
+- **Fold decision (B1): did NOT fold.** The mechanism was _not_ "entirely pre-existing" as assumed
+  — correct enforcement required the core seam — so t-4 is its own PR, ~t-3-sized. The B1 "fold if
+  commit-sized" bet was based on a wrong premise; the investigation corrected it.
+- **Done when:** an admin can add/remove documents/tags to a module's knowledge scope; a
+  **restricted** agent bound to the module inherits that scope at search time via the core resolver
+  (composed live, unioned with its direct grants, never clobbering them); the access cache is
+  invalidated on mutation; the Sunrise seam issue is filed; **gates green** (retro B4).
+
+**Cache-invalidation coordination (surfaced by t-4 `/code-review` — deferrals need a home).**
+The resolver caches the composed access set per-agent for 60s, so any path that changes what a
+contributor reads must call `invalidateAgentAccess`. t-4 wired the two application sites that
+mutate the inputs (grant/revoke in `knowledge/service.ts`; bind/unbind in `bindings/service.ts`).
+Two paths are deliberately **not** covered and are recorded here so a future owner doesn't miss them:
+
+- **Module hard-delete → `f-ops-views` (15).** `moduleId onDelete: Cascade` means deleting a `Module`
+  row drops its bindings + knowledge pivots at the DB layer with **no application code running**, so
+  no site can evict the affected agents' caches — a ≤60s fail-to-revoke window. There is **no
+  module-hard-delete path today** (f-module-core shipped a read API only). **When f-ops-views (or any
+  admin) adds delete-module, it MUST `invalidateAllAgentAccess()` (or invalidate the module's bound
+  agents) as part of the delete.** Belt-and-braces alternative if this proves fiddly: shorten the
+  resolver TTL, or have the resolver not cache contributor output (recompute live) — a Sunrise-side
+  call, since it's the core cache. (Core doc/tag deletes already call `invalidateAllAgentAccess`, so
+  a deleted _document/tag_ is safe; only _module_ deletion is the gap.)
+- **Module soft-retire (`isRegistered=false`) — retain, by decision.** Retiring a module (code removed,
+  row kept for audit) leaves its bindings + knowledge pivots intact, and the contributor filters on
+  **binding existence, not `isRegistered`** — so a bound restricted agent keeps inheriting a retired
+  module's scope. This is **intended**: retire is an audit flag, not a revocation; to revoke, unbind
+  the agents or delete the module. Stated so it's a designed behaviour, not an accident. (If a future
+  feature wants retire to also revoke knowledge, the contributor gains an `isRegistered` join — a
+  one-line change, deliberately not made now.)
 
 ## Boundary & forkability notes
 
@@ -434,12 +533,13 @@ hooks).
 
 ## Open questions
 
-- **`AiAgent` / `AiWorkflow` back-relation necessity (t-1/t-3).** _Resolved in t-1 (PR #33):_
-  **no core edit needed.** `agentId` is a **plain scalar FK** (no Prisma `@relation` on either
-  side); the `ON DELETE CASCADE` to `ai_agent` is hand-written in the migration (the f-slots
-  `SlotValue.userId` pattern). Prisma compiles fine with no reverse field on `AiAgent`, so the
-  boundary-clean hand-FK — not a back-relation — is the shape. **t-3 does the same for
-  `ModuleWorkflowBinding.workflowId → ai_workflow`.**
+- **`AiAgent` / `AiWorkflow` back-relation necessity (t-1/t-3).** _Resolved._ **No core edit
+  needed for either.** t-1 (PR #33): `agentId` is a plain scalar FK, `ON DELETE CASCADE` to
+  `ai_agent` hand-written (f-slots `SlotValue.userId` pattern), Prisma compiles with no reverse
+  field on `AiAgent`. **t-3 did the same:** `ModuleWorkflowBinding.workflowId → ai_workflow`
+  (`CASCADE`) and `createdBy → user` (`SET NULL`) are both plain scalar hand-FKs — two hand-written
+  constraints in the migration, no `@relation`, no reverse field on the core `AiWorkflow` / `User`
+  models. The boundary-clean hand-FK is the settled shape for a framework→core FK.
 - **Interim scope posture (t-2).** The refuse-helper's missing-`moduleSlug` behaviour
   (recommended: allow-when-absent, refuse-on-mismatch) governs safety before f-guidance
   populates scope. Confirm the posture is the one f-guidance will want to _tighten into_
@@ -448,8 +548,10 @@ hooks).
   transform (prefix with separators normalised, or bare tool name) and confirm no collision
   across two modules' identically-named tools once the prefix is normalised out of the
   function name.
-- **t-4 fold vs standalone.** Decide at build whether knowledge grants warrant a PR or fold
-  into t-1 (B1). Leaning fold.
+- **t-4 fold vs standalone.** _Resolved: standalone._ The premise for folding ("mechanism
+  entirely pre-existing, so commit-sized") was wrong — correct enforcement of a durable module
+  scope that coexists with direct grants required a generic core seam
+  (`registerAgentAccessContributor`) + two fork pivots + a live contributor, ~t-3-sized. Its own PR.
 - **Event-source coordination (t-3).** f-engagement (08) owns the module-lifecycle event
   emission that calls `runModuleWorkflowBindings`. Whichever of 07-t3 / 08 lands the shared
   emit point first owns it; coordinate rather than both defining it (the 08/09 `JourneyEvent`
@@ -460,18 +562,20 @@ hooks).
 Tracked here rather than left in a PR comment (a deferral needs a home). Action _within this
 feature_ — t-3/t-4 are the natural trigger, not a separate later effort.
 
-- **Consolidate the duplicated route/service plumbing when t-3/t-4 add the 3rd–4th copies
-  (rule of three).** Flagged by t-1 `/code-review` (PR #33): `parseModuleSlug` / `parseBindingId`
-  verbatim-duplicate f-map's `parseMapSlug` (differing only in the noun); the `P2002 →
-ValidationError` narrowing is re-hand-rolled in `bindings/service.ts` and f-map's
-  `version-service.ts`; and "resolve module by slug or 404" appears in both `bindings/service.ts`
-  and `bindings/queries.ts`. Deliberately **not** fixed in t-1 — extracting a shared
-  `parseSlugParam(raw, label)` / `parseCuidParam(raw, label)` (→ `lib/validations/common`) and a
-  `mapUniqueConstraintError(err, …)` helper spans f-map + f-module-bindings, so it wants doing
-  once with enough call sites to shape it right, not churned into the first leaf. **t-3
-  (workflow bindings) and t-4 (knowledge) will each add another `parseXSlug` + P2002 map — that
-  is the 3rd/4th copy; extract the shared helpers then instead of copying a 4th time.** Cost of
-  not doing it: a fix to the slug rule or error message in one leaf silently misses the others.
+- **Consolidate the duplicated route/service plumbing (rule of three).** ✅ **Done at t-3 (PR
+  for workflow bindings).** Flagged by t-1 `/code-review` (PR #33): `parseModuleSlug` /
+  `parseBindingId` verbatim-duplicated f-map's `parseMapSlug` (differing only in the noun) and
+  the `P2002 → ValidationError` narrowing was re-hand-rolled in `bindings/service.ts` and f-map's
+  `version-service.ts`. t-3 was the 3rd copy, so the shared helpers were extracted **framework-tier
+  (not core — X6):** `parseSlugParam(raw, label)` / `parseCuidParam(raw, label, field?)` in
+  [`lib/framework/shared/route-params.ts`](../../../lib/framework/shared/route-params.ts) and
+  `mapPrismaWriteError(err, { onUnique, notFound })` / `uniqueTargetString(err)` in
+  [`lib/framework/shared/prisma-errors.ts`](../../../lib/framework/shared/prisma-errors.ts). The
+  plan's earlier "→ `lib/validations/common`" note was corrected at build: that file is
+  **Sunrise-owned**, so the helpers live in the fork's `shared/` tier and f-map + t-1 keep thin
+  named wrappers (`parseMapSlug = parseSlugParam(raw, 'map')`) over them — bodies centralised,
+  call sites unchanged. ("resolve module by slug or 404" stays a one-liner per file; not worth a
+  helper.)
 
 ## Done when (feature)
 

@@ -27,7 +27,12 @@
  */
 
 import { registerContextContributor } from '@/lib/orchestration/chat/context-builder';
+import { registerAgentAccessContributor } from '@/lib/orchestration/knowledge/agent-access-contributors';
 import { loadModuleContext, MODULE_CONTEXT_TYPE } from '@/lib/framework/modules/context';
+import {
+  resolveModuleKnowledgeForAgent,
+  MODULE_KNOWLEDGE_CONTRIBUTOR_KEY,
+} from '@/lib/framework/modules/knowledge/contributor';
 import { syncRegisteredModules } from '@/lib/framework/modules/sync';
 import { syncRegisteredSlotDefinitions } from '@/lib/framework/data-slots/sync';
 import { registerRegisteredModuleCapabilities } from '@/lib/framework/modules/capabilities/register';
@@ -42,6 +47,11 @@ import { guidanceCapabilities } from '@/lib/framework/guidance/capabilities';
 
 export function initFramework(): void {
   registerContextContributor(MODULE_CONTEXT_TYPE, loadModuleContext);
+  // Module knowledge scope: a restricted agent bound to a module inherits that module's
+  // documents/tags, unioned live by the core resolver. Registration is in-memory (the
+  // contributor queries the DB only when the resolver calls it), so it belongs at init;
+  // it is module-registry-independent (it reads bindings at resolve time). (t-4)
+  registerAgentAccessContributor(MODULE_KNOWLEDGE_CONTRIBUTOR_KEY, resolveModuleKnowledgeForAgent);
   // Framework built-in capabilities (get_state, guidance read tools, …) — framework-owned,
   // not leaf- or module-dependent, so they register here at init. The dispatcher-handler +
   // DB-row passes run in `syncFramework()` below.

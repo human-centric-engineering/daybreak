@@ -12,6 +12,7 @@ import { z } from 'zod';
 import {
   registerModule,
   getRegisteredModules,
+  getRegisteredModule,
   __resetModuleRegistryForTests,
 } from '@/lib/framework/modules/registry';
 import type { ModuleDefinition } from '@/lib/framework/modules/definition';
@@ -57,5 +58,22 @@ describe('module registry', () => {
     first.push(def('injected'));
 
     expect(getRegisteredModules().map((m) => m.slug)).toEqual(['alpha']);
+  });
+});
+
+describe('getRegisteredModule (by slug)', () => {
+  it('returns the registered definition for a known slug', () => {
+    registerModule(def('alpha', { name: 'Alpha' }));
+    expect(getRegisteredModule('alpha')?.name).toBe('Alpha');
+  });
+
+  it('returns undefined for an unregistered slug', () => {
+    expect(getRegisteredModule('ghost')).toBeUndefined();
+  });
+
+  it('reflects the latest registration for a slug (idempotent by slug)', () => {
+    registerModule(def('alpha', { name: 'First' }));
+    registerModule(def('alpha', { name: 'Second' }));
+    expect(getRegisteredModule('alpha')?.name).toBe('Second');
   });
 });

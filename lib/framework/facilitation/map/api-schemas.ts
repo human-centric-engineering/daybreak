@@ -9,7 +9,7 @@
 
 import { z } from 'zod';
 import { slugSchema, cuidSchema } from '@/lib/validations/common';
-import { ValidationError } from '@/lib/api/errors';
+import { parseSlugParam } from '@/lib/framework/shared/route-params';
 import { mapDefinitionSchema } from '@/lib/framework/facilitation/map/schema';
 
 /** POST /maps — create a map, optionally with an initial (v1-published) map. */
@@ -44,14 +44,9 @@ export const listMapVersionsQuerySchema = z.object({
 
 /**
  * Validate a `[slug]` path param. A malformed slug can never name a real map, so
- * this is a 400 (bad input), not a 404.
+ * this is a 400 (bad input), not a 404. Thin wrapper over the shared parser (the
+ * parsing body is centralised in `lib/framework/shared/route-params.ts`).
  */
 export function parseMapSlug(raw: string): string {
-  const parsed = slugSchema.safeParse(raw);
-  if (!parsed.success) {
-    throw new ValidationError('Invalid map slug', {
-      slug: ['Must be lowercase alphanumeric with hyphens'],
-    });
-  }
-  return parsed.data;
+  return parseSlugParam(raw, 'map');
 }

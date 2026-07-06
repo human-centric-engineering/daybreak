@@ -12,16 +12,25 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('@/lib/orchestration/chat/context-builder', () => ({
   registerContextContributor: vi.fn(),
 }));
+vi.mock('@/lib/orchestration/knowledge/agent-access-contributors', () => ({
+  registerAgentAccessContributor: vi.fn(),
+}));
 
 const { registerContextContributor } = await import('@/lib/orchestration/chat/context-builder');
+const { registerAgentAccessContributor } =
+  await import('@/lib/orchestration/knowledge/agent-access-contributors');
 const { initFramework } = await import('@/lib/framework');
 const { loadModuleContext, MODULE_CONTEXT_TYPE, MODULE_CONTEXT_UNAVAILABLE } =
   await import('@/lib/framework/modules/context');
+const { resolveModuleKnowledgeForAgent, MODULE_KNOWLEDGE_CONTRIBUTOR_KEY } =
+  await import('@/lib/framework/modules/knowledge/contributor');
 
 const registerMock = registerContextContributor as ReturnType<typeof vi.fn>;
+const registerAccessMock = registerAgentAccessContributor as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   registerMock.mockClear();
+  registerAccessMock.mockClear();
 });
 
 describe('initFramework', () => {
@@ -31,9 +40,18 @@ describe('initFramework', () => {
     expect(registerMock).toHaveBeenCalledWith(MODULE_CONTEXT_TYPE, loadModuleContext);
   });
 
-  it('registers only one contributor (nothing else) per boot', () => {
+  it('registers exactly one context contributor per boot', () => {
     initFramework();
     expect(registerMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('registers the module knowledge access contributor under its key', () => {
+    initFramework();
+    expect(registerAccessMock).toHaveBeenCalledTimes(1);
+    expect(registerAccessMock).toHaveBeenCalledWith(
+      MODULE_KNOWLEDGE_CONTRIBUTOR_KEY,
+      resolveModuleKnowledgeForAgent
+    );
   });
 });
 

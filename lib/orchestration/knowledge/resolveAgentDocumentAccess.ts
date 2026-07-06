@@ -25,6 +25,10 @@
 
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
+import {
+  getAgentAccessContributors,
+  type AgentAccessContribution,
+} from '@/lib/orchestration/knowledge/agent-access-contributors';
 
 export type AgentDocumentAccess =
   | { mode: 'full' }
@@ -90,7 +94,13 @@ export async function resolveAgentDocumentAccess(agentId: string): Promise<Agent
     return value;
   }
 
-  const [docGrants, tagGrants] = await Promise.all([
+  // Direct grants, tag grants, and any registered access contributors resolve in
+  // parallel. Contributors only WIDEN the restricted set; a failing contributor is
+  // logged and ignored so this function keeps its never-throws contract. The call is
+  // wrapped in `Promise.resolve().then(...)` so a contributor that throws SYNCHRONOUSLY
+  // (a non-async fn that throws before returning its promise) is caught too, not just
+  // an async rejection.
+  const [docGrants, tagGrants, contributions] = await Promise.all([
     prisma.aiAgentKnowledgeDocument.findMany({
       where: { agentId },
       select: { documentId: true },
@@ -99,9 +109,29 @@ export async function resolveAgentDocumentAccess(agentId: string): Promise<Agent
       where: { agentId },
       select: { tagId: true },
     }),
+    Promise.all(
+      getAgentAccessContributors().map((contribute) =>
+        Promise.resolve()
+          .then(() => contribute(agentId))
+          .catch((err): AgentAccessContribution => {
+            logger.warn('resolveAgentDocumentAccess: access contributor failed, ignoring', {
+              agentId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            return {};
+          })
+      )
+    ),
   ]);
 
-  const grantedTagIds = tagGrants.map((g) => g.tagId);
+  // Contributed tags join the granted tags before expansion, so a contributed tag's
+  // documents are pulled in exactly like a directly-granted tag's.
+  const grantedTagIds = Array.from(
+    new Set<string>([
+      ...tagGrants.map((g) => g.tagId),
+      ...contributions.flatMap((c) => c.tagIds ?? []),
+    ])
+  );
   const tagExpandedDocs =
     grantedTagIds.length === 0
       ? []
@@ -114,6 +144,7 @@ export async function resolveAgentDocumentAccess(agentId: string): Promise<Agent
     new Set<string>([
       ...docGrants.map((g) => g.documentId),
       ...tagExpandedDocs.map((d) => d.documentId),
+      ...contributions.flatMap((c) => c.documentIds ?? []),
     ])
   );
 
