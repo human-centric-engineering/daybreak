@@ -2,12 +2,13 @@
 name: f-module-config
 feature: 06 · f-module-config
 epic: Framework v1
-status: in flight
+status: shipped (t-1 #56 · t-2 #58)
 owner: Simon Holmes
 depends_on: f-module-core (shipped — t-1 #10 · t-2 #11 · t-3 #12)
 spec: framework-architecture.md §4.1 (Modules) + Appendix A (A4 Zod config · A10 ModuleVersion) + X1
 parent: plan.md
 opened: 2026-07-06
+shipped: 2026-07-06 (unblocks f-ops-views 15)
 ---
 
 # f-module-config — config validation + versioning
@@ -135,10 +136,10 @@ Vitest on `happy-dom`, **no live DB** ([[f-module-core]] reconciliation note): t
 
 ## Tasks (promoted)
 
-| ID  | Task                                                                                                                                         | Files                                                                                                                                                                                                          | Deps | Status      | PR  |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ----------- | --- |
-| t-1 | **`ModuleVersion` spine + config-versioning service** (validate against registry `configSchema` → write `config` → snapshot; restore; audit) | `prisma/schema/framework-modules.prisma`, `framework_…` migration, `lib/framework/modules/config/{version-service,index}.ts`, `lib/framework/index.ts` (barrel), `tests/…`                                     | —    | in progress |     |
-| t-2 | **Zod→descriptor walker + config/version admin APIs** (the A4 engine + editing/history endpoints)                                            | `lib/framework/modules/config/schema-descriptors.ts`, `app/api/v1/admin/framework/modules/[slug]/config/route.ts`, `.../[slug]/versions/route.ts`, `.../[slug]/versions/[version]/restore/route.ts`, `tests/…` | t-1  | backlog     |     |
+| ID  | Task                                                                                                                                         | Files                                                                                                                                                                                                          | Deps | Status   | PR  |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | -------- | --- |
+| t-1 | **`ModuleVersion` spine + config-versioning service** (validate against registry `configSchema` → write `config` → snapshot; restore; audit) | `prisma/schema/framework-modules.prisma`, `framework_…` migration, `lib/framework/modules/config/{version-service,index}.ts`, `lib/framework/index.ts` (barrel), `tests/…`                                     | —    | **done** | #56 |
+| t-2 | **Zod→descriptor walker + config/version admin APIs** (the A4 engine + editing/history endpoints)                                            | `lib/framework/modules/config/schema-descriptors.ts`, `app/api/v1/admin/framework/modules/[slug]/config/route.ts`, `.../[slug]/versions/route.ts`, `.../[slug]/versions/[version]/restore/route.ts`, `tests/…` | t-1  | **done** | #58 |
 
 **Two promoted PRs — fewer than the parent plan's indicative `~4`.** The two deferred UI tasks (the
 generic client form; the version-history tab) move to **f-ops-views (15)** per the API-first
@@ -171,11 +172,19 @@ The versioned config backbone: a validated config write that snapshots history.
   - `saveModuleConfig({ slug, config, userId, changeSummary?, clientIp })` — resolve the **registered**
     `ModuleDefinition` by slug (reject with a clear error if the module is unregistered / code removed —
     there is no schema to validate against); `configSchema.safeParse(config)` → `ValidationError` on
-    failure (A4); in one `executeTransaction`: `nextModuleVersionNumber(tx, moduleId)`, update
-    `Module.config`, create the `ModuleVersion` snapshot. Seed an explicit **initial version** the first
-    time a module is versioned (the `INITIAL_VERSION_SUMMARY` precedent), so the pre-edit state is a
-    restorable entry. `logAdminAction` after commit (`action: 'module_config.save'`, `changes:
-{ config: { from: prevVersion, to: newVersion } }`).
+    failure (A4); in one `$transaction`: `nextVersionNumber(tx, moduleId)`, create the `ModuleVersion`
+    snapshot, update `Module.config`. `logAdminAction` after commit (`action: 'module_config.save'`,
+    `changes: { config: { from: prevVersion|null, to: newVersion } }`).
+    **Reconciled at t-1 code review (no lazy v1 seed — the first save is v1):** the plan originally
+    called for lazily seeding an "Initial configuration" v1 of the pre-edit config on first save (the
+    `AiAgentVersion` precedent). Review showed that rationale does **not** transfer to modules: an
+    agent's create-time config is a real human-authored snapshot, but a module's pre-edit state is the
+    **empty `{}` boot-sync default** — so seeding it fabricated an author (stamped the first _editor_ on
+    config they never wrote) and, for a schema with required fields, produced a v1 that fails its own
+    restore re-validation (a version presented as restorable that can never be restored). Dropped; the
+    first save is simply v1, and `from` is `null` for it. Also wraps the version-create in
+    `mapPrismaWriteError` so a concurrent-save `@@unique([moduleId, version])` collision (a
+    double-submitted form) is a retryable `ValidationError`, not a raw P2002 → 500.
   - `restoreModuleVersion({ slug, version, userId, clientIp })` — load the target `ModuleVersion` via
     `@@unique([moduleId, version])`; **re-validate its `snapshot` against the current `configSchema`**
     (the schema may have changed since — reject if the old snapshot no longer parses); write
@@ -209,6 +218,15 @@ FieldDescriptor[]`. Walk a top-level `ZodObject`'s `.shape`; per field, unwrap
   - `label` from the field's `.description` if present, else a humanised key; `required` = not optional
     and no default; `default` read from `ZodDefault`. Pure, no I/O, exhaustively unit-tested. Bounded on
     purpose (flat config is the 99% case — a module needing deep config uses the JSON fallback).
+  - **As built (t-2):** rather than reach into Zod's version-specific `_def` internals (fragile across
+    Zod majors), the walker converts the schema with **Zod 4's native `z.toJSONSchema(schema, {
+unrepresentable: 'any' })`** and walks the stable JSON-Schema shape — `unrepresentable: 'any'` keeps
+    it total (an unmodellable type becomes `{}` → the `json` fallback rather than a throw). Two
+    JSON-Schema quirks handled after code review: a defaulted field is listed in JSON-Schema `required`
+    (so form-`required` = in `required` **and** no default), and a bare `z.number().int()` emits
+    ±`MAX_SAFE_INTEGER` sentinel bounds (dropped; `exclusiveMinimum`/`exclusiveMaximum` from
+    `.positive()`/`.gt()` are read instead). The `[version]` path param is bounded to Postgres `int4`
+    (an over-range value is a clean 400, not a DB error → 500).
 - **`app/api/v1/admin/framework/modules/[slug]/config/route.ts`** — `GET` returns
   `{ descriptors: describeConfigSchema(def.configSchema), values: module.config }` (the registered def +
   the live row); `PUT` validates the body shape (Zod), then calls `saveModuleConfig(...)` with
