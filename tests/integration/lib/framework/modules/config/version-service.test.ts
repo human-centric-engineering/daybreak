@@ -3,11 +3,11 @@
  *
  * Exercises the real save/restore/list/get logic against a small STATEFUL in-memory
  * Prisma fake — `create`/`update` mutate a store and the finders read it back, so version
- * monotonicity, the lazy initial-version seed, the live-config write, and restore-forward
- * are proven for real rather than asserted call-by-call (house style: no live DB in
- * vitest). The `configSchema` is a genuine Zod schema via a mocked registry, so A4
- * validation (reject / apply-defaults / re-validate-on-restore) is real. The HTTP
- * contract over these functions is t-2.
+ * monotonicity, the live-config write, restore-forward, and the P2002 conflict mapping are
+ * proven for real rather than asserted call-by-call (house style: no live DB in vitest).
+ * The `configSchema` is a genuine Zod schema via a mocked registry, so A4 validation
+ * (reject / apply-defaults / re-validate-on-restore) is real. The HTTP contract over these
+ * functions is t-2.
  *
  * @see lib/framework/modules/config/version-service.ts
  */
@@ -110,12 +110,12 @@ vi.mock('@/lib/db/client', () => ({ prisma: prismaFake }));
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({ logAdminAction: vi.fn() }));
 vi.mock('@/lib/framework/modules/registry', () => ({ getRegisteredModule: vi.fn() }));
 
+import { Prisma } from '@prisma/client';
 import {
   saveModuleConfig,
   restoreModuleVersion,
   listModuleVersions,
   getModuleVersion,
-  INITIAL_VERSION_SUMMARY,
 } from '@/lib/framework/modules/config/version-service';
 import { getRegisteredModule } from '@/lib/framework/modules/registry';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
@@ -165,23 +165,20 @@ describe('saveModuleConfig', () => {
     expect(versions).toHaveLength(0);
   });
 
-  it('on first save seeds an initial v1 (pre-edit) then writes the save as v2', async () => {
-    seedModule('reading', { tone: 'direct', sessions: 9 }); // pre-edit state
+  it('writes the first save as v1 (no lazy pre-edit seed)', async () => {
+    seedModule('reading', { tone: 'direct', sessions: 9 }); // pre-edit boot default
     const { version } = await saveModuleConfig({
       slug: 'reading',
       config: { tone: 'gentle', sessions: 5 },
       userId: USER,
       changeSummary: 'tuned',
     });
-    expect(version.version).toBe(2);
+    expect(version.version).toBe(1);
 
     const { versions } = await listModuleVersions('reading');
-    expect(versions.map((v) => v.version)).toEqual([2, 1]);
-    const v1 = versions.find((v) => v.version === 1)!;
-    expect(v1.changeSummary).toBe(INITIAL_VERSION_SUMMARY);
-    expect(v1.snapshot).toEqual({ tone: 'direct', sessions: 9 }); // the pre-edit config
-    const v2 = versions.find((v) => v.version === 2)!;
-    expect(v2.snapshot).toEqual({ tone: 'gentle', sessions: 5 });
+    expect(versions.map((v) => v.version)).toEqual([1]); // pre-edit state NOT captured
+    expect(versions[0].snapshot).toEqual({ tone: 'gentle', sessions: 5 });
+    expect(versions[0].changeSummary).toBe('tuned');
   });
 
   it('applies Zod defaults and stores the canonical parsed config on the live row', async () => {
@@ -193,27 +190,47 @@ describe('saveModuleConfig', () => {
 
   it('numbers versions monotonically across saves', async () => {
     seedModule('reading');
-    await saveModuleConfig({ slug: 'reading', config: { tone: 'gentle' }, userId: USER }); // seeds v1 + v2
+    const first = await saveModuleConfig({
+      slug: 'reading',
+      config: { tone: 'gentle' },
+      userId: USER,
+    });
     const second = await saveModuleConfig({
       slug: 'reading',
       config: { tone: 'direct' },
       userId: USER,
     });
-    expect(second.version.version).toBe(3);
+    expect(first.version.version).toBe(1);
+    expect(second.version.version).toBe(2);
     const { versions } = await listModuleVersions('reading');
-    expect(versions.map((v) => v.version)).toEqual([3, 2, 1]);
+    expect(versions.map((v) => v.version)).toEqual([2, 1]);
   });
 
-  it('audits module_config.save with the version transition', async () => {
+  it('audits the first save with from: null (no prior version)', async () => {
     seedModule('reading');
     await saveModuleConfig({ slug: 'reading', config: { tone: 'gentle' }, userId: USER });
     expect(logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'module_config.save',
         entityType: 'module_config',
-        changes: { config: { from: 1, to: 2 } },
+        changes: { config: { from: null, to: 1 } },
       })
     );
+  });
+
+  it('maps a concurrent version collision (P2002) to a retryable ValidationError', async () => {
+    seedModule('reading');
+    const spy = vi.spyOn(prismaFake.moduleVersion, 'create').mockRejectedValueOnce(
+      new Prisma.PrismaClientKnownRequestError('Unique constraint', {
+        code: 'P2002',
+        clientVersion: 'test',
+        meta: { target: ['moduleId', 'version'] },
+      })
+    );
+    await expect(
+      saveModuleConfig({ slug: 'reading', config: { tone: 'gentle' }, userId: USER })
+    ).rejects.toThrow(ValidationError);
+    spy.mockRestore();
   });
 });
 
@@ -231,16 +248,16 @@ describe('restoreModuleVersion', () => {
       slug: 'reading',
       config: { tone: 'gentle', sessions: 2 },
       userId: USER,
-    }); // v1 seed + v2
+    }); // v1
     await saveModuleConfig({
       slug: 'reading',
       config: { tone: 'direct', sessions: 8 },
       userId: USER,
-    }); // v3
+    }); // v2
 
-    const { version } = await restoreModuleVersion({ slug: 'reading', version: 2, userId: USER });
-    expect(version.version).toBe(4);
-    expect(version.changeSummary).toBe('Restore to v2');
+    const { version } = await restoreModuleVersion({ slug: 'reading', version: 1, userId: USER });
+    expect(version.version).toBe(3);
+    expect(version.changeSummary).toBe('Restore to v1');
     expect(version.snapshot).toEqual({ tone: 'gentle', sessions: 2 });
 
     const live = await prismaFake.module.findUnique({ where: { id } });
@@ -249,16 +266,16 @@ describe('restoreModuleVersion', () => {
     expect(logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({
         action: 'module_config.restore',
-        metadata: expect.objectContaining({ restoredFromVersion: 2 }),
+        metadata: expect.objectContaining({ restoredFromVersion: 1 }),
       })
     );
   });
 
-  it('rejects restoring a snapshot that no longer validates against the current schema', async () => {
+  it('rejects restoring a snapshot that no longer validates, with a restore-specific message', async () => {
     seedModule('reading');
-    await saveModuleConfig({ slug: 'reading', config: { tone: 'gentle' }, userId: USER }); // v1 seed + v2
+    await saveModuleConfig({ slug: 'reading', config: { tone: 'gentle' }, userId: USER }); // v1
 
-    // The module's schema tightens: `tone` now must be 'formal' only — the old snapshot
+    // The module's schema tightens: `tone` now must be 'formal' only — the v1 snapshot
     // ('gentle') no longer parses.
     vi.mocked(getRegisteredModule).mockReturnValue({
       slug: 'reading',
@@ -268,15 +285,15 @@ describe('restoreModuleVersion', () => {
     });
 
     await expect(
-      restoreModuleVersion({ slug: 'reading', version: 2, userId: USER })
-    ).rejects.toThrow(ValidationError);
+      restoreModuleVersion({ slug: 'reading', version: 1, userId: USER })
+    ).rejects.toThrow(/Version 1 can no longer be restored/);
   });
 });
 
 describe('listModuleVersions / getModuleVersion', () => {
   beforeEach(async () => {
     seedModule('reading');
-    // seeds v1 + v2, then v3, v4
+    // three saves → v1, v2, v3 (no lazy seed)
     await saveModuleConfig({ slug: 'reading', config: { tone: 'gentle' }, userId: USER });
     await saveModuleConfig({ slug: 'reading', config: { tone: 'direct' }, userId: USER });
     await saveModuleConfig({ slug: 'reading', config: { tone: 'gentle' }, userId: USER });
@@ -284,16 +301,16 @@ describe('listModuleVersions / getModuleVersion', () => {
 
   it('lists newest first', async () => {
     const { versions } = await listModuleVersions('reading');
-    expect(versions.map((v) => v.version)).toEqual([4, 3, 2, 1]);
+    expect(versions.map((v) => v.version)).toEqual([3, 2, 1]);
   });
 
   it('paginates with a stable id cursor', async () => {
     const page1 = await listModuleVersions('reading', { limit: 2 });
-    expect(page1.versions.map((v) => v.version)).toEqual([4, 3]);
+    expect(page1.versions.map((v) => v.version)).toEqual([3, 2]);
     expect(page1.nextCursor).toBe(page1.versions[1].id);
 
     const page2 = await listModuleVersions('reading', { limit: 2, cursor: page1.nextCursor! });
-    expect(page2.versions.map((v) => v.version)).toEqual([2, 1]);
+    expect(page2.versions.map((v) => v.version)).toEqual([1]);
     expect(page2.nextCursor).toBeNull();
   });
 

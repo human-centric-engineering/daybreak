@@ -24,28 +24,37 @@ import type { ModuleVersion } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
+import { mapPrismaWriteError } from '@/lib/framework/shared/prisma-errors';
 import { getRegisteredModule } from '@/lib/framework/modules/registry';
 
 type Tx = Prisma.TransactionClient;
 
 const ENTITY_TYPE = 'module_config';
 
-/** Change summary for the explicit original version seeded on a module's first save. */
-export const INITIAL_VERSION_SUMMARY = 'Initial configuration';
+/**
+ * A concurrent save/restore lost the race for the next version number (two writers both
+ * computed N+1 under READ COMMITTED and one hit `@@unique([moduleId, version])`). Surfaced
+ * as a clean retryable `ValidationError`, not a raw P2002 500. The realistic trigger is a
+ * double-submitted config form.
+ */
+function throwConcurrentVersionConflict(): never {
+  throw new ValidationError('Module config was updated concurrently — please retry', {
+    config: ['A newer config version was written while this one was in flight'],
+  });
+}
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
 interface ResolvedModule {
   id: string;
   name: string;
-  config: Prisma.JsonValue;
 }
 
-/** Resolve a module row (id, name, live config) from its slug, or 404. */
+/** Resolve a module row (id, name) from its slug, or 404. */
 async function loadModule(slug: string): Promise<ResolvedModule> {
   const row = await prisma.module.findUnique({
     where: { slug },
-    select: { id: true, name: true, config: true },
+    select: { id: true, name: true },
   });
   if (!row) throw new NotFoundError(`Module "${slug}" not found`);
   return row;
@@ -74,8 +83,13 @@ function validateAgainstSchema(slug: string, config: unknown): Prisma.InputJsonV
   return parsed.data as Prisma.InputJsonValue;
 }
 
-/** Highest existing version for a module + 1 (or 1 if none). Call inside the write tx
- *  so concurrent writers can't collide on `@@unique([moduleId, version])`. */
+/**
+ * Highest existing version for a module + 1 (or 1 if none). Computed inside the write tx,
+ * but note that under READ COMMITTED that does NOT serialise concurrent writers — two
+ * overlapping saves can both read N and both try to create N+1. That collision is caught
+ * at the `@@unique([moduleId, version])` index and mapped to a retryable error by the
+ * callers (`throwConcurrentVersionConflict`), not prevented here.
+ */
 async function nextVersionNumber(client: Tx, moduleId: string): Promise<number> {
   const row = await client.moduleVersion.findFirst({
     where: { moduleId },
@@ -83,34 +97,6 @@ async function nextVersionNumber(client: Tx, moduleId: string): Promise<number> 
     select: { version: true },
   });
   return (row?.version ?? 0) + 1;
-}
-
-/**
- * Seed an explicit v1 capturing the module's *pre-edit* config when it has no versions
- * yet, so the original state is a first-class, restorable entry (the `AiAgentVersion`
- * create-time seed, done lazily here because a module row is created by boot-sync, not
- * through this service). The seed snapshot is stored as-is (it predates this feature's
- * validation) — restore re-validates before it is ever reinstated. Returns the next
- * free version number after seeding (2 when seeded, else the original `next`).
- */
-async function seedInitialVersionIfNeeded(
-  tx: Tx,
-  moduleId: string,
-  next: number,
-  currentConfig: Prisma.JsonValue,
-  userId: string
-): Promise<number> {
-  if (next !== 1) return next;
-  await tx.moduleVersion.create({
-    data: {
-      moduleId,
-      version: 1,
-      snapshot: currentConfig ?? {},
-      changeSummary: INITIAL_VERSION_SUMMARY,
-      createdBy: userId,
-    },
-  });
-  return 2;
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
@@ -130,9 +116,11 @@ export interface SaveModuleConfigResult {
 
 /**
  * Validate an operator's config against the registered module's schema, write it to
- * `Module.config`, and snapshot a new `ModuleVersion` — atomically. On a module's first
- * save, an explicit v1 capturing the pre-edit config is seeded first (so it stays
- * restorable) and the save becomes v2. Throws `ValidationError` when the module is
+ * `Module.config`, and snapshot a new `ModuleVersion` — atomically. The first save is v1
+ * (there is no lazy pre-edit seed: a module's pre-edit state is the empty `{}` boot-sync
+ * default — not a meaningful, human-authored config like an agent's create-time snapshot —
+ * so seeding it would fabricate an author and, for a schema with required fields, produce a
+ * v1 that fails its own restore re-validation). Throws `ValidationError` when the module is
  * unregistered or the config fails its schema; `NotFoundError` when the slug is unknown.
  */
 export async function saveModuleConfig(
@@ -144,21 +132,25 @@ export async function saveModuleConfig(
   // Validate before opening the transaction — a bad config writes nothing.
   const validated = validateAgainstSchema(slug, config);
 
-  const version = await prisma.$transaction(async (tx) => {
-    const next = await nextVersionNumber(tx, mod.id);
-    const versionNumber = await seedInitialVersionIfNeeded(tx, mod.id, next, mod.config, userId);
-    const created = await tx.moduleVersion.create({
-      data: {
-        moduleId: mod.id,
-        version: versionNumber,
-        snapshot: validated,
-        changeSummary: changeSummary ?? null,
-        createdBy: userId,
-      },
+  let version: ModuleVersion;
+  try {
+    version = await prisma.$transaction(async (tx) => {
+      const next = await nextVersionNumber(tx, mod.id);
+      const created = await tx.moduleVersion.create({
+        data: {
+          moduleId: mod.id,
+          version: next,
+          snapshot: validated,
+          changeSummary: changeSummary ?? null,
+          createdBy: userId,
+        },
+      });
+      await tx.module.update({ where: { id: mod.id }, data: { config: validated } });
+      return created;
     });
-    await tx.module.update({ where: { id: mod.id }, data: { config: validated } });
-    return created;
-  });
+  } catch (err) {
+    mapPrismaWriteError(err, { onUnique: () => throwConcurrentVersionConflict() });
+  }
 
   logAdminAction({
     userId,
@@ -166,7 +158,9 @@ export async function saveModuleConfig(
     entityType: ENTITY_TYPE,
     entityId: mod.id,
     entityName: mod.name,
-    changes: { config: { from: version.version - 1, to: version.version } },
+    changes: {
+      config: { from: version.version > 1 ? version.version - 1 : null, to: version.version },
+    },
     metadata: { slug, ...(changeSummary ? { changeSummary } : {}) },
     clientIp: clientIp ?? null,
   });
@@ -203,23 +197,43 @@ export async function restoreModuleVersion(
     throw new NotFoundError(`Module "${slug}" has no version ${version}`);
   }
 
-  // Re-validate the historical snapshot against the schema as it stands now.
-  const validated = validateAgainstSchema(slug, target.snapshot);
+  // Re-validate the historical snapshot against the schema as it stands NOW. A config
+  // valid when saved may be rejected by a since-tightened schema; restoring it raw would
+  // write a config the current module code can't consume, so this fails closed — but with
+  // a restore-specific message (the generic "config is invalid" would confuse an operator
+  // who submitted no config), preserving the field-level detail.
+  let validated: Prisma.InputJsonValue;
+  try {
+    validated = validateAgainstSchema(slug, target.snapshot);
+  } catch (err) {
+    if (err instanceof ValidationError) {
+      throw new ValidationError(
+        `Version ${version} can no longer be restored — it does not match the module's current config schema`,
+        err.details
+      );
+    }
+    throw err;
+  }
 
-  const created = await prisma.$transaction(async (tx) => {
-    const next = await nextVersionNumber(tx, mod.id);
-    const row = await tx.moduleVersion.create({
-      data: {
-        moduleId: mod.id,
-        version: next,
-        snapshot: validated,
-        changeSummary: `Restore to v${version}`,
-        createdBy: userId,
-      },
+  let created: ModuleVersion;
+  try {
+    created = await prisma.$transaction(async (tx) => {
+      const next = await nextVersionNumber(tx, mod.id);
+      const row = await tx.moduleVersion.create({
+        data: {
+          moduleId: mod.id,
+          version: next,
+          snapshot: validated,
+          changeSummary: `Restore to v${version}`,
+          createdBy: userId,
+        },
+      });
+      await tx.module.update({ where: { id: mod.id }, data: { config: validated } });
+      return row;
     });
-    await tx.module.update({ where: { id: mod.id }, data: { config: validated } });
-    return row;
-  });
+  } catch (err) {
+    mapPrismaWriteError(err, { onUnique: () => throwConcurrentVersionConflict() });
+  }
 
   logAdminAction({
     userId,

@@ -10,7 +10,6 @@ export {
   restoreModuleVersion,
   listModuleVersions,
   getModuleVersion,
-  INITIAL_VERSION_SUMMARY,
   type SaveModuleConfigArgs,
   type SaveModuleConfigResult,
   type RestoreModuleVersionArgs,
