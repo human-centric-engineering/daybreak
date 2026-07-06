@@ -19,6 +19,7 @@ import type { FacilitationGraph, FacilitationGraphVersion } from '@prisma/client
 import { prisma } from '@/lib/db/client';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
+import { mapPrismaWriteError } from '@/lib/framework/shared/prisma-errors';
 import { mapDefinitionSchema } from '@/lib/framework/facilitation/map/schema';
 import type { MapDefinition } from '@/lib/framework/facilitation/map/schema';
 import { validateMapFormat } from '@/lib/framework/facilitation/map/validate';
@@ -156,12 +157,13 @@ export async function createGraph(args: CreateGraphArgs): Promise<FacilitationGr
       return tx.facilitationGraph.findUniqueOrThrow({ where: { id: created.id } });
     });
   } catch (err) {
-    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-      throw new ValidationError('A facilitation map with this slug already exists', {
-        slug: [`"${slug}" is already in use`],
-      });
-    }
-    throw err;
+    mapPrismaWriteError(err, {
+      onUnique: () => {
+        throw new ValidationError('A facilitation map with this slug already exists', {
+          slug: [`"${slug}" is already in use`],
+        });
+      },
+    });
   }
 
   logAdminAction({

@@ -19,6 +19,7 @@ import type { ModuleAgentBinding } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
+import { mapPrismaWriteError } from '@/lib/framework/shared/prisma-errors';
 import { getRegisteredModules } from '@/lib/framework/modules/registry';
 
 const ENTITY_TYPE = 'module_agent_binding';
@@ -94,17 +95,10 @@ function rethrowBindingWriteError(
   err: unknown,
   ctx: { moduleSlug: string; agentId?: string; role?: string }
 ): never {
-  if (err instanceof Prisma.PrismaClientKnownRequestError) {
-    if (err.code === 'P2002') {
-      // Prisma's P2002 `meta.target` is the violated index/constraint — a string or
-      // a string[] of field names depending on the driver; normalise before testing.
-      const target = err.meta?.target;
-      const targetStr = Array.isArray(target)
-        ? target.join(',')
-        : typeof target === 'string'
-          ? target
-          : '';
-      if (targetStr.includes('single_primary')) {
+  mapPrismaWriteError(err, {
+    onUnique: (target) => {
+      // Two unique indexes back this table; the message depends on which was hit.
+      if (target.includes('single_primary')) {
         throw new ValidationError(
           'Another agent was set as the primary seat for this module concurrently; retry',
           { isPrimary: ['Only one primary seat is allowed per module'] }
@@ -113,12 +107,9 @@ function rethrowBindingWriteError(
       throw new ValidationError('This agent is already bound to that seat', {
         role: [`"${ctx.agentId}" is already bound to module "${ctx.moduleSlug}" as "${ctx.role}"`],
       });
-    }
-    if (err.code === 'P2025') {
-      throw new NotFoundError('Binding was removed concurrently');
-    }
-  }
-  throw err;
+    },
+    notFound: 'Binding was removed concurrently',
+  });
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────

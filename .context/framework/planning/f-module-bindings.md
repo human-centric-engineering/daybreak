@@ -365,18 +365,44 @@ hooks).
 - **`prisma/schema/framework-modules.prisma`** — **`ModuleWorkflowBinding`** (mirror
   `AiWorkflowTrigger`): `id`, `moduleId`, `eventType String`, `workflowId`,
   `inputTemplate Json?` (the `AiWorkflowSchedule` precedent), `enabled Boolean @default(true)`,
-  timestamps; `module Module @relation(onDelete: Cascade)` + `Module.workflowBindings`
-  back-relation; `workflow AiWorkflow @relation(...)` + back-relation caveat as in t-1;
-  `@@unique([moduleId, eventType, workflowId])`, `@@index([moduleId])`,
-  `@@map("framework_module_workflow")`. Migration + DROP-INDEX strip (B13).
+  **`createdBy String?`**, timestamps; `module Module @relation(onDelete: Cascade)` +
+  `Module.workflowBindings` back-relation; `@@unique([moduleId, eventType, workflowId])`,
+  `@@index([moduleId])`, `@@index([workflowId])`, `@@map("framework_module_workflow")`. Migration
+  - B13 strip. **Built (PR for t-3):**
+  * **`workflowId` is a plain scalar hand-FK to `ai_workflow` (`ON DELETE CASCADE`)** — no Prisma
+    `@relation`, no reverse field on the core `AiWorkflow` model, exactly the t-1 pattern; the
+    back-relation open question is settled (no core edit).
+  * **`createdBy` added (beyond the sketch above)** — a plain scalar hand-FK to `user`
+    (`ON DELETE SET NULL`, nullable; the CLAUDE.md retained-config policy). Both `AiWorkflowTrigger`
+    and `AiWorkflowSchedule` carry `createdBy` and pass it as the triggered execution's `userId`;
+    the mirror needs it so a module-event run is attributed to the operator who wired it (the
+    execution row's cost/display owner) rather than `null`. So the migration hand-writes **two**
+    FKs (`workflowId`→CASCADE, `createdBy`→SET NULL) plus the Prisma-emitted `moduleId` cascade.
 - **`lib/framework/modules/workflow-bindings/`** — the service (`bindWorkflow` /
-  `unbindWorkflow` / `listModuleWorkflowBindings`) **and** the dispatch function
-  **`runModuleWorkflowBindings(moduleSlug, eventType, payload)`**: resolve enabled bindings
-  for `(moduleSlug, eventType)`, and for each, follow the standard pattern — load the
-  workflow + its `publishedVersion`, render `inputTemplate` against `payload`, create a
-  `PENDING`/`RUNNING` `AiWorkflowExecution` pinning `publishedVersion.id`, then
-  `void drainEngine(execution.id, { id, slug }, definition, inputData, userId, versionId)`.
-  Skips (with a `logger.warn`) a binding whose workflow has no published version.
+  `updateWorkflowBinding` / `unbindWorkflow`, `./service`), the reads (`listModuleWorkflowBindings`,
+  `./queries`, stitching the workflow's display fields + a `hasPublishedVersion` "will it fire"
+  flag — no `@relation`, so a batched stitch, not `include`), **and** the dispatch function
+  **`runModuleWorkflowBindings(moduleSlug, eventType, payload)`** (`./dispatch`): resolve enabled
+  bindings for `(moduleId, eventType)`, batch-load the workflows + `publishedVersion`, and for each
+  follow the standard pattern — create a `PENDING` `AiWorkflowExecution` pinning
+  `publishedVersion.id` (userId = the binding's `createdBy`, `triggerSource: 'module-event'`), then
+  `void drainEngine(...)`. **Built (PR for t-3):**
+  - **Input shape:** `inputData = { ...inputTemplate, event: { moduleSlug, eventType, payload } }` —
+    the operator's static template at top level, the live event under an `event` envelope that
+    **wins on key collision** (a workflow always finds the event at `input.event`).
+  - **`triggerSource` is the fixed literal `'module-event'`**, not `module:<eventType>` — the column
+    is `VarChar(50)` and `eventType` is free-form up to 100 chars, so a derived value could overflow;
+    the eventType travels in `inputData.event` instead. Attribution-only, matching the column's
+    intent.
+  - **Skips (never aborts the fan-out), each `logger.warn`'d with a reason:** unknown module (clean
+    no-op — the event source is decoupled from the registry), no matching enabled binding,
+    `workflow_not_found`, `workflow_inactive`, `no_published_version`, `invalid_definition`
+    (malformed published snapshot), and a per-binding `execution_create_failed` (one failed insert
+    doesn't stop the others). Returns a `{ matched, dispatched, skipped[] }` summary for
+    observability/testing.
+  - **`eventType` is NOT validated against a declared vocabulary** (unlike agent `role` vs
+    `agentRoles`) — the module-lifecycle event vocabulary (`ModuleDefinition.events`) is
+    **f-engagement** (08); until it exists `eventType` is free-form shape-only (X1).
 - **Admin API** under `app/api/v1/admin/framework/modules/[slug]/workflows/` — `GET`/`POST`/
   `DELETE`/`PATCH` bindings; `withAdminAuth`, Zod bodies, audit. (Views → f-ops-views.)
 - **Event source — coordination note (no hard dep edge):** nothing _calls_
@@ -434,12 +460,13 @@ hooks).
 
 ## Open questions
 
-- **`AiAgent` / `AiWorkflow` back-relation necessity (t-1/t-3).** _Resolved in t-1 (PR #33):_
-  **no core edit needed.** `agentId` is a **plain scalar FK** (no Prisma `@relation` on either
-  side); the `ON DELETE CASCADE` to `ai_agent` is hand-written in the migration (the f-slots
-  `SlotValue.userId` pattern). Prisma compiles fine with no reverse field on `AiAgent`, so the
-  boundary-clean hand-FK — not a back-relation — is the shape. **t-3 does the same for
-  `ModuleWorkflowBinding.workflowId → ai_workflow`.**
+- **`AiAgent` / `AiWorkflow` back-relation necessity (t-1/t-3).** _Resolved._ **No core edit
+  needed for either.** t-1 (PR #33): `agentId` is a plain scalar FK, `ON DELETE CASCADE` to
+  `ai_agent` hand-written (f-slots `SlotValue.userId` pattern), Prisma compiles with no reverse
+  field on `AiAgent`. **t-3 did the same:** `ModuleWorkflowBinding.workflowId → ai_workflow`
+  (`CASCADE`) and `createdBy → user` (`SET NULL`) are both plain scalar hand-FKs — two hand-written
+  constraints in the migration, no `@relation`, no reverse field on the core `AiWorkflow` / `User`
+  models. The boundary-clean hand-FK is the settled shape for a framework→core FK.
 - **Interim scope posture (t-2).** The refuse-helper's missing-`moduleSlug` behaviour
   (recommended: allow-when-absent, refuse-on-mismatch) governs safety before f-guidance
   populates scope. Confirm the posture is the one f-guidance will want to _tighten into_
@@ -460,18 +487,20 @@ hooks).
 Tracked here rather than left in a PR comment (a deferral needs a home). Action _within this
 feature_ — t-3/t-4 are the natural trigger, not a separate later effort.
 
-- **Consolidate the duplicated route/service plumbing when t-3/t-4 add the 3rd–4th copies
-  (rule of three).** Flagged by t-1 `/code-review` (PR #33): `parseModuleSlug` / `parseBindingId`
-  verbatim-duplicate f-map's `parseMapSlug` (differing only in the noun); the `P2002 →
-ValidationError` narrowing is re-hand-rolled in `bindings/service.ts` and f-map's
-  `version-service.ts`; and "resolve module by slug or 404" appears in both `bindings/service.ts`
-  and `bindings/queries.ts`. Deliberately **not** fixed in t-1 — extracting a shared
-  `parseSlugParam(raw, label)` / `parseCuidParam(raw, label)` (→ `lib/validations/common`) and a
-  `mapUniqueConstraintError(err, …)` helper spans f-map + f-module-bindings, so it wants doing
-  once with enough call sites to shape it right, not churned into the first leaf. **t-3
-  (workflow bindings) and t-4 (knowledge) will each add another `parseXSlug` + P2002 map — that
-  is the 3rd/4th copy; extract the shared helpers then instead of copying a 4th time.** Cost of
-  not doing it: a fix to the slug rule or error message in one leaf silently misses the others.
+- **Consolidate the duplicated route/service plumbing (rule of three).** ✅ **Done at t-3 (PR
+  for workflow bindings).** Flagged by t-1 `/code-review` (PR #33): `parseModuleSlug` /
+  `parseBindingId` verbatim-duplicated f-map's `parseMapSlug` (differing only in the noun) and
+  the `P2002 → ValidationError` narrowing was re-hand-rolled in `bindings/service.ts` and f-map's
+  `version-service.ts`. t-3 was the 3rd copy, so the shared helpers were extracted **framework-tier
+  (not core — X6):** `parseSlugParam(raw, label)` / `parseCuidParam(raw, label, field?)` in
+  [`lib/framework/shared/route-params.ts`](../../../lib/framework/shared/route-params.ts) and
+  `mapPrismaWriteError(err, { onUnique, notFound })` / `uniqueTargetString(err)` in
+  [`lib/framework/shared/prisma-errors.ts`](../../../lib/framework/shared/prisma-errors.ts). The
+  plan's earlier "→ `lib/validations/common`" note was corrected at build: that file is
+  **Sunrise-owned**, so the helpers live in the fork's `shared/` tier and f-map + t-1 keep thin
+  named wrappers (`parseMapSlug = parseSlugParam(raw, 'map')`) over them — bodies centralised,
+  call sites unchanged. ("resolve module by slug or 404" stays a one-liner per file; not worth a
+  helper.)
 
 ## Done when (feature)
 
