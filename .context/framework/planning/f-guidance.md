@@ -111,10 +111,15 @@ precedent is verified against the tree (§ _Reuse anchors_). Decisions (2026-07-
    (template: `data-slots/capabilities/get-state.ts`), array-exported from a barrel, registered by a
    single loop added to `initFramework()` (`lib/framework/index.ts`) alongside the data-slots loop;
    `syncFramework()` already picks them up (`registerFrameworkCapabilityHandlers` + `syncFrameworkCapabilities`).
-   **PII posture per cap:** any cap whose output embeds slot-derived content (`get_next_steps`,
-   `suggest_focus`, `get_progress_synopsis`) sets `processesPii = true` and overrides `redactProvenance`
-   (mirroring `get_state`); `get_journey_state` (node statuses + positions, no slot values) does not.
-   Each guards `context.userId === null` → structured `no_user_context` error.
+   **PII posture — resolved in the t-2 build: all four read caps are `processesPii = false`.** The
+   plan anticipated `get_next_steps`/`suggest_focus`/`get_progress_synopsis` might carry slot-derived
+   PII, but t-1 built the ranking reasons + synopsis from **authored map vocabulary** (node keys, slot
+   _slugs_, event types, timestamps, authored dates) — **never a captured slot value**. Both the t-1
+   and t-2 security reviews confirmed no free-text PII reaches any output field, so none needs
+   `redactProvenance` (contrast `get_state`, which returns the slot `value` and does). Each still guards
+   `context.userId === null` → structured `no_user_context` error. **Journey key:** the caps take
+   `graphSlug` (+ optional `contextKey`, X3) as args; the **subject is always `context.userId`** (never
+   an arg), so a cap only ever reads one of the caller's _own_ journeys.
 
 4. **`request_transition` is the write cap over `applyEvent` — split from the reads by the write
    boundary (the f-slot-capture `get_state`/`fill_slot` discipline).** It assembles the same inputs

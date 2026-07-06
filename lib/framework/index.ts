@@ -38,13 +38,15 @@ import {
 } from '@/lib/framework/capabilities/registry';
 import { syncFrameworkCapabilities } from '@/lib/framework/capabilities/sync';
 import { dataSlotCapabilities } from '@/lib/framework/data-slots/capabilities';
+import { guidanceCapabilities } from '@/lib/framework/guidance/capabilities';
 
 export function initFramework(): void {
   registerContextContributor(MODULE_CONTEXT_TYPE, loadModuleContext);
-  // Framework built-in capabilities (get_state, …) — framework-owned, not leaf- or
-  // module-dependent, so they register here at init. The dispatcher-handler + DB-row
-  // passes run in `syncFramework()` below.
+  // Framework built-in capabilities (get_state, guidance read tools, …) — framework-owned,
+  // not leaf- or module-dependent, so they register here at init. The dispatcher-handler +
+  // DB-row passes run in `syncFramework()` below.
   for (const capability of dataSlotCapabilities) registerFrameworkCapability(capability);
+  for (const capability of guidanceCapabilities) registerFrameworkCapability(capability);
 }
 
 export async function syncFramework(): Promise<void> {
