@@ -16,6 +16,11 @@ import {
   computeAvailability,
   type AvailabilityResult,
 } from '@/lib/framework/facilitation/engine/availability';
+import {
+  applyEvent,
+  type ApplyEventResult,
+  type TransitionKind,
+} from '@/lib/framework/facilitation/engine/apply-event';
 import { getJourneyTimeline } from '@/lib/framework/facilitation/journey/queries';
 import { assembleJourneyContext, type JourneyContext } from '@/lib/framework/guidance/assemble';
 import {
@@ -93,4 +98,37 @@ export async function loadProgressSynopsis(
     scope
   );
   return buildProgressSynopsis(context.nodeStates, timeline, options);
+}
+
+/** The transition a caller asks the engine to make. */
+export interface TransitionRequest {
+  nodeKey: string;
+  kind: TransitionKind;
+}
+
+/**
+ * Ask the engine to apply a journey transition (the sole write path). Assembles the same
+ * read context and hands it to `applyEvent`, which validates the move and — on success —
+ * writes the event + projection in one transaction, or returns a `Rejection` (with the
+ * node's lock reasons) that never touches the DB. `null` when the journey has not started
+ * (nothing to transition). The subject is `key.userId`, `canRead`-guarded by the assembler.
+ */
+export async function applyJourneyTransition(
+  viewer: JourneyViewer,
+  key: JourneyKey,
+  move: TransitionRequest,
+  scope?: AccessScope
+): Promise<ApplyEventResult | null> {
+  const context = await assembleJourneyContext(viewer, key, scope);
+  if (context === null) return null;
+
+  return applyEvent({
+    ...context.availabilityInput,
+    transition: {
+      userId: key.userId,
+      journeyId: context.journey.id,
+      nodeKey: move.nodeKey,
+      kind: move.kind,
+    },
+  });
 }

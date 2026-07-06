@@ -10,15 +10,18 @@ vi.mock('@/lib/framework/guidance/assemble', () => ({ assembleJourneyContext: vi
 vi.mock('@/lib/framework/facilitation/engine/availability', () => ({
   computeAvailability: vi.fn(),
 }));
+vi.mock('@/lib/framework/facilitation/engine/apply-event', () => ({ applyEvent: vi.fn() }));
 vi.mock('@/lib/framework/facilitation/journey/queries', () => ({ getJourneyTimeline: vi.fn() }));
 
 import {
   loadGuidance,
   loadFocusSuggestion,
   loadProgressSynopsis,
+  applyJourneyTransition,
 } from '@/lib/framework/guidance/guidance';
 import { assembleJourneyContext } from '@/lib/framework/guidance/assemble';
 import { computeAvailability } from '@/lib/framework/facilitation/engine/availability';
+import { applyEvent } from '@/lib/framework/facilitation/engine/apply-event';
 import { getJourneyTimeline } from '@/lib/framework/facilitation/journey/queries';
 
 const viewer = { userId: 'user-1' };
@@ -92,5 +95,24 @@ describe('loadProgressSynopsis', () => {
     vi.mocked(assembleJourneyContext).mockResolvedValue(null);
     expect(await loadProgressSynopsis(viewer, key)).toBeNull();
     expect(getJourneyTimeline).not.toHaveBeenCalled();
+  });
+});
+
+describe('applyJourneyTransition', () => {
+  it('assembles the context and calls applyEvent with the resolved transition', async () => {
+    vi.mocked(applyEvent).mockResolvedValue({ ok: true, nodeState: {}, event: {} } as never);
+    await applyJourneyTransition(viewer, key, { nodeKey: 'intro', kind: 'enter' });
+    expect(applyEvent).toHaveBeenCalledWith({
+      ...availabilityInput,
+      transition: { userId: 'user-1', journeyId: 'journey-1', nodeKey: 'intro', kind: 'enter' },
+    });
+  });
+
+  it('returns null (no write) when the journey has not started', async () => {
+    vi.mocked(assembleJourneyContext).mockResolvedValue(null);
+    expect(
+      await applyJourneyTransition(viewer, key, { nodeKey: 'n', kind: 'complete' })
+    ).toBeNull();
+    expect(applyEvent).not.toHaveBeenCalled();
   });
 });
