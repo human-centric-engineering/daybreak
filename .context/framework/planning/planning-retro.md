@@ -398,3 +398,29 @@ startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registra
   resolver) from "no new _seam_" (separately false when the reuse can't be wired without a core edit).
   Generalises the fork-first model: the _decision_ to go fork-first-with-a-seam is frequently made at build,
   by a behaviour analysis, not at plan time. _Status: open._
+
+### B18 · A precedent borrowed for its shape can carry a rationale that doesn't transfer — re-derive it from the new domain
+
+- **Discovery.** `f-module-config`'s plan (and A10) named the **`AiAgentVersion`** pattern for `ModuleVersion`,
+  and the plan prescribed following it faithfully — including its **create-time v1 seed** ("seed an explicit
+  initial version so the pre-edit state is a first-class, restorable entry", the `INITIAL_VERSION_SUMMARY`
+  precedent). t-1 built it that way. `/code-review` (3 of 8 finder angles independently) then showed the seed's
+  _rationale_ doesn't survive the domain change: an **agent's** create-time config is a real human-authored
+  snapshot worth preserving, but a **module's** pre-edit state is the empty `{}` boot-sync default. So the
+  borrowed seed (a) **fabricated an author** — it stamped the first _editor_ on config they never wrote — and
+  (b) for a schema with required fields produced a v1 that fails its own restore re-validation: a version
+  presented as restorable that can never be restored. The shape transferred cleanly; the _reason for the seed_
+  did not. Dropped it — the first save is simply v1.
+- **Impact.** Low cost, caught pre-merge — but it was a **plan-prescribed** step (not an incidental
+  implementation choice), so the feature doc's t-1 detail had to be reconciled at close-out ("no lazy seed").
+  The tell was available at plan time: the plan copied "seed the initial version" from the agent precedent
+  without asking _what the module's initial state actually is_ (the `{}` default, set by boot-sync, not by a
+  user) — the same over-reading of a precedent that B17 flagged for "no new mechanism".
+- **Feedback.** When a plan says "mirror `X`", **separate the mechanism you're borrowing (the shape) from the
+  justification `X` gives for it (the rationale)** and re-derive the rationale in the new domain before
+  committing it to the plan. A precedent's shape (point-in-time snapshot table, monotonic version, restore-
+  forward) is portable; its edge-case decisions (seed v1 at create, who authored it, is the origin
+  restorable) are contingent on _that_ domain's data and must be re-asked. Concretely for "versioned config":
+  ask "what is the pre-first-edit state, who authored it, and is it a meaningful restore target?" — for
+  modules the answer (empty default, no human, no) kills the seed; for agents it (real config, the creator,
+  yes) justifies it. Same table shape, opposite call. _Status: open._
