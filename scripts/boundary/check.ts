@@ -173,6 +173,7 @@ function isCoreSource(rel: string): boolean {
   if (rel.startsWith('lib/app/')) return false; // leaf surface (built on framework)
   if (rel.startsWith('app/admin/framework/')) return false; // framework admin UI
   if (rel.startsWith('app/api/v1/admin/framework/')) return false; // framework admin routes
+  if (rel.startsWith('app/api/v1/framework/')) return false; // framework consumer routes (X5 surfaces)
   const base = path.basename(rel);
   if (base.startsWith('framework-') && base.endsWith('.prisma')) return false;
   if (base === 'app.prisma') return false; // leaf schema

@@ -1,0 +1,85 @@
+/**
+ * Module surface chat — streaming (SSE). f-guidance t-5 (spec X5).
+ *
+ * POST /api/v1/framework/modules/:slug/chat/stream
+ *
+ * Opens (or resumes) the surface-scoped conversation for a module: resolves the module's
+ * **bound primary agent**, tags the conversation with `contextType: 'module'` /
+ * `contextId: <slug>`, and — the point of X5 — threads `scope.moduleSlug` into the dispatch
+ * so a module's capabilities actually refuse out-of-module calls (`isInModuleScope`).
+ *
+ * A framework-owned route (under the `framework` API segment) so the scope write stays on the
+ * framework side of the tier boundary and the core `streamChat` handler is reused unchanged —
+ * the core consumer route/schema can't carry `scope` (decision 6). Auth + baseline rate limit
+ * mirror the consumer chat route; the agent is resolved from the module, not supplied.
+ */
+
+import { z } from 'zod';
+import { withAuth } from '@/lib/auth/guards';
+import { sseResponse } from '@/lib/api/sse';
+import { validateRequestBody } from '@/lib/api/validation';
+import { getRouteLogger } from '@/lib/api/context';
+import {
+  consumerChatLimiter,
+  agentChatLimiter,
+  createRateLimitResponse,
+} from '@/lib/security/rate-limit';
+import { streamChat } from '@/lib/orchestration/chat';
+import { getRequestId, getVisitorId } from '@/lib/logging/context';
+import { NotFoundError } from '@/lib/api/errors';
+import {
+  resolveModuleSurface,
+  MODULE_SURFACE_CONTEXT_TYPE,
+} from '@/lib/framework/guidance/surface';
+
+const surfaceChatRequestSchema = z.object({
+  message: z.string().min(1),
+});
+
+export const POST = withAuth<{ slug: string }>(async (request, session, { params }) => {
+  const userLimit = consumerChatLimiter.check(session.user.id);
+  if (!userLimit.success) return createRateLimitResponse(userLimit);
+
+  const log = await getRouteLogger(request);
+  const { slug } = await params;
+  const body = await validateRequestBody(request, surfaceChatRequestSchema);
+  const requestId = await getRequestId();
+  const visitorId = await getVisitorId();
+
+  // Resolve the module's primary-agent surface. NotFoundError (unknown module) propagates to
+  // the standard 404; a bound-but-no-usable-agent module returns null → an explicit 404.
+  const surface = await resolveModuleSurface(session.user.id, slug);
+  if (surface === null) {
+    throw new NotFoundError(`Module "${slug}" has no active agent to chat with`);
+  }
+
+  // Honour the agent's per-agent RPM override (as the direct consumer route does), so the
+  // same agent enforces one cap regardless of entry surface.
+  const agentLimit = agentChatLimiter.check(
+    `${surface.agentId}:${session.user.id}`,
+    surface.rateLimitRpm ?? undefined
+  );
+  if (!agentLimit.success) return createRateLimitResponse(agentLimit);
+
+  log.info('Module surface chat stream started', {
+    moduleSlug: slug,
+    agentSlug: surface.agentSlug,
+    resumed: surface.conversationId !== undefined,
+    userId: session.user.id,
+  });
+
+  const events = streamChat({
+    message: body.message,
+    agentSlug: surface.agentSlug,
+    userId: session.user.id,
+    conversationId: surface.conversationId,
+    contextType: MODULE_SURFACE_CONTEXT_TYPE,
+    contextId: slug,
+    scope: surface.scope, // { moduleSlug: slug } — the X5 write that enforces module scope
+    requestId,
+    visitorId,
+    signal: request.signal,
+  });
+
+  return sseResponse(events, { signal: request.signal });
+});
