@@ -3,10 +3,14 @@
  *
  * The config save is a **PUT** (`saveModuleConfig` replaces the whole config), but the
  * shared `apiClient` (`lib/api/client.ts`) exposes only get/post/patch/delete — and it's
- * Sunrise-owned, so we don't add a `put` there. This thin helper does the PUT with the
- * same envelope semantics `apiClient` uses (`{ success, data | error }`) and throws the
- * same core `APIClientError` on failure, so callers get uniform error handling — in
- * particular `error.details` carries the server's field-level validation messages (A4).
+ * Sunrise-owned, so we don't add a `put` there. This helper does the PUT, then parses the
+ * response through the shared `parseApiResponse` (so the envelope contract stays in one
+ * place, not re-implemented here) and throws the same core `APIClientError` on failure —
+ * `error.details` carries the server's field-level validation messages (A4).
+ *
+ * `parseApiResponse` is imported from `@/lib/api/parse-response` directly, NOT via
+ * `@/lib/api/server-fetch` (which pulls in `next/headers` — server-only — and would break
+ * this `'use client'` module's bundle).
  *
  * The restore call is a POST and uses `apiClient.post` directly at its call site.
  */
@@ -14,6 +18,7 @@
 'use client';
 
 import { APIClientError } from '@/lib/api/client';
+import { parseApiResponse } from '@/lib/api/parse-response';
 import type { ModuleVersionSummary } from '@/lib/framework/modules/view';
 
 export interface SaveModuleConfigBody {
@@ -35,27 +40,22 @@ export async function saveModuleConfig(
     body: JSON.stringify(body),
   });
 
-  let json: unknown = null;
+  let parsed;
   try {
-    json = await res.json();
+    parsed = await parseApiResponse<{ version: ModuleVersionSummary }>(res);
   } catch {
-    // fall through to the generic error below
+    // Non-JSON / malformed body — surface a uniform error carrying the HTTP status.
+    throw new APIClientError(`Request failed (${res.status})`, undefined, res.status);
   }
 
-  const envelope = (json ?? {}) as {
-    success?: boolean;
-    data?: { version: ModuleVersionSummary };
-    error?: { code?: string; message?: string; details?: Record<string, unknown> };
-  };
-
-  if (!res.ok || !envelope.success || !envelope.data) {
+  if (!parsed.success) {
     throw new APIClientError(
-      envelope.error?.message ?? `Request failed (${res.status})`,
-      envelope.error?.code,
+      parsed.error.message,
+      parsed.error.code,
       res.status,
-      envelope.error?.details
+      parsed.error.details
     );
   }
 
-  return envelope.data;
+  return parsed.data;
 }

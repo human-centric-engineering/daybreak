@@ -1,5 +1,3 @@
-'use client';
-
 /**
  * ModuleDetail (f-ops-views t-2).
  *
@@ -8,9 +6,14 @@
  * config/version API); the `tabs` array is the extension point t-3 (Settings) and t-4
  * (Agents / Workflows / Knowledge bindings) append entries to — the host-first pattern.
  *
- * The Config tab is keyed on the current live version number, so a save or restore (which
- * bumps that number and, for a restore, rewrites the live config) re-initialises the form
- * from the fresh server data after `router.refresh()`.
+ * A composition-only server component (no client hooks) — it renders the client tabs and
+ * passes them server-fetched props.
+ *
+ * The Config tab is keyed on the **config content** (a serialisation of the current
+ * values), so a save or restore that changes the live config re-initialises the form from
+ * the fresh server data after `router.refresh()`. Keying on the config itself (rather than
+ * the version number from the separate versions fetch) keeps the form's freshness from
+ * depending on the versions endpoint's availability.
  */
 
 import Link from 'next/link';
@@ -41,19 +44,23 @@ function statusVariant(status: string): 'default' | 'secondary' | 'outline' {
 interface ModuleDetailProps {
   slug: string;
   identity: ModuleListItem;
-  config: ModuleConfigFormView;
+  /** null when the config fetch failed (distinct from a genuinely unregistered module). */
+  config: ModuleConfigFormView | null;
   versions: ModuleVersionsView;
 }
 
 export function ModuleDetail({ slug, identity, config, versions }: ModuleDetailProps) {
   // Newest version is always the live config (no draft/published split); 0 before any save.
   const currentVersion = versions.versions[0]?.version ?? 0;
+  // Re-key the Config tab on its own data, so a save/restore re-initialises the form after
+  // `router.refresh()` regardless of whether the versions fetch succeeded.
+  const configKey = config ? JSON.stringify(config.values) : 'unavailable';
 
   const tabs = [
     {
       value: 'config',
       label: 'Config',
-      node: <ConfigTab key={currentVersion} slug={slug} form={config} />,
+      node: <ConfigTab key={configKey} slug={slug} form={config} />,
     },
     {
       value: 'versions',

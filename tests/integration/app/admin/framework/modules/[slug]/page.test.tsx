@@ -115,9 +115,10 @@ describe('FrameworkModuleDetailPage (server component)', () => {
 
   it('still renders when config and versions fail (degraded, not thrown)', async () => {
     render(await setup({ configOk: false, versionsSuccess: false }));
-    // Heading still present; config degraded to the unregistered/read-only view.
+    // Heading still present; a config-fetch failure shows a load error, NOT the false
+    // "unregistered" claim (that's reserved for a genuine registered:false response).
     expect(screen.getByRole('heading', { name: 'Demo Module' })).toBeInTheDocument();
-    expect(screen.getByText(/no longer registered/i)).toBeInTheDocument();
+    expect(screen.getByText(/couldn.t be loaded/i)).toBeInTheDocument();
   });
 
   it('also degrades on config envelope failure and versions HTTP failure', async () => {

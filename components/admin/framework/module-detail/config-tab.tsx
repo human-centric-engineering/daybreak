@@ -66,18 +66,27 @@ function initialValues(
 
 interface ConfigTabProps {
   slug: string;
-  form: ModuleConfigFormView;
+  /** null when the config fetch failed (vs `{ registered: false }` for a removed module). */
+  form: ModuleConfigFormView | null;
 }
 
 export function ConfigTab({ slug, form }: ConfigTabProps) {
   const router = useRouter();
   const [values, setValues] = useState<Record<string, unknown>>(() =>
-    initialValues(form.descriptors, form.values)
+    initialValues(form?.descriptors ?? [], form?.values ?? {})
   );
   const [changeSummary, setChangeSummary] = useState('');
   const [errors, setErrors] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+
+  if (!form) {
+    return (
+      <p className="text-muted-foreground text-sm" role="alert">
+        The configuration couldn&rsquo;t be loaded. Try refreshing the page.
+      </p>
+    );
+  }
 
   if (!form.registered) {
     return (
@@ -106,6 +115,7 @@ export function ConfigTab({ slug, form }: ConfigTabProps) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!form) return; // unreachable — the form isn't rendered when `form` is null
     const config: Record<string, unknown> = {};
     const clientErrors: string[] = [];
 

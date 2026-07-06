@@ -15,7 +15,6 @@ export const metadata: Metadata = {
   description: 'Configure a framework module and review its config history.',
 };
 
-const EMPTY_CONFIG: ModuleConfigFormView = { registered: false, descriptors: [], values: {} };
 const EMPTY_VERSIONS: ModuleVersionsView = { versions: [], nextCursor: null };
 
 /**
@@ -23,6 +22,10 @@ const EMPTY_VERSIONS: ModuleVersionsView = { versions: [], nextCursor: null };
  * UI over 06/03's already-shipped APIs, so it reads the list rather than adding a
  * single-module GET (that lands with the lifecycle writes in t-3). Returns `null` when the
  * module doesn't exist → the page 404s.
+ *
+ * Relies on `GET /modules` being unpaginated/uncapped (`listModules()` is a `findMany` with
+ * no `take`), so `.find` never misses a module past a first page. If t-3 ever paginates the
+ * list, this must switch to a single-module GET or the detail page will false-404.
  */
 async function getIdentity(slug: string): Promise<ModuleListItem | null> {
   try {
@@ -37,18 +40,23 @@ async function getIdentity(slug: string): Promise<ModuleListItem | null> {
   }
 }
 
-/** The generic config form (descriptors + current values). Degrades to an empty form. */
-async function getConfig(slug: string): Promise<ModuleConfigFormView> {
+/**
+ * The generic config form (descriptors + current values). Returns `null` on a fetch
+ * failure — distinct from a successful `{ registered: false }` (a genuinely unregistered
+ * module), so a transient error is never shown as the false claim "this module's code is
+ * no longer registered".
+ */
+async function getConfig(slug: string): Promise<ModuleConfigFormView | null> {
   try {
     const res = await serverFetch(
       `/api/v1/admin/framework/modules/${encodeURIComponent(slug)}/config`
     );
-    if (!res.ok) return EMPTY_CONFIG;
+    if (!res.ok) return null;
     const body = await parseApiResponse<ModuleConfigFormView>(res);
-    return body.success ? body.data : EMPTY_CONFIG;
+    return body.success ? body.data : null;
   } catch (err) {
     logger.error('framework module detail: config fetch failed', err);
-    return EMPTY_CONFIG;
+    return null;
   }
 }
 

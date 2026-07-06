@@ -43,9 +43,11 @@ export interface ModuleConfigFormView {
 }
 
 /**
- * One immutable config version as the client consumes it — the wire shape of a
- * `ModuleVersion` row (ISO-string `createdAt`), minus the `snapshot` blob the list view
- * doesn't render. The newest version is always the live config (no draft/published split).
+ * One immutable config version as the client consumes it — a `ModuleVersion` row with an
+ * ISO-string `createdAt`. It omits the `snapshot` blob from the TYPE (the list view doesn't
+ * render it); note 06's `GET .../versions` still sends the full rows over the wire, so the
+ * omission is a type narrowing, not a payload reduction. The newest version is always the
+ * live config (no draft/published split).
  */
 export interface ModuleVersionSummary {
   id: string;

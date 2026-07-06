@@ -109,4 +109,10 @@ describe('ConfigTab', () => {
     render(<ConfigTab slug="demo" form={form({ descriptors: [] })} />);
     expect(screen.getByText(/no configurable parameters/i)).toBeInTheDocument();
   });
+
+  it('shows a load error (not the unregistered message) when the config failed to load', () => {
+    render(<ConfigTab slug="demo" form={null} />);
+    expect(screen.getByText(/couldn.t be loaded/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no longer registered/i)).not.toBeInTheDocument();
+  });
 });
