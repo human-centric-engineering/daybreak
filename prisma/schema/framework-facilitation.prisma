@@ -146,3 +146,23 @@ model JourneyEvent {
   @@index([journeyId, occurredAt]) // the journey timeline (§5.2)
   @@map("framework_journey_event")
 }
+
+// Facilitation agent binding (f-facilitation-agents t-1) — maps a facilitation SEAT
+// (`role`) to an `AiAgent`, the second scope of the one binding mechanism (the first is
+// `ModuleAgentBinding`). FLAT / parentless: unlike a module binding there is no
+// facilitation entity to key on — the family is a deployment-wide role→agent map. `role`
+// is validated in code against `FACILITATION_ROLES` (there is no per-instance `agentRoles`).
+// `agentId` is a plain scalar FK (no Prisma `@relation`, so no reverse field on the
+// Sunrise-owned `AiAgent`, X6); its `ON DELETE CASCADE` to `ai_agent` is hand-written in the
+// migration (the `ModuleAgentBinding` pattern). No `userId` → not user data, no erasure path.
+model FacilitationAgentBinding {
+  id        String   @id @default(cuid())
+  agentId   String // FK to AiAgent.id — no @relation; ON DELETE CASCADE hand-written in the migration
+  role      String   @unique // one facilitation seat, one agent (a role IS the seat); validated against FACILITATION_ROLES
+  config    Json? // per-binding overrides (tone hints, etc.), opaque to the framework
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([agentId])
+  @@map("framework_facilitation_agent")
+}
