@@ -424,3 +424,48 @@ startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registra
   ask "what is the pre-first-edit state, who authored it, and is it a meaningful restore target?" — for
   modules the answer (empty default, no human, no) kills the seed; for agents it (real config, the creator,
   yes) justifies it. Same table shape, opposite call. _Status: open._
+
+### B19 · The fork-carried core seam is the sanctioned escape hatch when no seam exists — mirror the #385/#403 shape, keep it generic, ledger it
+
+- **Discovery.** f-guidance t-4b needed to inject **per-user** context through the core context-contributor
+  seam, but the seam gave contributors only `(id)` (no `userId`) and cached per `(type, id)` — so per-user
+  content would leak across users. The first instinct (recorded in the earlier plan decision) was "that's a
+  forbidden core edit — defer to an upstream ask." That framing was **incomplete**: f-module-bindings t-4 had
+  already established the opposite precedent (#53) — a _generic seam added inside a Sunrise-core file_
+  (`registerAgentAccessContributor`), carried in the fork, tracked in [[upstream-asks]], with "empty registry =
+  prior behaviour" and boundary CI green. So the widening was done the same way: `buildContext` /
+  `ContextContributor` gained a generic `ContextRequest { userId? }` + a user-aware cache key — a minimal,
+  framework-agnostic core edit.
+- **Impact.** The task was initially deferred as "blocked on upstream" when it was actually buildable via an
+  in-repo, sanctioned pattern — a lost cycle and a decision that had to be reversed with the user. The tell:
+  the CLAUDE.md banner _itself_ sanctions this ("if you genuinely must change platform behaviour and no seam
+  exists, keep the edit minimal and add a follow-up"), and a live precedent existed one feature over.
+- **Feedback.** When a framework feature needs behaviour a Sunrise-core file doesn't expose, the decision is
+  **not** binary "seam exists → extend / no seam → defer." There is a **third, sanctioned option**: add the
+  _generic_ seam **in the core file**, carried as a fork edit, if and only if it is (a) **generic** — no
+  framework vocabulary in core (the boundary vocab-scan must stay green), (b) **behaviour-neutral at rest** —
+  the empty/absent state reproduces prior behaviour exactly, and (c) **ledgered** in [[upstream-asks]] with the
+  delete-when-it-lands action. Reach for it when the alternative is a worse contortion (a hacky framework shim,
+  or shipping a feature crippled). Don't reach for it when a registry-style seam already exists (use it) or the
+  edit would drag a framework concept into core (that fails the vocab scan — find another shape). Generalises
+  B5/B7 (fork-first informs upstream) and B17 (a needed core seam is a build-time finding): the seam can be the
+  fork's to _carry_, not just to _request_. _Status: open._
+
+### B20 · Resolve a plan's open design questions inline, not via a separate refinement pass
+
+- **Discovery.** f-guidance's plan shipped with a "five open questions for Ultraplan refinement" section
+  (ranking weights, synopsis determinism, scope posture, surface-route shape, confirm-first). The user asked to
+  settle them **without** Ultraplan; each had a clear, defensible default that took one focused pass to decide
+  and fold into the plan (documented weights, deterministic synopsis, leave-allow-on-absent, one framework
+  route, no dryRun). The separate refinement tool added ceremony without adding signal for questions this
+  shape.
+- **Impact.** Positive once done, but the plan-authoring habit of parking every under-specified choice for a
+  later "refinement pass" delayed decisions that were readily made from the spec + repo reality already in
+  hand. Some genuinely need the owner's product steer; most are architecture calls with a right answer.
+- **Feedback.** When authoring a feature plan, **triage open questions as you write them**: if a question has a
+  clear default derivable from the spec, the shipped code, or the "ship-nothing-a-fork-deletes / keep-it-simple"
+  disciplines, **resolve it inline with a one-line rationale** rather than deferring it. Reserve a flagged
+  "needs the owner" list for the genuine product-scope forks (e.g. the seed-the-family-vs-mechanism call in
+  [[f-facilitation-agents]]) — decisions where guessing risks the wrong build, not decisions with a
+  conventional right answer. A plan that resolves its own tractable questions is build-ready; one that parks
+  them all just moves the work later. _Status: open._
