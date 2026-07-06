@@ -22,6 +22,7 @@
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
+import { isRecord } from '@/lib/utils';
 import { WorkflowStatus } from '@/types/orchestration';
 import { workflowDefinitionSchema } from '@/lib/validations/orchestration';
 import { drainEngine } from '@/lib/orchestration/scheduling/scheduler';
@@ -39,13 +40,6 @@ export interface ModuleWorkflowDispatchResult {
   dispatched: number;
   /** Bindings that matched but did not run, with the reason. */
   skipped: Array<{ bindingId: string; workflowId: string; reason: string }>;
-}
-
-/** Narrow a Prisma `Json | null` template to a spreadable record (arrays/scalars → ignored). */
-function asRecord(value: unknown): Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : {};
 }
 
 /**
@@ -143,7 +137,7 @@ export async function runModuleWorkflowBindings(
     }
 
     const inputData: Record<string, unknown> = {
-      ...asRecord(binding.inputTemplate),
+      ...(isRecord(binding.inputTemplate) ? binding.inputTemplate : {}),
       event: { moduleSlug, eventType, payload },
     };
 

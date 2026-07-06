@@ -34,6 +34,12 @@ export function uniqueTargetString(err: Prisma.PrismaClientKnownRequestError): s
  * it must throw the caller's `ValidationError`. `notFound`, when set, turns P2025 into
  * a `NotFoundError` with that message. Any other error (or an unmatched code) is
  * rethrown so it surfaces as a 500.
+ *
+ * **Pass `onUnique` on any write that can hit a unique index.** If a write path can
+ * raise P2002 but the caller omits `onUnique` (e.g. copied from a create-only site that
+ * had no unique constraint), this silently rethrows → a raw 500 instead of a 4xx, with
+ * no compile-time nudge. Only omit `onUnique` when the write provably cannot violate a
+ * unique constraint.
  */
 export function mapPrismaWriteError(
   err: unknown,
