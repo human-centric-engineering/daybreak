@@ -37,8 +37,9 @@ describe('initFramework', () => {
   });
 });
 
-describe('loadModuleContext (scaffold)', () => {
-  it('resolves to the "not available yet" body until f-module-core supplies a real loader', async () => {
+describe('loadModuleContext (unregistered slug)', () => {
+  it('resolves to the "not available yet" body when the slug is not a registered module', async () => {
+    // No modules are registered in this init-only test, so any slug is unknown.
     await expect(loadModuleContext('any-slug')).resolves.toBe(MODULE_CONTEXT_UNAVAILABLE);
   });
 });
