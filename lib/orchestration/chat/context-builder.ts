@@ -38,16 +38,29 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 
-function cacheKey(type: string, id: string): string {
-  return `${type}:${id}`;
+/**
+ * Per-request inputs a contributor may read, threaded from the chat handler. Generic —
+ * core names no domain concept. `userId` lets a contributor return **per-user** context;
+ * when present it is also part of the cache key (below), so one user's context is never
+ * served to another. Absent ⇒ the entry is shared (prior behaviour). Extensible: new
+ * generic fields (e.g. `conversationId`) can join without breaking existing contributors.
+ */
+export interface ContextRequest {
+  userId?: string;
+}
+
+function cacheKey(type: string, id: string, userId?: string): string {
+  return `${type}:${id}:${userId ?? ''}`;
 }
 
 /**
  * A prompt-context loader keyed by `contextType`. Returns the raw body
  * string to be framed as `LOCKED CONTEXT`; `buildContext` handles caching
- * and framing. Registered via `registerContextContributor`.
+ * and framing. Registered via `registerContextContributor`. The optional
+ * `request` carries per-turn inputs (e.g. `userId`) for per-user context;
+ * a contributor that ignores it stays shared/cached per `(type, id)`.
  */
-type ContextContributor = (id: string) => Promise<string>;
+type ContextContributor = (id: string, request?: ContextRequest) => Promise<string>;
 
 const contributors = new Map<string, ContextContributor>();
 
@@ -110,10 +123,16 @@ export function __resetContextContributorsForTests(): void {
 
 /**
  * Load and frame context for the given entity, returning a string that
- * can be appended to the system prompt. Cached for 60 s per `(type, id)`.
+ * can be appended to the system prompt. Cached for 60 s per `(type, id, userId)` —
+ * a `request.userId` scopes the cache so per-user contributor output never leaks
+ * across users. Omit `request` (or its `userId`) for shared context (prior behaviour).
  */
-export async function buildContext(type: string, id: string): Promise<string> {
-  const key = cacheKey(type, id);
+export async function buildContext(
+  type: string,
+  id: string,
+  request?: ContextRequest
+): Promise<string> {
+  const key = cacheKey(type, id, request?.userId);
   const hit = cache.get(key);
   if (hit && hit.expiresAt > Date.now()) {
     return hit.value;
@@ -151,7 +170,7 @@ export async function buildContext(type: string, id: string): Promise<string> {
       const contributor = contributors.get(type);
       if (contributor) {
         try {
-          body = await contributor(id);
+          body = await contributor(id, request);
         } catch (err) {
           // A contributor that throws must not fail the whole chat turn.
           // Degrade to the benign placeholder (uncached, so a transient
@@ -190,9 +209,10 @@ export async function buildContext(type: string, id: string): Promise<string> {
   return framed;
 }
 
-/** Drop the cache entry for a single entity. */
-export function invalidateContext(type: string, id: string): void {
-  cache.delete(cacheKey(type, id));
+/** Drop the cache entry for a single entity. Pass the same `userId` used to build it to
+ *  drop that user's per-user entry (omit for the shared entry). */
+export function invalidateContext(type: string, id: string, userId?: string): void {
+  cache.delete(cacheKey(type, id, userId));
 }
 
 /** Wipe the entire context cache. Mainly for tests and admin hooks. */

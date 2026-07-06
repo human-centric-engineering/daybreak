@@ -293,3 +293,51 @@ describe('registerContextContributor', () => {
     expect(initAppContextContributorsMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('per-user context (userId in the request)', () => {
+  it('passes the request to the contributor and caches per user (no cross-user leak)', async () => {
+    const loader = vi.fn((_id: string, req?: { userId?: string }) =>
+      Promise.resolve(`slots-for-${req?.userId ?? 'shared'}`)
+    );
+    registerContextContributor('module', loader);
+
+    const a1 = await buildContext('module', 'onboarding', { userId: 'user-a' });
+    const b1 = await buildContext('module', 'onboarding', { userId: 'user-b' });
+    // Different users get different bodies from the same (type, id) — no shared cache entry.
+    expect(a1).toContain('slots-for-user-a');
+    expect(b1).toContain('slots-for-user-b');
+
+    // Second call for user-a is served from that user's own cache entry (loader not re-run).
+    const a2 = await buildContext('module', 'onboarding', { userId: 'user-a' });
+    expect(a2).toBe(a1);
+    expect(loader).toHaveBeenCalledTimes(2); // once per distinct user, not thrice
+    expect(loader).toHaveBeenLastCalledWith('onboarding', { userId: 'user-b' });
+  });
+
+  it("invalidateContext(type,id,userId) drops that user's entry only", async () => {
+    let n = 0;
+    registerContextContributor('module', () => Promise.resolve(`v${++n}`));
+
+    await buildContext('module', 'm', { userId: 'user-a' }); // v1, cached for user-a
+    await buildContext('module', 'm', { userId: 'user-b' }); // v2, cached for user-b
+    invalidateContext('module', 'm', 'user-a'); // drop only user-a
+
+    const a = await buildContext('module', 'm', { userId: 'user-a' }); // re-run → v3
+    const b = await buildContext('module', 'm', { userId: 'user-b' }); // still cached → v2
+    expect(a).toContain('v3');
+    expect(b).toContain('v2');
+  });
+
+  it('a no-userId request is a separate shared entry from per-user entries', async () => {
+    const loader = vi.fn((_id: string, req?: { userId?: string }) =>
+      Promise.resolve(`body-${req?.userId ?? 'shared'}`)
+    );
+    registerContextContributor('module', loader);
+
+    const shared = await buildContext('module', 'm');
+    const perUser = await buildContext('module', 'm', { userId: 'user-a' });
+    expect(shared).toContain('body-shared');
+    expect(perUser).toContain('body-user-a');
+    expect(loader).toHaveBeenCalledTimes(2);
+  });
+});
