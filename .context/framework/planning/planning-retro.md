@@ -367,3 +367,34 @@ startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registra
   (best-effort, never-fail-the-write). Promote them as separate rows and let the pure one land first — the map
   it builds is exactly the seam the impure one consumes. Generalises [B1] (sizing self-check): the split axis
   here isn't _size_, it's the **purity boundary**. _Status: open._
+
+### B17 · "Pure framework-tier / no upstream issue" is a build-time finding, not a plan-time fact — correct-behaviour-first can reveal a needed core seam
+
+- **Discovery.** `f-module-bindings`'s plan asserted, at claim time, "fourth pure framework-tier feature —
+  **no upstream issue**; the one core touch is a possible minimal Prisma back-relation (confirm at build)."
+  Three of the four tasks held to that. But **t-4 (knowledge scope) inverted it.** Starting from _behaviour_
+  ("a module owns a durable knowledge scope its bound agents inherit, coexisting with the operator's direct
+  grants") rather than from the assumed-thin mechanism surfaced a hard constraint: the core enforcement pivot
+  `AiAgentKnowledgeDocument` is `@@id([agentId, documentId])` with **no provenance**, so a module-grant and a
+  direct grant of the same doc are the _same row_ — any materialised copy-down clobbers-or-leaks on unbind.
+  Correct behaviour therefore _required_ composing the scope **live inside the Sunrise-owned resolver**, which
+  the fork can only do by adding a **generic core seam** (`registerAgentAccessContributor`) — and that makes
+  t-4 file an upstream issue (#403) and carry a core edit. The "no upstream issue" line was a plan-time
+  _guess_, stated as fact, that a build-time behaviour analysis overturned.
+- **Impact.** Net positive — the feature shipped the _right_ shape (live composition, no leak) instead of the
+  expedient-but-wrong materialisation the "thin, fold into t-1" framing would have produced. But the plan's
+  confident "pure framework-tier / no upstream issue / may fold" framing had to be **corrected in three
+  places** (the feature-tier heading, the t-4 detail, the fold open-question) after the fact, and the B1
+  "t-4 is the lightest, may fold" sizing bet was simply wrong — t-4 was ~t-3-sized. The tell was in the plan
+  the whole time: §4.2's "no new mechanism at all" describes the _enforcement_ (reuse the resolver), which the
+  plan over-read as "no new _anything_, so thin."
+- **Feedback.** A feature's **tier classification and upstream-issue count are build-time outcomes, not
+  plan-time commitments** — write them as hypotheses ("_expected_ pure framework-tier; confirm the enforcement
+  path touches no core method at build") and re-confirm from _behaviour_, not from a spec phrase. Specifically:
+  when a task claims to "reuse an existing mechanism with no new code," verify the reuse point is
+  **fork-reachable** — if correct behaviour needs logic _inside_ a Sunrise-owned function (an enforcement
+  resolver, a dispatch key, a cache), that's a **core seam** (fork-first-informs-upstream), and the "no
+  upstream issue" claim is false. Distinguish "no new _enforcement mechanism_" (often true — reuse the
+  resolver) from "no new _seam_" (separately false when the reuse can't be wired without a core edit).
+  Generalises the fork-first model: the _decision_ to go fork-first-with-a-seam is frequently made at build,
+  by a behaviour analysis, not at plan time. _Status: open._
