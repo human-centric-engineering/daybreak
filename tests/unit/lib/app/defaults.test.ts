@@ -2,22 +2,27 @@
  * Tests: lib/app/ bootstrap files ship as no-op defaults
  *
  * The auto-wired bootstrap hooks (`lib/app/rate-limit.ts`, `lib/app/capabilities.ts`,
- * `lib/app/context-contributors.ts`, `lib/app/admin-nav.ts`) must register NOTHING
- * out of the box — the template
- * ships them empty and forks fill them in. The wiring tests
+ * `lib/app/context-contributors.ts`) must register NOTHING out of the box — the
+ * template ships them empty and forks fill them in. The wiring tests
  * (`bootstrap-wiring.test.ts`, `admin-nav-wiring.test.tsx`) replace these hooks
  * with registering versions; this file exercises the REAL defaults to lock in
  * the no-op contract (a stray default registration would silently apply to
  * every install).
  *
- * @see lib/app/rate-limit.ts · lib/app/capabilities.ts · lib/app/admin-nav.ts
+ * NOTE (Daybreak): `lib/app/admin-nav.ts` is FILLED in this fork — its
+ * `initAppNav()` registers the framework nav section (covered by
+ * `admin-nav.test.ts`), the same way `bootstrap.ts` is filled. So the leaf no-op
+ * contract moves to the reserved-empty seam it delegates to,
+ * `lib/app/leaf-admin-nav.ts`, which is what this file now asserts.
+ *
+ * @see lib/app/rate-limit.ts · lib/app/capabilities.ts · lib/app/leaf-admin-nav.ts
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { registerAppRateLimits } from '@/lib/app/rate-limit';
 import { initAppCapabilities } from '@/lib/app/capabilities';
 import { initAppContextContributors } from '@/lib/app/context-contributors';
-import { initAppNav } from '@/lib/app/admin-nav';
+import { initLeafAdminNav } from '@/lib/app/leaf-admin-nav';
 import { publicNavItems, footerNavItems, footerLegalItems } from '@/lib/app/public-nav';
 import { emailOverrides } from '@/lib/app/emails';
 import { getEffectiveRateLimitPolicy, RATE_LIMIT_POLICY } from '@/lib/security/rate-limit-policy';
@@ -50,12 +55,14 @@ describe('lib/app/ bootstrap defaults are no-ops', () => {
     expect(initAppContextContributors()).toBeUndefined();
   });
 
-  it('initAppNav registers no admin nav sections by default', () => {
+  it('initLeafAdminNav registers no admin nav sections by default', () => {
     // Arrange — clean registry
     __resetNavRegistryForTests();
 
-    // Act — run the real (empty) hook
-    initAppNav();
+    // Act — run the real (empty) leaf hook. `initAppNav` itself is Daybreak-filled
+    // (it registers the framework section); the reserved-empty leaf seam it
+    // delegates to must stay a no-op so a leaf fork inherits an empty nav.
+    initLeafAdminNav();
 
     // Assert — nothing registered
     expect(getRegisteredNavSections()).toHaveLength(0);
