@@ -141,24 +141,19 @@ state · path · facilitator`. The bind service validates `role ∈ FACILITATION
    per call sets it `true`; there is **nothing to build** for the flag beyond setting it on any
    agent this feature seeds/documents. Not a task.
 
-## The one open decision — for the owner
+## The one open decision — RESOLVED: mechanism-only (John, 2026-07-06)
 
 **Seed a default facilitation family, or ship mechanism-only?** The board's indicative task 2
-says "agent seeds via the `isSystem:false` scaffold (#303)". But **ship-nothing-a-fork-deletes**
-(and the spec's own "they are `AiAgent` rows" framing — agents are per-deployment config:
-persona, model, voice, guardrails) pulls the other way: a seeded family imposes Daybreak's
-persona/model choices on every fork.
+said "agent seeds via the `isSystem:false` scaffold (#303)". But **ship-nothing-a-fork-deletes**
+(and the spec's own "they are `AiAgent` rows" framing — agents are per-deployment config: persona,
+model, voice, guardrails) pulled the other way.
 
-- **Recommendation — mechanism-only (my default).** Ship the binding + `FACILITATION_ROLES` +
-  the surface + the role→cap reference. A fork/app creates its **own** facilitation agents
-  (its persona, its model), grants them the guidance caps, and binds them to roles. Nothing to
-  delete; the mechanism is complete and immediately usable. This makes the feature **2 PRs**
-  (binding, surface) — an honest B1 size, not padded to hit "~3".
-- **Alternative — seed a minimal family as `isSystem:false` scaffolded rows.** If Daybreak
-  should boot with a working facilitation family out of the box, seed the six agents (the #303
-  scaffold makes them fork-editable/deletable) + their role→cap grants + bindings as a **t-3**.
-  Cost: demo-ish content a fork will re-persona, and the seed→`ai_capability`-sync boot-ordering
-  wrinkle (grants FK to rows `syncFramework()` writes at boot) to handle.
+**Decided — mechanism-only.** Ship the binding + `FACILITATION_ROLES` + the surface + the role→cap
+reference; a fork/app creates its **own** facilitation agents (its persona, its model), grants them
+the guidance caps, and binds them to roles. Nothing to delete; the mechanism is complete and
+immediately usable. The feature is therefore **2 PRs** (t-1 binding, t-2 surface) — the conditional
+seed task (**t-3**) is **dropped**. _(If a fork later wants a bootable default family, it seeds its
+own via the #303 `isSystem:false` scaffold — the mechanism this feature ships makes that trivial.)_
 
 Everything else in this plan is settled; this is the single product-scope fork worth the owner's
 call before t-3 is (or isn't) promoted. _(Per [[planning-retro#B20|B20]]: resolve the tractable
