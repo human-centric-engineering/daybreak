@@ -80,9 +80,11 @@ export const DELETE = withAdminAuth<{ slug: string }>(
     const slug = parseModuleSlug((await params).slug);
 
     const { searchParams } = new URL(request.url);
+    // `|| undefined` (not `??`) so a present-but-empty param (`?documentId=`) is treated
+    // as absent — it hits the "exactly one" refine cleanly instead of a cuid error.
     const query = revokeModuleKnowledgeQuerySchema.parse({
-      documentId: searchParams.get('documentId') ?? undefined,
-      tagId: searchParams.get('tagId') ?? undefined,
+      documentId: searchParams.get('documentId') || undefined,
+      tagId: searchParams.get('tagId') || undefined,
     });
     const common = { moduleSlug: slug, userId: session.user.id, clientIp };
 

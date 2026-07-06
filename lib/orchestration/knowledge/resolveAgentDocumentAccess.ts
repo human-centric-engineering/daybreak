@@ -94,10 +94,12 @@ export async function resolveAgentDocumentAccess(agentId: string): Promise<Agent
     return value;
   }
 
-  // Direct grants, tag grants, and any registered access contributors (e.g. a
-  // framework module contributing its bound agents' knowledge scope) resolve in
+  // Direct grants, tag grants, and any registered access contributors resolve in
   // parallel. Contributors only WIDEN the restricted set; a failing contributor is
-  // logged and ignored so this function keeps its never-throws contract.
+  // logged and ignored so this function keeps its never-throws contract. The call is
+  // wrapped in `Promise.resolve().then(...)` so a contributor that throws SYNCHRONOUSLY
+  // (a non-async fn that throws before returning its promise) is caught too, not just
+  // an async rejection.
   const [docGrants, tagGrants, contributions] = await Promise.all([
     prisma.aiAgentKnowledgeDocument.findMany({
       where: { agentId },
@@ -109,13 +111,15 @@ export async function resolveAgentDocumentAccess(agentId: string): Promise<Agent
     }),
     Promise.all(
       getAgentAccessContributors().map((contribute) =>
-        contribute(agentId).catch((err): AgentAccessContribution => {
-          logger.warn('resolveAgentDocumentAccess: access contributor failed, ignoring', {
-            agentId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          return {};
-        })
+        Promise.resolve()
+          .then(() => contribute(agentId))
+          .catch((err): AgentAccessContribution => {
+            logger.warn('resolveAgentDocumentAccess: access contributor failed, ignoring', {
+              agentId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+            return {};
+          })
       )
     ),
   ]);

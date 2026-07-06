@@ -291,7 +291,7 @@ describe('resolveAgentDocumentAccess', () => {
       expect(contributor).not.toHaveBeenCalled();
     });
 
-    it('ignores a throwing contributor and still resolves (never throws)', async () => {
+    it('ignores an async-throwing contributor and still resolves (never throws)', async () => {
       agentFindUnique.mockResolvedValueOnce({ knowledgeAccessMode: 'restricted' });
       docGrantsFindMany.mockResolvedValueOnce([{ documentId: 'doc-direct' }]);
       tagGrantsFindMany.mockResolvedValueOnce([]);
@@ -300,6 +300,23 @@ describe('resolveAgentDocumentAccess', () => {
       });
 
       const result = await resolveAgentDocumentAccess('agent-c5');
+
+      if (result.mode !== 'restricted') throw new Error('expected restricted');
+      expect(result.documentIds).toEqual(['doc-direct']);
+    });
+
+    it('ignores a SYNCHRONOUSLY-throwing contributor and still resolves', async () => {
+      // A non-async contributor that throws before returning its promise: the throw
+      // happens inside the map callback, not the returned promise — the resolver must
+      // still catch it (Promise.resolve().then wrapper) and keep its never-throws contract.
+      agentFindUnique.mockResolvedValueOnce({ knowledgeAccessMode: 'restricted' });
+      docGrantsFindMany.mockResolvedValueOnce([{ documentId: 'doc-direct' }]);
+      tagGrantsFindMany.mockResolvedValueOnce([]);
+      registerAgentAccessContributor('sync-bad', (): Promise<never> => {
+        throw new Error('synchronous boom');
+      });
+
+      const result = await resolveAgentDocumentAccess('agent-c6');
 
       if (result.mode !== 'restricted') throw new Error('expected restricted');
       expect(result.documentIds).toEqual(['doc-direct']);

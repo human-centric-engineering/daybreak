@@ -486,6 +486,29 @@ be composed **live at resolve time**, never stored on the agent.
   (composed live, unioned with its direct grants, never clobbering them); the access cache is
   invalidated on mutation; the Sunrise seam issue is filed; **gates green** (retro B4).
 
+**Cache-invalidation coordination (surfaced by t-4 `/code-review` — deferrals need a home).**
+The resolver caches the composed access set per-agent for 60s, so any path that changes what a
+contributor reads must call `invalidateAgentAccess`. t-4 wired the two application sites that
+mutate the inputs (grant/revoke in `knowledge/service.ts`; bind/unbind in `bindings/service.ts`).
+Two paths are deliberately **not** covered and are recorded here so a future owner doesn't miss them:
+
+- **Module hard-delete → `f-ops-views` (15).** `moduleId onDelete: Cascade` means deleting a `Module`
+  row drops its bindings + knowledge pivots at the DB layer with **no application code running**, so
+  no site can evict the affected agents' caches — a ≤60s fail-to-revoke window. There is **no
+  module-hard-delete path today** (f-module-core shipped a read API only). **When f-ops-views (or any
+  admin) adds delete-module, it MUST `invalidateAllAgentAccess()` (or invalidate the module's bound
+  agents) as part of the delete.** Belt-and-braces alternative if this proves fiddly: shorten the
+  resolver TTL, or have the resolver not cache contributor output (recompute live) — a Sunrise-side
+  call, since it's the core cache. (Core doc/tag deletes already call `invalidateAllAgentAccess`, so
+  a deleted _document/tag_ is safe; only _module_ deletion is the gap.)
+- **Module soft-retire (`isRegistered=false`) — retain, by decision.** Retiring a module (code removed,
+  row kept for audit) leaves its bindings + knowledge pivots intact, and the contributor filters on
+  **binding existence, not `isRegistered`** — so a bound restricted agent keeps inheriting a retired
+  module's scope. This is **intended**: retire is an audit flag, not a revocation; to revoke, unbind
+  the agents or delete the module. Stated so it's a designed behaviour, not an accident. (If a future
+  feature wants retire to also revoke knowledge, the contributor gains an `isRegistered` join — a
+  one-line change, deliberately not made now.)
+
 ## Boundary & forkability notes
 
 - **Everything is framework-tier.** All `lib/framework/modules/**` code imports core only
