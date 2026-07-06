@@ -53,6 +53,21 @@ describe('describeConfigSchema — supported leaves', () => {
     expect(d).toMatchObject({ type: 'number', integer: false });
   });
 
+  it('drops Zod’s safe-integer sentinels: a bare .int() carries no min/max', () => {
+    const d = byKey(describeConfigSchema(z.object({ retries: z.number().int() })), 'retries');
+    // Zod emits minimum/maximum = ±MAX_SAFE_INTEGER for a bare .int(); these are dropped.
+    expect(d).toMatchObject({ type: 'number', integer: true });
+    expect((d as { min?: number }).min).toBeUndefined();
+    expect((d as { max?: number }).max).toBeUndefined();
+  });
+
+  it('picks up an exclusive lower bound from .positive()', () => {
+    const d = byKey(describeConfigSchema(z.object({ pos: z.number().int().positive() })), 'pos');
+    // .positive() → exclusiveMinimum: 0; the .int() max sentinel is still dropped.
+    expect(d).toMatchObject({ type: 'number', min: 0 });
+    expect((d as { max?: number }).max).toBeUndefined();
+  });
+
   it('describes a boolean', () => {
     const d = byKey(describeConfigSchema(z.object({ enabled: z.boolean() })), 'enabled');
     expect(d).toMatchObject({ type: 'boolean', required: true });

@@ -33,12 +33,20 @@ export function parseModuleSlug(raw: string): string {
   return parseSlugParam(raw, 'module');
 }
 
+/** Postgres `int4` max — `ModuleVersion.version` is an `Int`, so a larger value can
+ *  never name a real row and would error at the DB (a 500) rather than 400 if it reached
+ *  `findUnique`. */
+const PG_INT4_MAX = 2_147_483_647;
+
 /**
  * Validate a `[version]` path param (a positive integer version NUMBER). A malformed
- * value can never name a real version, so this is a 400, not a 404.
+ * value can never name a real version, so this is a 400, not a 404. Canonical digits only
+ * (`z.coerce` would otherwise accept `1e3`, `0x10`, ` 3 `), and bounded to `int4` so an
+ * out-of-range number is a clean 400 instead of a Postgres range error → 500.
  */
 export function parseVersionParam(raw: string): number {
-  const parsed = z.coerce.number().int().positive().safeParse(raw);
+  const n = /^[0-9]+$/.test(raw) ? Number(raw) : Number.NaN;
+  const parsed = z.number().int().positive().max(PG_INT4_MAX).safeParse(n);
   if (!parsed.success) {
     throw new ValidationError('Invalid version number', {
       version: ['Must be a positive integer'],

@@ -90,6 +90,18 @@ function asNumber(value: unknown): number | undefined {
   return typeof value === 'number' ? value : undefined;
 }
 
+/**
+ * A numeric *bound* to surface as a form hint, or `undefined` when there is none.
+ * Drops non-finite values and Zod 4's safe-integer sentinels (±`MAX_SAFE_INTEGER`),
+ * which `z.number().int()` emits as `minimum`/`maximum` even when the author set no
+ * bound — carrying them through would render an absurd ±9007199254740991 limit.
+ */
+function numericBound(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return undefined;
+  if (Math.abs(value) === Number.MAX_SAFE_INTEGER) return undefined;
+  return value;
+}
+
 function describeField(key: string, prop: JsonSchemaProp, inRequired: boolean): FieldDescriptor {
   const hasDefault = 'default' in prop && prop.default !== undefined;
   const label = humanizeKey(key);
@@ -131,8 +143,10 @@ function describeField(key: string, prop: JsonSchemaProp, inRequired: boolean): 
       required,
       integer: prop.type === 'integer',
       default: hasDefault && typeof prop.default === 'number' ? prop.default : undefined,
-      min: asNumber(prop.minimum),
-      max: asNumber(prop.maximum),
+      // Prefer an inclusive bound; fall back to an exclusive one (`.positive()` /
+      // `.gt()` emit `exclusiveMinimum`), and drop Zod's `.int()` safe-int sentinels.
+      min: numericBound(prop.minimum) ?? numericBound(prop.exclusiveMinimum),
+      max: numericBound(prop.maximum) ?? numericBound(prop.exclusiveMaximum),
     };
   }
 
