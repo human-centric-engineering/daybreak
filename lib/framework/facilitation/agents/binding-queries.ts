@@ -43,3 +43,22 @@ export async function listFacilitationBindings(): Promise<FacilitationAgentBindi
 
   return bindings.map((b) => ({ ...b, agent: byId.get(b.agentId) ?? null }));
 }
+
+/**
+ * Resolve the single binding for one seat (`@@unique([role])` ⇒ at most one), stitched with its
+ * bound agent's display fields, or `null` when nothing is bound to the role (including a role that
+ * is not a declared seat — `findUnique` simply misses). The read side the facilitation surface
+ * resolver keys on; same stitch as {@link listFacilitationBindings}, keyed instead of listed.
+ */
+export async function getFacilitationBindingByRole(
+  role: string
+): Promise<FacilitationAgentBindingView | null> {
+  const binding = await prisma.facilitationAgentBinding.findUnique({ where: { role } });
+  if (binding === null) return null;
+
+  const agent = await prisma.aiAgent.findUnique({
+    where: { id: binding.agentId },
+    select: { id: true, name: true, slug: true, isActive: true, deletedAt: true },
+  });
+  return { ...binding, agent: agent ?? null };
+}

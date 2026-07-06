@@ -8,12 +8,15 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 vi.mock('@/lib/db/client', () => ({
   prisma: {
-    facilitationAgentBinding: { findMany: vi.fn() },
-    aiAgent: { findMany: vi.fn() },
+    facilitationAgentBinding: { findMany: vi.fn(), findUnique: vi.fn() },
+    aiAgent: { findMany: vi.fn(), findUnique: vi.fn() },
   },
 }));
 
-import { listFacilitationBindings } from '@/lib/framework/facilitation/agents/binding-queries';
+import {
+  listFacilitationBindings,
+  getFacilitationBindingByRole,
+} from '@/lib/framework/facilitation/agents/binding-queries';
 import { prisma } from '@/lib/db/client';
 
 beforeEach(() => vi.clearAllMocks());
@@ -53,5 +56,43 @@ describe('listFacilitationBindings', () => {
     ] as never);
     vi.mocked(prisma.aiAgent.findMany).mockResolvedValue([] as never);
     expect((await listFacilitationBindings())[0].agent).toBeNull();
+  });
+});
+
+describe('getFacilitationBindingByRole', () => {
+  it('returns null (without an agent lookup) when nothing is bound to the role', async () => {
+    vi.mocked(prisma.facilitationAgentBinding.findUnique).mockResolvedValue(null);
+    expect(await getFacilitationBindingByRole('made-up')).toBeNull();
+    expect(prisma.aiAgent.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('stitches the single binding with its bound agent', async () => {
+    vi.mocked(prisma.facilitationAgentBinding.findUnique).mockResolvedValue({
+      id: 'fab-1',
+      agentId: 'a1',
+      role: 'state',
+    } as never);
+    vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue({
+      id: 'a1',
+      name: 'Reporter',
+      slug: 'reporter',
+      isActive: true,
+      deletedAt: null,
+    } as never);
+    const view = await getFacilitationBindingByRole('state');
+    expect(prisma.facilitationAgentBinding.findUnique).toHaveBeenCalledWith({
+      where: { role: 'state' },
+    });
+    expect(view?.agent).toMatchObject({ slug: 'reporter' });
+  });
+
+  it('sets agent to null when the bound agent row is gone (hard-deleted between reads)', async () => {
+    vi.mocked(prisma.facilitationAgentBinding.findUnique).mockResolvedValue({
+      id: 'fab-1',
+      agentId: 'ghost',
+      role: 'state',
+    } as never);
+    vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue(null);
+    expect((await getFacilitationBindingByRole('state'))?.agent).toBeNull();
   });
 });
