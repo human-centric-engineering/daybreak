@@ -2,12 +2,13 @@
 name: f-module-bindings
 feature: 07 · f-module-bindings
 epic: Framework v1
-status: in flight
+status: shipped
 owner: Simon Holmes
 depends_on: f-module-core (shipped — #10 / #11 / #12)
 spec: framework-architecture.md §4.2 (bindings, not ownership), Appendix A (A6 role bindings · A7 two parallel tables · A8 namespaced capabilities + generic scope), X1 / X6
 parent: plan.md
 opened: 2026-07-05
+shipped: 2026-07-06 (t-1 #33 · t-2 #35 · t-3 #50 · t-4 #53)
 ---
 
 # f-module-bindings — agent / workflow / knowledge bindings
@@ -259,12 +260,12 @@ definition, inputData, userId, versionId)`** (`scheduling/scheduler.ts:102`) ove
 
 ## Tasks (promoted)
 
-| ID  | Task                                                                                                                                                                       | Files                                                                                                                                                                                                                     | Deps | Status        | PR  |
-| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ------------- | --- |
-| t-1 | **Agent bindings**: `ModuleDefinition.agentRoles` + `ModuleAgentBinding` model + `Module` relation + bind-time role validation + admin binding API (+ this plan)           | `lib/framework/modules/definition.ts`, `prisma/schema/framework-modules.prisma`, `framework_…` migration, `lib/framework/modules/bindings/*`, `app/api/v1/admin/framework/modules/[slug]/agents/**`, `tests/…`, this plan | —    | **available** | —   |
-| t-2 | **Module capabilities → registry + scope seam**: `ModuleDefinition.capabilities` + namespaced registration (in-memory + DB metadata) + `assertInModuleScope` refuse-helper | `lib/framework/modules/definition.ts`, `lib/framework/modules/capabilities/*`, `lib/framework/index.ts`, `lib/framework/modules/sync.ts`, `tests/…`                                                                       | t-1  | backlog       | —   |
-| t-3 | **Workflow bindings**: `ModuleWorkflowBinding` model (mirror `AiWorkflowTrigger`) + admin API + resolve-bindings→`drainEngine` dispatch function                           | `prisma/schema/framework-modules.prisma`, `framework_…` migration, `lib/framework/modules/workflow-bindings/*`, `app/api/v1/admin/framework/modules/[slug]/workflows/**`, `tests/…`                                       | t-1  | backlog       | —   |
-| t-4 | **Knowledge grants**: grant a module's docs/tags to its bound agents via the existing restricted-access system + cache invalidation                                        | `lib/framework/modules/knowledge/*`, `app/api/v1/admin/framework/modules/[slug]/knowledge/**`, `tests/…`                                                                                                                  | t-1  | backlog       | —   |
+| ID  | Task                                                                                                                                                                       | Files                                                                                                                                                                                                                     | Deps | Status   | PR  |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | -------- | --- |
+| t-1 | **Agent bindings**: `ModuleDefinition.agentRoles` + `ModuleAgentBinding` model + `Module` relation + bind-time role validation + admin binding API (+ this plan)           | `lib/framework/modules/definition.ts`, `prisma/schema/framework-modules.prisma`, `framework_…` migration, `lib/framework/modules/bindings/*`, `app/api/v1/admin/framework/modules/[slug]/agents/**`, `tests/…`, this plan | —    | **done** | #33 |
+| t-2 | **Module capabilities → registry + scope seam**: `ModuleDefinition.capabilities` + namespaced registration (in-memory + DB metadata) + `assertInModuleScope` refuse-helper | `lib/framework/modules/definition.ts`, `lib/framework/modules/capabilities/*`, `lib/framework/index.ts`, `lib/framework/modules/sync.ts`, `tests/…`                                                                       | t-1  | **done** | #35 |
+| t-3 | **Workflow bindings**: `ModuleWorkflowBinding` model (mirror `AiWorkflowTrigger`) + admin API + resolve-bindings→`drainEngine` dispatch function                           | `prisma/schema/framework-modules.prisma`, `framework_…` migration, `lib/framework/modules/workflow-bindings/*`, `app/api/v1/admin/framework/modules/[slug]/workflows/**`, `tests/…`                                       | t-1  | **done** | #50 |
+| t-4 | **Knowledge grants**: grant a module's docs/tags to its bound agents via the existing restricted-access system + cache invalidation                                        | `lib/framework/modules/knowledge/*`, `app/api/v1/admin/framework/modules/[slug]/knowledge/**`, `tests/…`                                                                                                                  | t-1  | **done** | #53 |
 
 **Four promoted PRs** (matches the parent plan's indicative `~4`). Honest sizing caveats
 ([[planning-retro#B1]]):
