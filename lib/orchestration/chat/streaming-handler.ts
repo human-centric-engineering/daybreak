@@ -59,6 +59,7 @@ import { withAgentBudgetLock } from '@/lib/orchestration/llm/budget-mutex';
 import { dispatchWebhookEvent } from '@/lib/orchestration/webhooks/dispatcher';
 import { resolveUserDisplayName } from '@/lib/orchestration/webhooks/payload-context';
 import { getOrchestrationSettings } from '@/lib/orchestration/settings';
+import { resolveGuardFloors, applyGuardFloor } from '@/lib/orchestration/chat/guard-floor';
 import { scanForInjection } from '@/lib/orchestration/chat/input-guard';
 import { scanCitations, scanOutput } from '@/lib/orchestration/chat/output-guard';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
@@ -659,6 +660,15 @@ export class StreamingChatHandler {
 
       yield { type: 'start', conversationId: conversation.id, messageId: userMessage.id };
 
+      // Per-turn guard-mode floors from any registered contributor (generic seam; empty registry
+      // ⇒ `{}`, so the guard resolutions below are unchanged). Resolved once and applied at each
+      // guard site — a contributor can only RAISE a guard, never lower it.
+      const guardFloors = await resolveGuardFloors({
+        contextType: request.contextType,
+        contextId: request.contextId,
+        agentId: agent.id,
+      });
+
       // Emit hook event for message creation
       emitHookEvent('message.created', {
         conversationId: conversation.id,
@@ -691,6 +701,7 @@ export class StreamingChatHandler {
             );
           }
         }
+        guardMode = applyGuardFloor(guardMode, guardFloors.input);
 
         if (guardMode === 'block') {
           yield errorEvent('input_blocked', 'Message blocked by security policy.');
@@ -1188,6 +1199,7 @@ export class StreamingChatHandler {
                   );
                 }
               }
+              outputMode = applyGuardFloor(outputMode, guardFloors.output);
 
               if (outputMode === 'block') {
                 yield errorEvent(
@@ -1231,6 +1243,7 @@ export class StreamingChatHandler {
                   );
                 }
               }
+              citationMode = applyGuardFloor(citationMode, guardFloors.citation);
 
               if (citationMode === 'block') {
                 yield errorEvent(

@@ -28,6 +28,11 @@
 
 import { registerContextContributor } from '@/lib/orchestration/chat/context-builder';
 import { registerAgentAccessContributor } from '@/lib/orchestration/knowledge/agent-access-contributors';
+import { registerGuardFloorContributor } from '@/lib/orchestration/chat/guard-floor';
+import {
+  resolveFacilitationGuardFloor,
+  FACILITATION_GUARD_FLOOR_KEY,
+} from '@/lib/framework/facilitation/policies/guard-floor';
 import { loadModuleContext, MODULE_CONTEXT_TYPE } from '@/lib/framework/modules/context';
 import {
   resolveModuleKnowledgeForAgent,
@@ -52,6 +57,10 @@ export function initFramework(): void {
   // contributor queries the DB only when the resolver calls it), so it belongs at init;
   // it is module-registry-independent (it reads bindings at resolve time). (t-4)
   registerAgentAccessContributor(MODULE_KNOWLEDGE_CONTRIBUTOR_KEY, resolveModuleKnowledgeForAgent);
+  // Facilitation guard minimums (f-policies t-3, F16): a `guard_minimum` policy scoped to a
+  // facilitation role raises the inline guard floor for that role's surface, via the generic core
+  // guard-floor seam. In-memory registration (the contributor queries the DB at resolve time).
+  registerGuardFloorContributor(FACILITATION_GUARD_FLOOR_KEY, resolveFacilitationGuardFloor);
   // Framework built-in capabilities (get_state, guidance read tools, …) — framework-owned,
   // not leaf- or module-dependent, so they register here at init. The dispatcher-handler +
   // DB-row passes run in `syncFramework()` below.
