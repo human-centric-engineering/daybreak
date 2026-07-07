@@ -127,6 +127,54 @@ describe('assertValidFacilitationPolicy — guard_minimum (t-3)', () => {
   });
 });
 
+describe('assertValidFacilitationPolicy — escalation (f-emergence t-1, F15)', () => {
+  const valid = {
+    scope: { type: 'facilitation_role', id: 'onboarding' },
+    signal: { guard: 'output', outcome: 'blocked' },
+    priority: 'high',
+  };
+
+  it('accepts a well-formed escalation policy', () => {
+    expect(() => assertValidFacilitationPolicy('escalation', valid)).not.toThrow();
+  });
+
+  it('rejects a scope id that is not a facilitation role', () => {
+    expect(() =>
+      assertValidFacilitationPolicy('escalation', {
+        ...valid,
+        scope: { type: 'facilitation_role', id: 'made_up' },
+      })
+    ).toThrow(ValidationError);
+  });
+
+  it('rejects an invalid guard, outcome, or priority', () => {
+    expect(() =>
+      assertValidFacilitationPolicy('escalation', {
+        ...valid,
+        signal: { guard: 'nope', outcome: 'blocked' },
+      })
+    ).toThrow(ValidationError);
+    expect(() =>
+      assertValidFacilitationPolicy('escalation', {
+        ...valid,
+        signal: { guard: 'output', outcome: 'exploded' },
+      })
+    ).toThrow(ValidationError);
+    expect(() =>
+      assertValidFacilitationPolicy('escalation', { ...valid, priority: 'urgent' })
+    ).toThrow(ValidationError);
+  });
+
+  it('rejects a missing signal or priority (strict)', () => {
+    expect(() =>
+      assertValidFacilitationPolicy('escalation', { scope: valid.scope, priority: 'low' })
+    ).toThrow(ValidationError);
+    expect(() =>
+      assertValidFacilitationPolicy('escalation', { scope: valid.scope, signal: valid.signal })
+    ).toThrow(ValidationError);
+  });
+});
+
 describe('facilitationPolicySchema (the discriminated union)', () => {
   it('rejects a mismatched kind/payload at the schema level', () => {
     expect(

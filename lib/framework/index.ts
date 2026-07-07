@@ -29,10 +29,15 @@
 import { registerContextContributor } from '@/lib/orchestration/chat/context-builder';
 import { registerAgentAccessContributor } from '@/lib/orchestration/knowledge/agent-access-contributors';
 import { registerGuardFloorContributor } from '@/lib/orchestration/chat/guard-floor';
+import { registerGuardEventContributor } from '@/lib/orchestration/chat/guard-events';
 import {
   resolveFacilitationGuardFloor,
   FACILITATION_GUARD_FLOOR_KEY,
 } from '@/lib/framework/facilitation/policies/guard-floor';
+import {
+  handleFacilitationGuardEvent,
+  FACILITATION_ESCALATION_KEY,
+} from '@/lib/framework/facilitation/policies/escalation';
 import { loadModuleContext, MODULE_CONTEXT_TYPE } from '@/lib/framework/modules/context';
 import {
   resolveModuleKnowledgeForAgent,
@@ -61,6 +66,10 @@ export function initFramework(): void {
   // facilitation role raises the inline guard floor for that role's surface, via the generic core
   // guard-floor seam. In-memory registration (the contributor queries the DB at resolve time).
   registerGuardFloorContributor(FACILITATION_GUARD_FLOOR_KEY, resolveFacilitationGuardFloor);
+  // Facilitation escalation (f-emergence t-1, F15): an `escalation` policy scoped to a facilitation
+  // role turns a guard firing on that role's surface into a notify + log pathway, via the generic
+  // post-detection guard-event core seam. Fire-and-forget at the guard site.
+  registerGuardEventContributor(FACILITATION_ESCALATION_KEY, handleFacilitationGuardEvent);
   // Framework built-in capabilities (get_state, guidance read tools, …) — framework-owned,
   // not leaf- or module-dependent, so they register here at init. The dispatcher-handler +
   // DB-row passes run in `syncFramework()` below.

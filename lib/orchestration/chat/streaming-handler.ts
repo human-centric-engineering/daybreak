@@ -60,6 +60,7 @@ import { dispatchWebhookEvent } from '@/lib/orchestration/webhooks/dispatcher';
 import { resolveUserDisplayName } from '@/lib/orchestration/webhooks/payload-context';
 import { getOrchestrationSettings } from '@/lib/orchestration/settings';
 import { resolveGuardFloors, applyGuardFloor } from '@/lib/orchestration/chat/guard-floor';
+import { emitGuardEvent } from '@/lib/orchestration/chat/guard-events';
 import { scanForInjection } from '@/lib/orchestration/chat/input-guard';
 import { scanCitations, scanOutput } from '@/lib/orchestration/chat/output-guard';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
@@ -660,14 +661,20 @@ export class StreamingChatHandler {
 
       yield { type: 'start', conversationId: conversation.id, messageId: userMessage.id };
 
-      // Per-turn guard-mode floors from any registered contributor (generic seam; empty registry
-      // ⇒ `{}`, so the guard resolutions below are unchanged). Resolved once and applied at each
-      // guard site — a contributor can only RAISE a guard, never lower it.
-      const guardFloors = await resolveGuardFloors({
+      // The turn's guard context — shared by the guard-floor seam (raise a guard before detection)
+      // and the guard-event seam (observe a guard firing, e.g. escalate). Both are inert when no
+      // contributor is registered.
+      const guardCtx = {
         contextType: request.contextType,
         contextId: request.contextId,
         agentId: agent.id,
-      });
+        userId: request.userId,
+        conversationId: conversation.id,
+      };
+      // Per-turn guard-mode floors from any registered contributor (generic seam; empty registry
+      // ⇒ `{}`, so the guard resolutions below are unchanged). Resolved once and applied at each
+      // guard site — a contributor can only RAISE a guard, never lower it.
+      const guardFloors = await resolveGuardFloors(guardCtx);
 
       // Emit hook event for message creation
       emitHookEvent('message.created', {
@@ -702,6 +709,16 @@ export class StreamingChatHandler {
           }
         }
         guardMode = applyGuardFloor(guardMode, guardFloors.input);
+
+        // An ARMED input guard detected a signal — notify any guard-event observer (e.g.
+        // escalation). Skipped when the guard is disabled ('none'), so a guard the operator turned
+        // off never escalates. Fire-and-forget: never delays or blocks the turn.
+        if (guardMode !== 'none') {
+          emitGuardEvent(guardCtx, {
+            guard: 'input',
+            outcome: guardMode === 'block' ? 'blocked' : 'flagged',
+          });
+        }
 
         if (guardMode === 'block') {
           yield errorEvent('input_blocked', 'Message blocked by security policy.');
@@ -1201,6 +1218,14 @@ export class StreamingChatHandler {
               }
               outputMode = applyGuardFloor(outputMode, guardFloors.output);
 
+              // Skipped when the guard is disabled ('none') — see the input guard above.
+              if (outputMode !== 'none') {
+                emitGuardEvent(guardCtx, {
+                  guard: 'output',
+                  outcome: outputMode === 'block' ? 'blocked' : 'flagged',
+                });
+              }
+
               if (outputMode === 'block') {
                 yield errorEvent(
                   'output_blocked',
@@ -1244,6 +1269,14 @@ export class StreamingChatHandler {
                 }
               }
               citationMode = applyGuardFloor(citationMode, guardFloors.citation);
+
+              // Skipped when the guard is disabled ('none') — see the input guard above.
+              if (citationMode !== 'none') {
+                emitGuardEvent(guardCtx, {
+                  guard: 'citation',
+                  outcome: citationMode === 'block' ? 'blocked' : 'flagged',
+                });
+              }
 
               if (citationMode === 'block') {
                 yield errorEvent(

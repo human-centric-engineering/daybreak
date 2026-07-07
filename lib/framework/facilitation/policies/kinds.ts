@@ -26,6 +26,7 @@ export const FACILITATION_POLICY_KINDS = [
   'auto_approval',
   'relevance_gating',
   'guard_minimum',
+  'escalation',
 ] as const;
 export type FacilitationPolicyKind = (typeof FACILITATION_POLICY_KINDS)[number];
 
@@ -120,6 +121,41 @@ const guardMinimumPolicySchema = z.object({
 });
 
 /**
+ * Escalation pathway (spec §5.5, F15 · f-emergence t-1, picked up from f-policies' deferred t-4) —
+ * "when signal S is detected in scope X, do Y". When an inline guard fires on a facilitation role's
+ * surface at or above the configured severity, escalate: notify a human reviewer (via the shipped
+ * escalation-notifier) and always log — turning a silent guard block into a defined, auditable
+ * pathway. Enforced via the post-detection guard-event core seam (`registerGuardEventContributor`).
+ * `signal.outcome` is the MINIMUM severity to fire on (`flagged` = any detection; `blocked` = only a
+ * hard block). v1 response is notify + log; conversation-rerouting (a workflow) and user-facing
+ * resources are a documented follow-up.
+ */
+export const escalationPayloadSchema = z
+  .object({
+    scope: z
+      .object({
+        type: z.literal('facilitation_role'),
+        id: facilitationRoleSchema,
+      })
+      .strict(),
+    signal: z
+      .object({
+        guard: z.enum(['input', 'output', 'citation']),
+        outcome: z.enum(['flagged', 'blocked']),
+      })
+      .strict(),
+    priority: z.enum(['low', 'medium', 'high']),
+  })
+  .strict();
+
+export type EscalationPayload = z.infer<typeof escalationPayloadSchema>;
+
+const escalationPolicySchema = z.object({
+  kind: z.literal('escalation'),
+  payload: escalationPayloadSchema,
+});
+
+/**
  * The discriminated union over every policy kind — validates that `payload` matches `kind`, and
  * rejects unknown kinds (the forward-compat guard). Each kind adds a member here (and a value to
  * the migration's `kind` CHECK + `FACILITATION_POLICY_KINDS`, kept in lockstep by the drift guard).
@@ -128,6 +164,7 @@ export const facilitationPolicySchema = z.discriminatedUnion('kind', [
   autoApprovalPolicySchema,
   relevanceGatingPolicySchema,
   guardMinimumPolicySchema,
+  escalationPolicySchema,
 ]);
 
 export type FacilitationPolicyInput = z.infer<typeof facilitationPolicySchema>;
