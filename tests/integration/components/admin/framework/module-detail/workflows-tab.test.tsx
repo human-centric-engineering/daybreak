@@ -220,6 +220,23 @@ describe('WorkflowsTab', () => {
     expect(nav.refresh).toHaveBeenCalled();
   });
 
+  it("locks other rows' actions while a confirm is open (no concurrent mutations)", async () => {
+    const user = userEvent.setup();
+    renderTab({
+      bindings: [
+        binding({ id: 'a', eventType: 'module.entered' }),
+        binding({ id: 'b', eventType: 'module.completed' }),
+      ],
+    });
+
+    // Open the unbind confirm on the first row.
+    const unbindButtons = screen.getAllByRole('button', { name: /^unbind$/i });
+    await user.click(unbindButtons[0]);
+
+    // The other row's Disable action is now locked (can't start a concurrent mutation).
+    expect(screen.getByRole('button', { name: /disable/i })).toBeDisabled();
+  });
+
   it('shows a roster load error', async () => {
     const user = userEvent.setup();
     vi.mocked(apiClient.get).mockRejectedValue(new APIClientError('boom', 'ERR', 500));

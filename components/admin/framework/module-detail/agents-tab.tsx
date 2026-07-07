@@ -90,6 +90,9 @@ export function AgentsTab({ slug, agentRoles, bindings }: AgentsTabProps) {
   // The picker shows only the first ROSTER_LIMIT agents (the roster endpoint's max page size);
   // flag the likely-truncated case rather than silently hiding agents past the cap.
   const rosterCapped = roster !== null && roster.length >= ROSTER_LIMIT;
+  // Lock every row's actions while any row is busy OR a confirm is open elsewhere, so a
+  // confirm can't be interleaved with another row's action into two concurrent mutations.
+  const rowLocked = rowBusy !== null || confirmingUnbind !== null;
 
   async function openForm() {
     setAdding(true);
@@ -333,7 +336,7 @@ export function AgentsTab({ slug, agentRoles, bindings }: AgentsTabProps) {
                           size="sm"
                           variant="destructive"
                           onClick={() => void unbind(b.id)}
-                          disabled={rowBusy === b.id}
+                          disabled={rowBusy !== null}
                         >
                           {rowBusy === b.id ? 'Unbinding…' : 'Confirm'}
                         </Button>
@@ -341,7 +344,7 @@ export function AgentsTab({ slug, agentRoles, bindings }: AgentsTabProps) {
                           size="sm"
                           variant="ghost"
                           onClick={() => setConfirmingUnbind(null)}
-                          disabled={rowBusy === b.id}
+                          disabled={rowBusy !== null}
                         >
                           Cancel
                         </Button>
@@ -353,7 +356,7 @@ export function AgentsTab({ slug, agentRoles, bindings }: AgentsTabProps) {
                             size="sm"
                             variant="outline"
                             onClick={() => void makePrimary(b.id)}
-                            disabled={rowBusy !== null}
+                            disabled={rowLocked}
                           >
                             Make primary
                           </Button>
@@ -365,7 +368,7 @@ export function AgentsTab({ slug, agentRoles, bindings }: AgentsTabProps) {
                             setRowError(null);
                             setConfirmingUnbind(b.id);
                           }}
-                          disabled={rowBusy !== null}
+                          disabled={rowLocked}
                         >
                           Unbind
                         </Button>

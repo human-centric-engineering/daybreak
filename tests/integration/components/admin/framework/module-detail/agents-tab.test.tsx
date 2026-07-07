@@ -198,6 +198,23 @@ describe('AgentsTab', () => {
     expect(nav.refresh).toHaveBeenCalled();
   });
 
+  it("locks other rows' actions while a confirm is open (no concurrent mutations)", async () => {
+    const user = userEvent.setup();
+    renderTab({
+      bindings: [
+        binding({ id: 'a', role: 'companion', isPrimary: true }),
+        binding({ id: 'b', role: 'coach', isPrimary: false }),
+      ],
+    });
+
+    // Open the unbind confirm on the first row.
+    const unbindButtons = screen.getAllByRole('button', { name: /^unbind$/i });
+    await user.click(unbindButtons[0]);
+
+    // The other row's "Make primary" action is now locked.
+    expect(screen.getByRole('button', { name: /make primary/i })).toBeDisabled();
+  });
+
   it('hides the bind form for an unregistered module but still lists bindings', () => {
     renderTab({ agentRoles: { registered: false, roles: [] } });
     expect(screen.queryByRole('button', { name: /bind agent/i })).not.toBeInTheDocument();

@@ -82,6 +82,9 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
   const [rowError, setRowError] = useState<string | null>(null);
 
   const rosterCapped = roster !== null && roster.length >= ROSTER_LIMIT;
+  // Lock every row's actions while any row is busy OR a confirm is open elsewhere, so a
+  // confirm can't be interleaved with another row's toggle into two concurrent mutations.
+  const rowLocked = rowBusy !== null || confirmingUnbind !== null;
 
   async function openForm() {
     setAdding(true);
@@ -360,7 +363,7 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
                           size="sm"
                           variant="destructive"
                           onClick={() => void unbind(b.id)}
-                          disabled={rowBusy === b.id}
+                          disabled={rowBusy !== null}
                         >
                           {rowBusy === b.id ? 'Unbinding…' : 'Confirm'}
                         </Button>
@@ -368,7 +371,7 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
                           size="sm"
                           variant="ghost"
                           onClick={() => setConfirmingUnbind(null)}
-                          disabled={rowBusy === b.id}
+                          disabled={rowBusy !== null}
                         >
                           Cancel
                         </Button>
@@ -379,7 +382,7 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
                           size="sm"
                           variant="outline"
                           onClick={() => void toggleEnabled(b)}
-                          disabled={rowBusy !== null}
+                          disabled={rowLocked}
                         >
                           {b.enabled ? 'Disable' : 'Enable'}
                         </Button>
@@ -390,7 +393,7 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
                             setRowError(null);
                             setConfirmingUnbind(b.id);
                           }}
-                          disabled={rowBusy !== null}
+                          disabled={rowLocked}
                         >
                           Unbind
                         </Button>
