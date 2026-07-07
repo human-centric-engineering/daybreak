@@ -25,6 +25,7 @@ import type {
   ModuleAgentBindingListItem,
   ModuleAgentRolesView,
   ModuleConfigFormView,
+  ModuleKnowledgeScopeView,
   ModuleSettingsView,
   ModuleVersionsView,
   ModuleWorkflowBindingListItem,
@@ -34,6 +35,7 @@ import { VersionsTab } from '@/components/admin/framework/module-detail/versions
 import { SettingsTab } from '@/components/admin/framework/module-detail/settings-tab';
 import { AgentsTab } from '@/components/admin/framework/module-detail/agents-tab';
 import { WorkflowsTab } from '@/components/admin/framework/module-detail/workflows-tab';
+import { KnowledgeTab } from '@/components/admin/framework/module-detail/knowledge-tab';
 
 // Mirrors `modules-table.tsx`'s statusVariant (2 uses — the Settings tab renders its status
 // as an editable Select, not a badge, so this stays at 2; extract to a shared
@@ -62,6 +64,8 @@ interface ModuleDetailProps {
   agentRoles: ModuleAgentRolesView | null;
   /** The module's workflow bindings (07's list); `null` when that fetch failed (not empty). */
   workflowBindings: ModuleWorkflowBindingListItem[] | null;
+  /** The module's knowledge scope (07's read); `null` when that fetch failed (not empty). */
+  knowledgeScope: ModuleKnowledgeScopeView | null;
 }
 
 export function ModuleDetail({
@@ -72,6 +76,7 @@ export function ModuleDetail({
   agentBindings,
   agentRoles,
   workflowBindings,
+  knowledgeScope,
 }: ModuleDetailProps) {
   // Newest version is always the live config (no draft/published split); 0 before any save.
   const currentVersion = versions.versions[0]?.version ?? 0;
@@ -113,6 +118,11 @@ export function ModuleDetail({
       value: 'workflows',
       label: 'Workflows',
       node: <WorkflowsTab slug={slug} bindings={workflowBindings} />,
+    },
+    {
+      value: 'knowledge',
+      label: 'Knowledge',
+      node: <KnowledgeTab slug={slug} scope={knowledgeScope} />,
     },
   ];
 

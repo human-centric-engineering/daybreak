@@ -9,12 +9,10 @@
  * server owns all validation (a role must be a declared seat, ≤ 1 primary per module, no
  * duplicate agent+seat), and its field errors surface on the form.
  *
- * This is the reusable "binding tab" shape the Workflows / Knowledge tabs (t-4b / t-4c)
- * mirror: a stitched read table (with a degraded row when the bound entity was removed) over
- * the list endpoint + an inline create form whose picker roster is fetched on demand.
- *
- * A per-binding `config` override exists on the model but has no operator-facing consumer
- * yet, so it is intentionally not edited here (deferred, not forgotten).
+ * Built on the shared binding-tab primitives ({@link useBindingRoster} on-demand picker,
+ * {@link useRowActions} row-lock/confirm state, {@link RowConfirm}) that the Workflows and
+ * Knowledge tabs also use. A per-binding `config` override exists on the model but has no
+ * operator-facing consumer yet, so it is intentionally not edited here (deferred).
  */
 
 import { useState } from 'react';
@@ -38,12 +36,18 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { apiClient, APIClientError } from '@/lib/api/client';
+import { apiClient } from '@/lib/api/client';
 import type {
   ModuleAgentBindingListItem,
   ModuleAgentRolesView,
 } from '@/lib/framework/modules/view';
 import { apiFieldErrors } from '@/components/admin/framework/module-detail/api-field-errors';
+import {
+  ROSTER_LIMIT,
+  useBindingRoster,
+} from '@/components/admin/framework/module-detail/use-binding-roster';
+import { useRowActions } from '@/components/admin/framework/module-detail/use-row-actions';
+import { RowConfirm } from '@/components/admin/framework/module-detail/row-confirm';
 
 /** The minimal agent fields the bind picker needs from the orchestration roster. */
 interface AgentRosterItem {
@@ -52,8 +56,9 @@ interface AgentRosterItem {
   slug: string;
 }
 
-/** The roster is capped at the roster endpoint's max page size; see the picker note below. */
-const ROSTER_LIMIT = 100;
+// `kind=chat` mirrors the agents list page: evaluation *judge* agents are not runtime agents,
+// so they must not be offered as bindable module seats.
+const ROSTER_URL = `/api/v1/admin/orchestration/agents?isActive=true&kind=chat&limit=${ROSTER_LIMIT}`;
 
 interface AgentsTabProps {
   slug: string;
@@ -67,54 +72,26 @@ export function AgentsTab({ slug, agentRoles, bindings }: AgentsTabProps) {
   const router = useRouter();
   const base = `/api/v1/admin/framework/modules/${encodeURIComponent(slug)}/agents`;
 
-  const [adding, setAdding] = useState(false);
-  const [roster, setRoster] = useState<AgentRosterItem[] | null>(null);
-  const [rosterLoading, setRosterLoading] = useState(false);
-  const [rosterError, setRosterError] = useState<string | null>(null);
+  const roster = useBindingRoster<AgentRosterItem>(ROSTER_URL);
+  const rows = useRowActions();
 
+  const [adding, setAdding] = useState(false);
   const [agentId, setAgentId] = useState('');
   const [role, setRole] = useState('');
   const [isPrimary, setIsPrimary] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
-  const [confirmingUnbind, setConfirmingUnbind] = useState<string | null>(null);
-  const [rowBusy, setRowBusy] = useState<string | null>(null);
-  const [rowError, setRowError] = useState<string | null>(null);
-
   // `null` agentRoles = the seats fetch failed → we can't offer the bind form, but this is a
   // distinct "couldn't load" state, NOT the false "module is unregistered" claim.
   const registered = agentRoles?.registered ?? false;
   const roles = agentRoles?.roles ?? [];
   const canBind = agentRoles !== null && registered && roles.length > 0;
-  // The picker shows only the first ROSTER_LIMIT agents (the roster endpoint's max page size);
-  // flag the likely-truncated case rather than silently hiding agents past the cap.
-  const rosterCapped = roster !== null && roster.length >= ROSTER_LIMIT;
-  // Lock every row's actions while any row is busy OR a confirm is open elsewhere, so a
-  // confirm can't be interleaved with another row's action into two concurrent mutations.
-  const rowLocked = rowBusy !== null || confirmingUnbind !== null;
 
-  async function openForm() {
+  function openForm() {
     setAdding(true);
     setErrors([]);
-    // Serialise the roster fetch: only fetch once, and never start a second while one is in
-    // flight — a late-arriving response (e.g. open → cancel → reopen) must not overwrite a
-    // newer one and leave a stale error over a populated roster.
-    if (roster !== null || rosterLoading) return;
-    setRosterError(null);
-    setRosterLoading(true);
-    try {
-      // `kind=chat` mirrors the agents list page: evaluation *judge* agents are not runtime
-      // agents, so they must not be offered as bindable module seats.
-      const agents = await apiClient.get<AgentRosterItem[]>(
-        `/api/v1/admin/orchestration/agents?isActive=true&kind=chat&limit=${ROSTER_LIMIT}`
-      );
-      setRoster(agents);
-    } catch (err) {
-      setRosterError(err instanceof APIClientError ? err.message : 'Failed to load agents');
-    } finally {
-      setRosterLoading(false);
-    }
+    void roster.load();
   }
 
   async function bind(e: React.FormEvent) {
@@ -139,31 +116,26 @@ export function AgentsTab({ slug, agentRoles, bindings }: AgentsTabProps) {
     }
   }
 
-  async function makePrimary(bindingId: string) {
-    setRowBusy(bindingId);
-    setRowError(null);
-    try {
-      await apiClient.patch(`${base}/${bindingId}`, { body: { isPrimary: true } });
-      router.refresh();
-    } catch (err) {
-      setRowError(err instanceof APIClientError ? err.message : 'Failed to update binding');
-    } finally {
-      setRowBusy(null);
-    }
+  function makePrimary(bindingId: string) {
+    void rows.run(
+      bindingId,
+      async () => {
+        await apiClient.patch(`${base}/${bindingId}`, { body: { isPrimary: true } });
+        router.refresh();
+      },
+      'Failed to update binding'
+    );
   }
 
-  async function unbind(bindingId: string) {
-    setRowBusy(bindingId);
-    setRowError(null);
-    try {
-      await apiClient.delete(`${base}/${bindingId}`);
-      setConfirmingUnbind(null);
-      router.refresh();
-    } catch (err) {
-      setRowError(err instanceof APIClientError ? err.message : 'Failed to unbind agent');
-    } finally {
-      setRowBusy(null);
-    }
+  function unbind(bindingId: string) {
+    void rows.run(
+      bindingId,
+      async () => {
+        await apiClient.delete(`${base}/${bindingId}`);
+        router.refresh();
+      },
+      'Failed to unbind agent'
+    );
   }
 
   return (
@@ -174,7 +146,7 @@ export function AgentsTab({ slug, agentRoles, bindings }: AgentsTabProps) {
           agent.
         </p>
         {canBind && !adding && (
-          <Button size="sm" onClick={() => void openForm()}>
+          <Button size="sm" onClick={openForm}>
             Bind agent
           </Button>
         )}
@@ -201,20 +173,26 @@ export function AgentsTab({ slug, agentRoles, bindings }: AgentsTabProps) {
           onSubmit={(e) => void bind(e)}
           className="bg-muted/40 space-y-4 rounded-md border p-4"
         >
-          {rosterError ? (
+          {roster.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {rosterError}
+              {roster.error}
             </p>
           ) : (
             <div className="flex flex-wrap gap-4">
               <div className="space-y-1.5">
                 <Label htmlFor="bind-agent">Agent</Label>
-                <Select value={agentId} onValueChange={setAgentId} disabled={roster === null}>
+                <Select
+                  value={agentId}
+                  onValueChange={setAgentId}
+                  disabled={roster.roster === null}
+                >
                   <SelectTrigger id="bind-agent" className="w-56">
-                    <SelectValue placeholder={roster === null ? 'Loading…' : 'Select an agent'} />
+                    <SelectValue
+                      placeholder={roster.roster === null ? 'Loading…' : 'Select an agent'}
+                    />
                   </SelectTrigger>
                   <SelectContent>
-                    {(roster ?? []).map((a) => (
+                    {(roster.roster ?? []).map((a) => (
                       <SelectItem key={a.id} value={a.id}>
                         {a.name}
                       </SelectItem>
@@ -250,7 +228,7 @@ export function AgentsTab({ slug, agentRoles, bindings }: AgentsTabProps) {
             </div>
           )}
 
-          {rosterCapped && !rosterError && (
+          {roster.capped && !roster.error && (
             <p className="text-muted-foreground text-xs">
               Showing the first {ROSTER_LIMIT} agents. If the one you want isn&rsquo;t listed,
               deactivate unused agents to bring it into range.
@@ -266,7 +244,7 @@ export function AgentsTab({ slug, agentRoles, bindings }: AgentsTabProps) {
           )}
 
           <div className="flex items-center gap-2">
-            <Button type="submit" size="sm" disabled={busy || roster === null}>
+            <Button type="submit" size="sm" disabled={busy || roster.roster === null}>
               {busy ? 'Binding…' : 'Bind'}
             </Button>
             <Button
@@ -282,9 +260,9 @@ export function AgentsTab({ slug, agentRoles, bindings }: AgentsTabProps) {
         </form>
       )}
 
-      {rowError && (
+      {rows.error && (
         <p className="text-destructive text-sm" role="alert">
-          {rowError}
+          {rows.error}
         </p>
       )}
 
@@ -330,33 +308,22 @@ export function AgentsTab({ slug, agentRoles, bindings }: AgentsTabProps) {
                     </div>
                   </TableCell>
                   <TableCell className="text-right">
-                    {confirmingUnbind === b.id ? (
-                      <div className="flex items-center justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => void unbind(b.id)}
-                          disabled={rowBusy !== null}
-                        >
-                          {rowBusy === b.id ? 'Unbinding…' : 'Confirm'}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setConfirmingUnbind(null)}
-                          disabled={rowBusy !== null}
-                        >
-                          Cancel
-                        </Button>
-                      </div>
+                    {rows.confirmingId === b.id ? (
+                      <RowConfirm
+                        busy={rows.busyId === b.id}
+                        anyBusy={rows.busyId !== null}
+                        onConfirm={() => unbind(b.id)}
+                        onCancel={() => rows.setConfirmingId(null)}
+                        busyLabel="Unbinding…"
+                      />
                     ) : (
                       <div className="flex items-center justify-end gap-2">
                         {!b.isPrimary && (
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={() => void makePrimary(b.id)}
-                            disabled={rowLocked}
+                            onClick={() => makePrimary(b.id)}
+                            disabled={rows.locked}
                           >
                             Make primary
                           </Button>
@@ -364,11 +331,8 @@ export function AgentsTab({ slug, agentRoles, bindings }: AgentsTabProps) {
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => {
-                            setRowError(null);
-                            setConfirmingUnbind(b.id);
-                          }}
-                          disabled={rowLocked}
+                          onClick={() => rows.setConfirmingId(b.id)}
+                          disabled={rows.locked}
                         >
                           Unbind
                         </Button>

@@ -4,11 +4,10 @@
  * WorkflowsTab (f-ops-views t-4b) — the module's event→workflow binding surface.
  *
  * Lists the workflows bound to the module's lifecycle events, and lets an operator bind an
- * event to a workflow, enable/disable a binding, or unbind. Mirrors the t-4a Agents tab's
- * "binding tab" shape (stitched read table with a degraded row for a removed workflow + an
- * inline create form whose picker roster loads on demand + a nullable-degrade props contract).
- * Pure UI over 07's shipped `/modules/[slug]/workflows[/bindingId]` endpoints; the server owns
- * all validation, and its field errors surface via the shared `apiFieldErrors` helper.
+ * event to a workflow, enable/disable a binding, or unbind. Pure UI over 07's shipped
+ * `/modules/[slug]/workflows[/bindingId]` endpoints; the server owns all validation, and its
+ * field errors surface via the shared `apiFieldErrors` helper. Built on the shared binding-tab
+ * primitives ({@link useBindingRoster}, {@link useRowActions}, {@link RowConfirm}).
  *
  * Unlike agent seats, a workflow `eventType` is free-form (X1 — the module-lifecycle event
  * vocabulary belongs to f-engagement/08), so it is a text field, not a picker; and there is no
@@ -41,8 +40,14 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { FieldHelp } from '@/components/ui/field-help';
-import { apiClient, APIClientError } from '@/lib/api/client';
+import { apiClient } from '@/lib/api/client';
 import { apiFieldErrors } from '@/components/admin/framework/module-detail/api-field-errors';
+import {
+  ROSTER_LIMIT,
+  useBindingRoster,
+} from '@/components/admin/framework/module-detail/use-binding-roster';
+import { useRowActions } from '@/components/admin/framework/module-detail/use-row-actions';
+import { RowConfirm } from '@/components/admin/framework/module-detail/row-confirm';
 import type { ModuleWorkflowBindingListItem } from '@/lib/framework/modules/view';
 
 /** The minimal workflow fields the bind picker needs from the orchestration roster. */
@@ -52,8 +57,8 @@ interface WorkflowRosterItem {
   slug: string;
 }
 
-/** The roster is capped at the roster endpoint's max page size; see the picker note below. */
-const ROSTER_LIMIT = 100;
+// `isTemplate=false` excludes template scaffolds — only real workflows are bindable.
+const ROSTER_URL = `/api/v1/admin/orchestration/workflows?isActive=true&isTemplate=false&limit=${ROSTER_LIMIT}`;
 
 interface WorkflowsTabProps {
   slug: string;
@@ -65,11 +70,10 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
   const router = useRouter();
   const base = `/api/v1/admin/framework/modules/${encodeURIComponent(slug)}/workflows`;
 
-  const [adding, setAdding] = useState(false);
-  const [roster, setRoster] = useState<WorkflowRosterItem[] | null>(null);
-  const [rosterLoading, setRosterLoading] = useState(false);
-  const [rosterError, setRosterError] = useState<string | null>(null);
+  const roster = useBindingRoster<WorkflowRosterItem>(ROSTER_URL);
+  const rows = useRowActions();
 
+  const [adding, setAdding] = useState(false);
   const [workflowId, setWorkflowId] = useState('');
   const [eventType, setEventType] = useState('');
   const [inputTemplate, setInputTemplate] = useState('');
@@ -77,33 +81,10 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
   const [errors, setErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
 
-  const [confirmingUnbind, setConfirmingUnbind] = useState<string | null>(null);
-  const [rowBusy, setRowBusy] = useState<string | null>(null);
-  const [rowError, setRowError] = useState<string | null>(null);
-
-  const rosterCapped = roster !== null && roster.length >= ROSTER_LIMIT;
-  // Lock every row's actions while any row is busy OR a confirm is open elsewhere, so a
-  // confirm can't be interleaved with another row's toggle into two concurrent mutations.
-  const rowLocked = rowBusy !== null || confirmingUnbind !== null;
-
-  async function openForm() {
+  function openForm() {
     setAdding(true);
     setErrors([]);
-    // Serialise the roster fetch (fetch once, no overlap) — same guard as the Agents tab.
-    if (roster !== null || rosterLoading) return;
-    setRosterError(null);
-    setRosterLoading(true);
-    try {
-      // `isTemplate=false` excludes template scaffolds — only real workflows are bindable.
-      const workflows = await apiClient.get<WorkflowRosterItem[]>(
-        `/api/v1/admin/orchestration/workflows?isActive=true&isTemplate=false&limit=${ROSTER_LIMIT}`
-      );
-      setRoster(workflows);
-    } catch (err) {
-      setRosterError(err instanceof APIClientError ? err.message : 'Failed to load workflows');
-    } finally {
-      setRosterLoading(false);
-    }
+    void roster.load();
   }
 
   async function bind(e: React.FormEvent) {
@@ -151,31 +132,26 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
     }
   }
 
-  async function toggleEnabled(binding: ModuleWorkflowBindingListItem) {
-    setRowBusy(binding.id);
-    setRowError(null);
-    try {
-      await apiClient.patch(`${base}/${binding.id}`, { body: { enabled: !binding.enabled } });
-      router.refresh();
-    } catch (err) {
-      setRowError(err instanceof APIClientError ? err.message : 'Failed to update binding');
-    } finally {
-      setRowBusy(null);
-    }
+  function toggleEnabled(binding: ModuleWorkflowBindingListItem) {
+    void rows.run(
+      binding.id,
+      async () => {
+        await apiClient.patch(`${base}/${binding.id}`, { body: { enabled: !binding.enabled } });
+        router.refresh();
+      },
+      'Failed to update binding'
+    );
   }
 
-  async function unbind(bindingId: string) {
-    setRowBusy(bindingId);
-    setRowError(null);
-    try {
-      await apiClient.delete(`${base}/${bindingId}`);
-      setConfirmingUnbind(null);
-      router.refresh();
-    } catch (err) {
-      setRowError(err instanceof APIClientError ? err.message : 'Failed to unbind workflow');
-    } finally {
-      setRowBusy(null);
-    }
+  function unbind(bindingId: string) {
+    void rows.run(
+      bindingId,
+      async () => {
+        await apiClient.delete(`${base}/${bindingId}`);
+        router.refresh();
+      },
+      'Failed to unbind workflow'
+    );
   }
 
   return (
@@ -186,7 +162,7 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
           no published version won&rsquo;t fire until it&rsquo;s published.
         </p>
         {!adding && (
-          <Button size="sm" onClick={() => void openForm()}>
+          <Button size="sm" onClick={openForm}>
             Bind workflow
           </Button>
         )}
@@ -197,9 +173,9 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
           onSubmit={(e) => void bind(e)}
           className="bg-muted/40 space-y-4 rounded-md border p-4"
         >
-          {rosterError ? (
+          {roster.error ? (
             <p className="text-destructive text-sm" role="alert">
-              {rosterError}
+              {roster.error}
             </p>
           ) : (
             <div className="space-y-4">
@@ -209,15 +185,15 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
                   <Select
                     value={workflowId}
                     onValueChange={setWorkflowId}
-                    disabled={roster === null}
+                    disabled={roster.roster === null}
                   >
                     <SelectTrigger id="bind-workflow" className="w-56">
                       <SelectValue
-                        placeholder={roster === null ? 'Loading…' : 'Select a workflow'}
+                        placeholder={roster.roster === null ? 'Loading…' : 'Select a workflow'}
                       />
                     </SelectTrigger>
                     <SelectContent>
-                      {(roster ?? []).map((w) => (
+                      {(roster.roster ?? []).map((w) => (
                         <SelectItem key={w.id} value={w.id}>
                           {w.name}
                         </SelectItem>
@@ -275,7 +251,7 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
             </div>
           )}
 
-          {rosterCapped && !rosterError && (
+          {roster.capped && !roster.error && (
             <p className="text-muted-foreground text-xs">
               Showing the first {ROSTER_LIMIT} workflows. If the one you want isn&rsquo;t listed,
               deactivate unused workflows to bring it into range.
@@ -291,7 +267,7 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
           )}
 
           <div className="flex items-center gap-2">
-            <Button type="submit" size="sm" disabled={busy || roster === null}>
+            <Button type="submit" size="sm" disabled={busy || roster.roster === null}>
               {busy ? 'Binding…' : 'Bind'}
             </Button>
             <Button
@@ -307,9 +283,9 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
         </form>
       )}
 
-      {rowError && (
+      {rows.error && (
         <p className="text-destructive text-sm" role="alert">
-          {rowError}
+          {rows.error}
         </p>
       )}
 
@@ -357,43 +333,29 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
                     </div>
                   </TableCell>
                   <TableCell className="text-right">
-                    {confirmingUnbind === b.id ? (
-                      <div className="flex items-center justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          onClick={() => void unbind(b.id)}
-                          disabled={rowBusy !== null}
-                        >
-                          {rowBusy === b.id ? 'Unbinding…' : 'Confirm'}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => setConfirmingUnbind(null)}
-                          disabled={rowBusy !== null}
-                        >
-                          Cancel
-                        </Button>
-                      </div>
+                    {rows.confirmingId === b.id ? (
+                      <RowConfirm
+                        busy={rows.busyId === b.id}
+                        anyBusy={rows.busyId !== null}
+                        onConfirm={() => unbind(b.id)}
+                        onCancel={() => rows.setConfirmingId(null)}
+                        busyLabel="Unbinding…"
+                      />
                     ) : (
                       <div className="flex items-center justify-end gap-2">
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => void toggleEnabled(b)}
-                          disabled={rowLocked}
+                          onClick={() => toggleEnabled(b)}
+                          disabled={rows.locked}
                         >
                           {b.enabled ? 'Disable' : 'Enable'}
                         </Button>
                         <Button
                           size="sm"
                           variant="ghost"
-                          onClick={() => {
-                            setRowError(null);
-                            setConfirmingUnbind(b.id);
-                          }}
-                          disabled={rowLocked}
+                          onClick={() => rows.setConfirmingId(b.id)}
+                          disabled={rows.locked}
                         >
                           Unbind
                         </Button>
