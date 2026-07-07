@@ -141,3 +141,17 @@ export async function subjectScope(
   void scope;
   return { userId: viewer.userId };
 }
+
+/**
+ * Build the viewer an **admin support surface** passes to the journey/slot reads:
+ * the operator's own `userId` plus the explicit `isAdminSupport` override that lets
+ * them read *other* users' data. This is the one sanctioned construction of that
+ * override — it exists so support routes opt in through a single named place (next
+ * to the {@link JourneyViewer} note above) rather than each hand-rolling
+ * `{ userId, isAdminSupport: true }` or, worse, deriving the flag from a bare
+ * `role === 'ADMIN'` read. Every framework admin support route (`f-ops-views` journey
+ * explorer today; more later) uses this so the grant stays auditable and drift-free.
+ */
+export function adminSupportViewer(userId: string): JourneyViewer {
+  return { userId, isAdminSupport: true };
+}

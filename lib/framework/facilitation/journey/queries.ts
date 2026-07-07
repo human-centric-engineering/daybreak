@@ -16,10 +16,16 @@
  * `f-engine` (F11). These reads are the consumer side of the tables t-1 shipped.
  */
 
+import { Prisma } from '@prisma/client';
 import type { UserJourney, UserNodeState, JourneyEvent } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { ForbiddenError } from '@/lib/api/errors';
-import { canRead, type JourneyViewer, type AccessScope } from '@/lib/framework/shared/access';
+import {
+  canRead,
+  subjectScope,
+  type JourneyViewer,
+  type AccessScope,
+} from '@/lib/framework/shared/access';
 
 /** Identifies one journey by its natural `@@unique([userId, graphSlug, contextKey])` key. */
 export interface JourneyKey {
@@ -115,4 +121,65 @@ export async function getJourneyTimeline(
     orderBy: { occurredAt: options?.order ?? 'asc' },
     ...(options?.limit !== undefined ? { take: options.limit } : {}),
   });
+}
+
+/**
+ * One journey by its row id — the id-keyed read the admin explorer needs (the
+ * natural-key {@link getJourney} is the engine's shape; an operator picks a row by
+ * id). `null` when the row is absent (a benign miss — a 404 at the route). Unlike
+ * the natural-key reads the subject isn't known until the row is loaded, so the
+ * find runs first, then the viewer is gated against the loaded `userId` **before
+ * the row is returned** — a denied viewer gets a `ForbiddenError`, never the row.
+ */
+export async function getJourneyById(
+  viewer: JourneyViewer,
+  journeyId: string,
+  scope?: AccessScope
+): Promise<UserJourney | null> {
+  const journey = await prisma.userJourney.findUnique({ where: { id: journeyId } });
+  if (!journey) return null;
+  if (!(await canRead(viewer, journey.userId, scope))) {
+    throw new ForbiddenError('Not permitted to read this journey');
+  }
+  return journey;
+}
+
+/** Narrowing / pagination options for {@link listJourneys}. */
+export interface ListJourneysOptions {
+  /** Rows to skip (page offset). */
+  skip?: number;
+  /** Page size (Prisma `take`). Omitted ⇒ unbounded — callers should pass one. */
+  limit?: number;
+  /** Restrict to one map's journeys (the picker's optional map filter). */
+  graphSlug?: string;
+}
+
+/**
+ * The journeys a viewer may see, newest first — the explorer picker's enumerator.
+ * Its access face is {@link subjectScope} (the set form of {@link canRead}): an
+ * admin-support viewer sees every subject's journeys (`{}`), everyone else only
+ * their own (`{ userId }`) — the same predicate as the single-row reads, expressed
+ * as a `where` fragment. Returns the page plus the unpaged `total` for the same
+ * filter, so the route can build pagination meta in one round trip.
+ */
+export async function listJourneys(
+  viewer: JourneyViewer,
+  options?: ListJourneysOptions,
+  scope?: AccessScope
+): Promise<{ journeys: UserJourney[]; total: number }> {
+  const subjectFilter = await subjectScope(viewer, scope);
+  const where: Prisma.UserJourneyWhereInput = {
+    ...subjectFilter,
+    ...(options?.graphSlug ? { graphSlug: options.graphSlug } : {}),
+  };
+  const [journeys, total] = await Promise.all([
+    prisma.userJourney.findMany({
+      where,
+      orderBy: { startedAt: 'desc' },
+      ...(options?.skip !== undefined ? { skip: options.skip } : {}),
+      ...(options?.limit !== undefined ? { take: options.limit } : {}),
+    }),
+    prisma.userJourney.count({ where }),
+  ]);
+  return { journeys, total };
 }
