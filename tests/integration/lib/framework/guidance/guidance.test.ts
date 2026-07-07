@@ -1,7 +1,9 @@
 /**
- * Guidance orchestration (f-guidance t-1). Mocks the assembler, the engine, and the timeline
- * read; asserts `loadGuidance` composes assemble → computeAvailability → rankMoves, the
- * null-passthrough ("nothing to guide"), the focus suggestion, and the synopsis path.
+ * Guidance orchestration (f-guidance t-1; f-overlays t-2). Mocks the assembler, the engine, the
+ * timeline read, and the f-overlays advisory-related enrichment; asserts `loadGuidance` composes
+ * assemble → computeAvailability → rankMoves → related-enrichment (F9: availability is computed
+ * independently, before and unaffected by the advisory overlay), the null-passthrough, the focus
+ * suggestion, and the synopsis path.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -12,6 +14,12 @@ vi.mock('@/lib/framework/facilitation/engine/availability', () => ({
 }));
 vi.mock('@/lib/framework/facilitation/engine/apply-event', () => ({ applyEvent: vi.fn() }));
 vi.mock('@/lib/framework/facilitation/journey/queries', () => ({ getJourneyTimeline: vi.fn() }));
+vi.mock('@/lib/framework/facilitation/map/version-service', () => ({
+  getPublishedMapVersion: vi.fn(),
+}));
+vi.mock('@/lib/framework/facilitation/overlays/related', () => ({
+  enrichMovesWithRelated: vi.fn(),
+}));
 
 import {
   loadGuidance,
@@ -23,6 +31,8 @@ import { assembleJourneyContext } from '@/lib/framework/guidance/assemble';
 import { computeAvailability } from '@/lib/framework/facilitation/engine/availability';
 import { applyEvent } from '@/lib/framework/facilitation/engine/apply-event';
 import { getJourneyTimeline } from '@/lib/framework/facilitation/journey/queries';
+import { getPublishedMapVersion } from '@/lib/framework/facilitation/map/version-service';
+import { enrichMovesWithRelated } from '@/lib/framework/facilitation/overlays/related';
 
 const viewer = { userId: 'user-1' };
 const key = { userId: 'user-1', graphSlug: 'onboarding' };
@@ -48,6 +58,9 @@ beforeEach(() => {
     firsts: ['next'],
   });
   vi.mocked(getJourneyTimeline).mockResolvedValue([] as never);
+  vi.mocked(getPublishedMapVersion).mockResolvedValue(2);
+  // Default: identity enrichment (no embeddings surfaced) so the non-overlay assertions hold.
+  vi.mocked(enrichMovesWithRelated).mockImplementation(async (_slug, _v, moves) => [...moves]);
 });
 
 describe('loadGuidance', () => {
@@ -63,6 +76,38 @@ describe('loadGuidance', () => {
     vi.mocked(assembleJourneyContext).mockResolvedValue(null);
     expect(await loadGuidance(viewer, key)).toBeNull();
     expect(computeAvailability).not.toHaveBeenCalled();
+  });
+
+  it('fills the advisory `related` slot from the overlay, keyed on the published version', async () => {
+    vi.mocked(enrichMovesWithRelated).mockImplementation(async (_slug, _v, moves) =>
+      moves.map((m) => ({ ...m, related: ['related-node'] }))
+    );
+    const guidance = await loadGuidance(viewer, key);
+    expect(getPublishedMapVersion).toHaveBeenCalledWith('onboarding');
+    expect(enrichMovesWithRelated).toHaveBeenCalledWith('onboarding', 2, expect.any(Array));
+    expect(guidance!.moves[0].related).toEqual(['related-node']);
+  });
+
+  it('F9: availability is computed independently and is unaffected by the related overlay', async () => {
+    // Even a destructive overlay (drops every move) must NOT change `availability` — eligibility is
+    // the engine's alone. loadGuidance computes availability before enrichment and returns it as-is.
+    vi.mocked(enrichMovesWithRelated).mockResolvedValue([]);
+    const guidance = await loadGuidance(viewer, key);
+    expect(guidance!.availability).toEqual({
+      perNode: new Map(),
+      validMoves: ['next'],
+      firsts: ['next'],
+    });
+    // Enrichment ran after availability, over the ranked eligible set.
+    const rankedArg = vi.mocked(enrichMovesWithRelated).mock.calls[0][2];
+    expect(rankedArg.map((m) => m.nodeKey)).toEqual(['next']);
+  });
+
+  it('skips enrichment when there is no published version (moves keep empty related)', async () => {
+    vi.mocked(getPublishedMapVersion).mockResolvedValue(null);
+    const guidance = await loadGuidance(viewer, key);
+    expect(enrichMovesWithRelated).not.toHaveBeenCalled();
+    expect(guidance!.moves[0].related).toEqual([]);
   });
 });
 

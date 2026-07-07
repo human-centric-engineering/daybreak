@@ -499,6 +499,19 @@ export async function getPublishedMap(slug: string): Promise<PublishedMap | null
   };
 }
 
+/**
+ * The current published version number for a slug, or `null` when the map does not exist or has no
+ * published version. A lightweight read (no definition parse) for callers that only need to key on
+ * the live version — e.g. `f-overlays` keying node embeddings on `(graphSlug, version)`.
+ */
+export async function getPublishedMapVersion(slug: string): Promise<number | null> {
+  const graph = await prisma.facilitationGraph.findUnique({
+    where: { slug },
+    include: { publishedVersion: { select: { version: true } } },
+  });
+  return graph?.publishedVersion?.version ?? null;
+}
+
 export interface ListVersionsOptions {
   limit?: number;
   cursor?: string;
