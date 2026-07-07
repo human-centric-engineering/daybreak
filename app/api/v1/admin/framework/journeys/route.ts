@@ -17,6 +17,7 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { paginatedResponse } from '@/lib/api/responses';
 import { validateQueryParams } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
+import { adminSupportViewer } from '@/lib/framework/shared/access';
 import { listJourneysForAdmin } from '@/lib/framework/facilitation/journey/admin-queries';
 import { listJourneysQuerySchema } from '@/lib/framework/facilitation/journey/api-schemas';
 
@@ -26,7 +27,7 @@ export const GET = withAdminAuth(async (request, session) => {
   const { page, limit, graphSlug } = validateQueryParams(searchParams, listJourneysQuerySchema);
 
   // Explicit support-tooling viewer (not a role check inside the seam) — see header.
-  const viewer = { userId: session.user.id, isAdminSupport: true };
+  const viewer = adminSupportViewer(session.user.id);
 
   const { items, total } = await listJourneysForAdmin(viewer, { page, limit, graphSlug });
 

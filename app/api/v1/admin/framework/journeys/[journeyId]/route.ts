@@ -16,6 +16,7 @@ import { withAdminAuth } from '@/lib/auth/guards';
 import { successResponse } from '@/lib/api/responses';
 import { NotFoundError } from '@/lib/api/errors';
 import { getRouteLogger } from '@/lib/api/context';
+import { adminSupportViewer } from '@/lib/framework/shared/access';
 import { getJourneyDetailForAdmin } from '@/lib/framework/facilitation/journey/admin-queries';
 import { parseJourneyId } from '@/lib/framework/facilitation/journey/api-schemas';
 
@@ -24,7 +25,7 @@ export const GET = withAdminAuth<{ journeyId: string }>(async (request, session,
   const journeyId = parseJourneyId((await params).journeyId);
 
   // Explicit support-tooling viewer (not a role check inside the seam) — see the list route.
-  const viewer = { userId: session.user.id, isAdminSupport: true };
+  const viewer = adminSupportViewer(session.user.id);
 
   const detail = await getJourneyDetailForAdmin(viewer, journeyId);
   if (!detail) throw new NotFoundError('Journey not found');

@@ -12,6 +12,7 @@ import { describe, it, expect } from 'vitest';
 import {
   canRead,
   subjectScope,
+  adminSupportViewer,
   type JourneyViewer,
   type AccessScope,
 } from '@/lib/framework/shared/access';
@@ -88,5 +89,15 @@ describe('subjectScope', () => {
         expect(passesFilter).toBe(allowed);
       }
     }
+  });
+});
+
+describe('adminSupportViewer', () => {
+  it('builds the operator viewer with the explicit admin-support override set', () => {
+    expect(adminSupportViewer('user_op')).toEqual({ userId: 'user_op', isAdminSupport: true });
+  });
+
+  it('produces a viewer canRead grants cross-user reads', async () => {
+    await expect(canRead(adminSupportViewer('user_op'), 'user_someone_else')).resolves.toBe(true);
   });
 });

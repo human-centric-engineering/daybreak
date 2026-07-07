@@ -35,6 +35,11 @@ function parseStructure(definition: unknown): MapDefinition | null {
   return parsed.success ? parsed.data : null;
 }
 
+/** An optional timestamp in wire form: ISO string, or `null` when unset. */
+function isoOrNull(d: Date | null): string | null {
+  return d ? d.toISOString() : null;
+}
+
 /** Pagination inputs for {@link listJourneysForAdmin} (already-validated, 1-based page). */
 export interface ListJourneysParams {
   page: number;
@@ -147,9 +152,9 @@ export async function getJourneyDetailForAdmin(
       nodeKey: s.nodeKey,
       status: s.status,
       timesCompleted: s.timesCompleted,
-      firstEnteredAt: s.firstEnteredAt?.toISOString() ?? null,
-      lastActiveAt: s.lastActiveAt?.toISOString() ?? null,
-      completedAt: s.completedAt?.toISOString() ?? null,
+      firstEnteredAt: isoOrNull(s.firstEnteredAt),
+      lastActiveAt: isoOrNull(s.lastActiveAt),
+      completedAt: isoOrNull(s.completedAt),
     })),
     timeline: timeline.map((e) => ({
       id: e.id,
