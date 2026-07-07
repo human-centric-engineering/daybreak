@@ -72,7 +72,7 @@ export function AgentsTab({ slug, agentRoles, bindings }: AgentsTabProps) {
   const router = useRouter();
   const base = `/api/v1/admin/framework/modules/${encodeURIComponent(slug)}/agents`;
 
-  const roster = useBindingRoster<AgentRosterItem>(ROSTER_URL);
+  const roster = useBindingRoster<AgentRosterItem>(ROSTER_URL, 'Failed to load agents');
   const rows = useRowActions();
 
   const [adding, setAdding] = useState(false);

@@ -70,7 +70,7 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
   const router = useRouter();
   const base = `/api/v1/admin/framework/modules/${encodeURIComponent(slug)}/workflows`;
 
-  const roster = useBindingRoster<WorkflowRosterItem>(ROSTER_URL);
+  const roster = useBindingRoster<WorkflowRosterItem>(ROSTER_URL, 'Failed to load workflows');
   const rows = useRowActions();
 
   const [adding, setAdding] = useState(false);

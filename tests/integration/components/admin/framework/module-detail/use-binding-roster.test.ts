@@ -52,6 +52,15 @@ describe('useBindingRoster', () => {
     expect(result.current.roster).toBeNull();
   });
 
+  it('uses the supplied fallback message for a non-APIClientError', async () => {
+    vi.mocked(apiClient.get).mockRejectedValue(new Error('network'));
+    const { result } = renderHook(() => useBindingRoster('/url', 'Failed to load agents'));
+    await act(async () => {
+      await result.current.load();
+    });
+    expect(result.current.error).toBe('Failed to load agents');
+  });
+
   it('flags capped when the roster hits ROSTER_LIMIT', async () => {
     vi.mocked(apiClient.get).mockResolvedValue(
       Array.from({ length: ROSTER_LIMIT }, (_, i) => ({ id: String(i) }))

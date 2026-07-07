@@ -39,6 +39,14 @@ export function useRowActions(): RowActions {
 
   const locked = busyId !== null || confirmingId !== null;
 
+  // Opening a confirm clears any stale row error, so a prior failed action's message doesn't
+  // linger over an unrelated confirm prompt (parity with the pre-primitive tabs, which reset
+  // the error before opening). Cancelling (`null`) leaves the error as-is.
+  function openConfirm(id: string | null) {
+    if (id !== null) setError(null);
+    setConfirmingId(id);
+  }
+
   async function run(id: string, fn: () => Promise<void>, fallback: string) {
     setBusyId(id);
     setError(null);
@@ -52,5 +60,5 @@ export function useRowActions(): RowActions {
     }
   }
 
-  return { confirmingId, setConfirmingId, busyId, error, locked, run };
+  return { confirmingId, setConfirmingId: openConfirm, busyId, error, locked, run };
 }

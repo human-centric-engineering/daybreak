@@ -57,6 +57,39 @@ describe('useRowActions', () => {
     expect(result.current.busyId).toBeNull();
   });
 
+  it('clears a stale error when a confirm opens (but not on cancel)', async () => {
+    const { result } = renderHook(() => useRowActions());
+    // A prior action failed, leaving an error.
+    await act(async () => {
+      await result.current.run(
+        'a',
+        async () => {
+          throw new Error('boom');
+        },
+        'fallback'
+      );
+    });
+    expect(result.current.error).toBe('fallback');
+
+    // Opening a confirm on another row clears the stale error.
+    act(() => result.current.setConfirmingId('b'));
+    expect(result.current.error).toBeNull();
+
+    // Re-set an error, then cancel — cancel leaves the error alone.
+    await act(async () => {
+      await result.current.run(
+        'b',
+        async () => {
+          throw new Error('boom2');
+        },
+        'fallback2'
+      );
+    });
+    expect(result.current.error).toBe('fallback2');
+    act(() => result.current.setConfirmingId(null));
+    expect(result.current.error).toBe('fallback2');
+  });
+
   it('run() falls back to the given message for a non-APIClientError', async () => {
     const { result } = renderHook(() => useRowActions());
     await act(async () => {

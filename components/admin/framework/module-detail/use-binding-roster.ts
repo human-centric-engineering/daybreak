@@ -34,7 +34,10 @@ export interface BindingRoster<T> {
   load: () => Promise<void>;
 }
 
-export function useBindingRoster<T>(url: string): BindingRoster<T> {
+export function useBindingRoster<T>(
+  url: string,
+  errorFallback = 'Failed to load options'
+): BindingRoster<T> {
   const [roster, setRoster] = useState<T[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +51,7 @@ export function useBindingRoster<T>(url: string): BindingRoster<T> {
     try {
       setRoster(await apiClient.get<T[]>(url));
     } catch (err) {
-      setError(err instanceof APIClientError ? err.message : 'Failed to load options');
+      setError(err instanceof APIClientError ? err.message : errorFallback);
     } finally {
       setLoading(false);
     }

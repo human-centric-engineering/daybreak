@@ -153,7 +153,7 @@ function GrantSection<T>({
   renderCell,
 }: GrantSectionProps<T>) {
   const router = useRouter();
-  const roster = useBindingRoster<KnowledgeRosterItem>(rosterUrl);
+  const roster = useBindingRoster<KnowledgeRosterItem>(rosterUrl, `Failed to load ${noun}s`);
   const rows = useRowActions();
 
   const [adding, setAdding] = useState(false);
@@ -287,7 +287,7 @@ function GrantSection<T>({
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>{title.replace(/s$/, '')}</TableHead>
+                <TableHead className="capitalize">{noun}</TableHead>
                 <TableHead className="w-40 text-right">Actions</TableHead>
               </TableRow>
             </TableHeader>
