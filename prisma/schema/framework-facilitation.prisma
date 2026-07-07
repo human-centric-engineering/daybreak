@@ -247,3 +247,36 @@ model FrameworkConversationEval {
   @@index([contextType, contextId])
   @@map("framework_conversation_eval")
 }
+
+// Per-node embedding of an authored facilitation map (f-overlays t-1, spec §5.4, F9 — advisory
+// overlays). One row per node of a PUBLISHED map version: the node's composed text
+// (`composeNodeText`) is embedded via the core embedder and the vector lands here, so guidance can
+// suggest thematically-"related places" (t-2) — strictly ADVISORY, never an eligibility input (F9;
+// enforced in `engine/availability.ts`/`graph-store.ts`). Keyed on `(graphSlug, nodeKey, version)`:
+// map nodes are JSON inside `FacilitationGraphVersion.definition`, not rows, so there is no node FK;
+// keying on the monotonic published `version` means republishing mints a new version and naturally
+// invalidates stale embeddings (a query for the current version finds no rows until re-embedded — the
+// advisory result degrades to empty, safe). Authored config (no `userId`) → NO erasure hook.
+//
+// `embedding` is pgvector's `vector(1536)` (Prisma-unmodelled `Unsupported`, like `AiMessageEmbedding`);
+// its HNSW index (`idx_framework_node_embedding`, `vector_cosine_ops`) is hand-written in the migration
+// SQL (Prisma can't emit `USING hnsw`) and probed via the framework drift bridge (`lib/framework/db-drift.ts`).
+// The `embeddingModel`/`Provider`/`Dimension` provenance powers the search-time dimension drift-guard
+// (t-2), mirroring `AiKnowledgeChunk`/`AiMessageEmbedding`.
+model FrameworkNodeEmbedding {
+  id                 String                      @id @default(cuid())
+  graphSlug          String // the FacilitationGraph.slug — plain string (nodes/versions are JSON, F2), not an FK
+  nodeKey            String // MapNode.key within the published version
+  version            Int // the published FacilitationGraphVersion.version this embedding is for
+  embedding          Unsupported("vector(1536)")
+  embeddingModel     String? // provenance — the model that produced this vector
+  embeddingProvider  String? // provenance — the providerType
+  embeddingDimension Int? // provenance — powers the search-time dimension drift-guard (t-2)
+  sourceText         String?                     @db.Text // the composed text that was embedded (debug/provenance)
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
+
+  @@unique([graphSlug, nodeKey, version])
+  @@index([graphSlug, version])
+  @@map("framework_node_embedding")
+}
