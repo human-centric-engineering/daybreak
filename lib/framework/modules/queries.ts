@@ -25,6 +25,17 @@ export async function listModules(): Promise<Module[]> {
 }
 
 /**
+ * Whether a `framework_module` row exists for `slug`. A minimal `id`-only existence
+ * probe — the cheap guard a write path uses to reject an unknown slug (e.g. the feedback
+ * endpoint, so an arbitrary slug can't inject junk into the engagement stream) without
+ * over-fetching the settings columns `getModuleSettings` returns.
+ */
+export async function moduleExists(slug: string): Promise<boolean> {
+  const row = await prisma.module.findUnique({ where: { slug }, select: { id: true } });
+  return row !== null;
+}
+
+/**
  * The operator-editable settings of one module — the read backing `GET /modules/[slug]`
  * and the shared load step for the write service (`updateModuleSettings` / `deleteModule`
  * both start here). Selects only the settings-relevant columns (the potentially-large

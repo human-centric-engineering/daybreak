@@ -127,9 +127,16 @@ async function main(): Promise<void> {
     });
     journeyEventLinkedId = journeyEventLinked.id;
     const journeyEventEngagement = await prisma.journeyEvent.create({
-      // journeyId left null — a non-journey engagement event (§4.3). Erasable ONLY
-      // via the userId hand-FK; this is the row a journeyId-only table would leak.
-      data: { userId: subject.id, moduleSlug: `${PREFIX}-module`, type: 'session.started' },
+      // journeyId left null — a non-journey engagement event (§4.3, f-engagement): a
+      // `module.feedback` row carrying a free-text comment (PII) in its payload. Erasable
+      // ONLY via the userId hand-FK; this is the row a journeyId-only table would leak,
+      // and it proves the comment PII goes with it on erasure.
+      data: {
+        userId: subject.id,
+        moduleSlug: `${PREFIX}-module`,
+        type: 'module.feedback',
+        payload: { rating: 5, comment: `${PREFIX}-loved-the-coaching` },
+      },
     });
     journeyEventEngagementId = journeyEventEngagement.id;
 

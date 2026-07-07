@@ -19,13 +19,16 @@
  * The engagement `JourneyEvent.type` values (spec §4.3):
  * - `module.entered` — a user opened a fresh module surface conversation (an "entry" /
  *   session). `journeyId` null (non-journey engagement), `moduleSlug` set.
+ * - `module.feedback` — a user rated a module (payload `{ rating, comment? }`), via the
+ *   `record_feedback` capability or the plain feedback API (t-2). `journeyId` null.
  *
- * Further kinds arrive with the feature that emits them: `module.feedback` (t-2). Module
- * *progression/completion* is not a new kind — the engine already writes `node_entered` /
- * `node_completed` stamped with `moduleSlug`, which the stats read side reads directly.
+ * Module *progression/completion* is not a new kind — the engine already writes
+ * `node_entered` / `node_completed` stamped with `moduleSlug`, which the stats read side
+ * reads directly.
  */
 export const ENGAGEMENT_EVENT_TYPE = {
   moduleEntered: 'module.entered',
+  moduleFeedback: 'module.feedback',
 } as const;
 
 /** A known engagement event-type literal. */
