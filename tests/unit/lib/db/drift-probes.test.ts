@@ -198,9 +198,13 @@ describe('mergeDriftProbes', () => {
   });
 });
 
-describe('shipped lib/app/db-drift.ts scaffold', () => {
-  it('registers zero probes by default (Sunrise ships the scaffold empty)', () => {
+describe('shipped lib/app/db-drift.ts bridge', () => {
+  // DAYBREAK "keep mine": vanilla Sunrise ships this scaffold empty, but Daybreak FILLS it — the
+  // drift analogue of the bootstrap / admin-nav bridges (`lib/app/db-drift.ts` →
+  // `registerFrameworkDriftProbes()` → reserved-empty `registerLeafDriftProbes()`). So the bridge
+  // registers the framework tier's probes rather than nothing. (Conflicts on Sunrise sync → keep this.)
+  it('registers the framework tier drift probes via the bridge', () => {
     registerAppDriftProbes();
-    expect(getAppDriftProbes()).toEqual([]);
+    expect(getAppDriftProbes().some((p) => p.table === 'framework_node_embedding')).toBe(true);
   });
 });
