@@ -99,6 +99,20 @@ async function getVersionInt(versionId: string | null): Promise<number | null> {
   return row?.version ?? null;
 }
 
+/** The graph's current published version number, re-read inside a transaction (for conflict checks). */
+async function currentPublishedVersionInt(client: Tx, graphId: string): Promise<number | null> {
+  const graph = await client.facilitationGraph.findUnique({
+    where: { id: graphId },
+    select: { publishedVersionId: true },
+  });
+  if (!graph?.publishedVersionId) return null;
+  const version = await client.facilitationGraphVersion.findUnique({
+    where: { id: graph.publishedVersionId },
+    select: { version: true },
+  });
+  return version?.version ?? null;
+}
+
 /** Write v1 for a freshly-created graph and pin it, inside the caller's tx. */
 async function createInitialVersion(
   tx: Tx,
@@ -305,6 +319,94 @@ export async function publishDraft(args: PublishDraftArgs): Promise<PublishResul
     entityName: existing.name,
     changes: { publishedVersion: { from: previousVersionInt, to: result.version.version } },
     metadata: changeSummary ? { changeSummary } : null,
+    clientIp: clientIp ?? null,
+  });
+
+  return result;
+}
+
+export interface PublishDefinitionArgs {
+  slug: string;
+  /** The definition to publish (re-validated before writing). */
+  definition: unknown;
+  /** The version author — `"agent:<slug>"` or a user id (F17: authorship preserved in history). */
+  createdBy: string;
+  /** The actor performing the publish (audit), or `null` for a system / auto-approval action. */
+  actorUserId: string | null;
+  /**
+   * When set, the map's current published version must still equal this at publish time — re-checked
+   * INSIDE the write transaction, so a concurrent publish that moved the map aborts this one rather
+   * than silently overwriting it (`null` = "expected no published version yet"). `undefined` skips
+   * the check. Note: under READ COMMITTED this narrows but does not fully eliminate a simultaneous-
+   * commit race (a graph-level optimistic-version column would — a shared limitation with
+   * `publishDraft`/`rollback`, tracked for the map version model).
+   */
+  expectedBaseVersion?: number | null;
+  changeSummary?: string;
+  clientIp?: string | null;
+}
+
+/**
+ * Publish an arbitrary validated definition as a new immutable version and pin it — the primitive
+ * behind approving a `StructureChangeProposal` (f-emergence). Differs from its siblings in two ways:
+ * it does NOT read or clear the graph's draft (a proposal is independent of the admin's WIP draft),
+ * and it writes `createdBy = <author>` — which may be `"agent:<slug>"` (F17) — while auditing the
+ * publish against `actorUserId` (the approving admin, or `null` for auto-approval). Re-validates via
+ * `validatePublishableMap` so a stale/tampered definition can never reach the spine.
+ */
+export async function publishDefinition(args: PublishDefinitionArgs): Promise<PublishResult> {
+  const {
+    slug,
+    definition: raw,
+    createdBy,
+    actorUserId,
+    expectedBaseVersion,
+    changeSummary,
+    clientIp,
+  } = args;
+
+  const graph = await loadGraph(slug);
+  const definition = validatePublishableMap(raw);
+  const previousVersionInt = await getVersionInt(graph.publishedVersionId);
+
+  const result = await prisma.$transaction(async (tx) => {
+    // Conflict re-check inside the write transaction: the map must still be at the expected base, so
+    // a concurrent publish that moved it aborts this write rather than overwriting it.
+    if (expectedBaseVersion !== undefined) {
+      const current = await currentPublishedVersionInt(tx, graph.id);
+      if (current !== expectedBaseVersion) {
+        throw new ValidationError('The map changed during publish — please re-propose', {
+          baseVersion: [
+            `Expected version ${expectedBaseVersion ?? 'none'} at publish, but the map is now at ${current ?? 'none'}`,
+          ],
+        });
+      }
+    }
+    const next = await nextVersionNumber(tx, graph.id);
+    const version = await tx.facilitationGraphVersion.create({
+      data: {
+        graphId: graph.id,
+        version: next,
+        definition: definition as unknown as Prisma.InputJsonValue,
+        changeSummary: changeSummary ?? null,
+        createdBy,
+      },
+    });
+    const updated = await tx.facilitationGraph.update({
+      where: { id: graph.id },
+      data: { publishedVersionId: version.id },
+    });
+    return { graph: updated, version };
+  });
+
+  logAdminAction({
+    userId: actorUserId,
+    action: 'facilitation_graph.publish',
+    entityType: ENTITY_TYPE,
+    entityId: graph.id,
+    entityName: graph.name,
+    changes: { publishedVersion: { from: previousVersionInt, to: result.version.version } },
+    metadata: { author: createdBy, ...(changeSummary ? { changeSummary } : {}) },
     clientIp: clientIp ?? null,
   });
 
