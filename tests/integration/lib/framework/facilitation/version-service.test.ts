@@ -149,6 +149,7 @@ import {
   saveDraft,
   discardDraft,
   publishDraft,
+  publishDefinition,
   rollback,
   getPublishedMap,
   listVersions,
@@ -319,6 +320,87 @@ describe('publishDraft', () => {
     await expect(publishDraft({ slug: 'ghost', userId: USER })).rejects.toBeInstanceOf(
       NotFoundError
     );
+  });
+});
+
+describe('publishDefinition (the f-emergence proposal-publish primitive)', () => {
+  it('publishes a definition as a new version, preserving the author, without touching the draft', async () => {
+    await createGraph({ slug: 'main', name: 'Main', definition: validMap(), userId: USER }); // v1
+    await saveDraft({ slug: 'main', definition: validMap('writing'), userId: USER }); // a real WIP draft
+
+    const { graph, version } = await publishDefinition({
+      slug: 'main',
+      definition: validMap('reading'),
+      createdBy: 'agent:onboarding', // agent authorship (F17)
+      actorUserId: 'admin-9',
+    });
+
+    expect(version.version).toBe(2); // monotonic after v1
+    expect(version.createdBy).toBe('agent:onboarding'); // author preserved, not the actor
+    expect(graph.publishedVersionId).toBe(version.id); // pinned
+    expect(graph.draftDefinition).not.toBeNull(); // the WIP draft is left intact (unlike publishDraft)
+    expect(logAdminAction).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'facilitation_graph.publish', userId: 'admin-9' })
+    );
+  });
+
+  it('publishes v1 when the map has no published version yet (author = user)', async () => {
+    await createGraph({ slug: 'main', name: 'Main', userId: USER }); // no definition → no published version
+    const { version } = await publishDefinition({
+      slug: 'main',
+      definition: validMap(),
+      createdBy: USER,
+      actorUserId: USER,
+    });
+    expect(version.version).toBe(1);
+  });
+
+  it('re-validates the definition (a broken definition is refused)', async () => {
+    await createGraph({ slug: 'main', name: 'Main', definition: validMap(), userId: USER });
+    await expect(
+      publishDefinition({
+        slug: 'main',
+        definition: danglingMap(),
+        createdBy: USER,
+        actorUserId: USER,
+      })
+    ).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('404s an unknown map', async () => {
+    await expect(
+      publishDefinition({
+        slug: 'ghost',
+        definition: validMap(),
+        createdBy: USER,
+        actorUserId: USER,
+      })
+    ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it('publishes when expectedBaseVersion matches the current published version', async () => {
+    await createGraph({ slug: 'main', name: 'Main', definition: validMap(), userId: USER }); // v1
+    const { version } = await publishDefinition({
+      slug: 'main',
+      definition: validMap('x'),
+      createdBy: USER,
+      actorUserId: USER,
+      expectedBaseVersion: 1,
+    });
+    expect(version.version).toBe(2);
+  });
+
+  it('aborts when the map moved from expectedBaseVersion (conflict re-check inside the tx)', async () => {
+    await createGraph({ slug: 'main', name: 'Main', definition: validMap(), userId: USER }); // v1
+    await expect(
+      publishDefinition({
+        slug: 'main',
+        definition: validMap('x'),
+        createdBy: USER,
+        actorUserId: USER,
+        expectedBaseVersion: 99,
+      })
+    ).rejects.toBeInstanceOf(ValidationError);
   });
 });
 
