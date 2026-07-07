@@ -1,8 +1,8 @@
 /**
  * Framework conversation supervisor (f-eval t-2). Mocks the DB client, the surface gate, the turn
  * reader, the supervisor core, the model/provider resolution, cost tracking, and the audit logger.
- * Proves the conversation→stepOutputs projection, the terminal-turn anchor + upsert, the framework
- * rubric/red-team wiring, the no-turns guard, the unknown-model guard, and audit.
+ * Proves the conversation→stepOutputs projection, the stable first-turn anchor + upsert, the
+ * framework rubric/red-team wiring, the no-turns guard, the unknown-model guard, and audit.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -88,32 +88,32 @@ describe('superviseConversation', () => {
 
     expect(result).toMatchObject({
       conversationId: 'c1',
-      messageId: 'a2',
+      messageId: 'a1', // anchored on the FIRST (stable) turn
       verdict: 'concerns',
       score: 0.6,
       tokensUsed: 15,
       costUsd: 0.03,
     });
 
-    // stepOutputs projection: one entry per turn, keyed turn-N, carrying the Q/A/citations.
+    // stepOutputs projection: one plain-string entry per turn, keyed turn-N, so the judge's prose
+    // quotes validate against the unescaped text.
     const passed = vi.mocked(runSupervisorAssessment).mock.calls[0][0];
     expect(Object.keys(passed.stepOutputs)).toEqual(['turn-1', 'turn-2']);
-    expect(passed.stepOutputs['turn-1']).toMatchObject({
-      userQuestion: 'Q-a1',
-      aiResponse: 'A-a1',
-    });
-    expect(passed.outputData).toEqual({ finalResponse: 'A-a2' });
+    expect(typeof passed.stepOutputs['turn-1']).toBe('string');
+    expect(passed.stepOutputs['turn-1']).toContain('Q-a1');
+    expect(passed.stepOutputs['turn-1']).toContain('A-a1');
+    expect(passed.outputData).toEqual({ finalResponse: 'A-a2' }); // final turn's response
     expect(passed.triggeredBy).toBe('retroactive');
-    expect(passed.includeStepOutputs).toBe('all');
+    expect(passed.includeStepOutputs).toBe('auto');
     expect(passed.requireEvidenceCitations).toBe(true);
     // Framework-specific rubric + red-team, not the core workflow defaults.
     expect(passed.assessmentCriteria).toMatch(/facilitation\/module/);
     expect(passed.redTeamPrompts?.length).toBeGreaterThan(0);
 
-    // Verdict upserted onto the terminal turn's row.
+    // Verdict upserted onto the first turn's row.
     expect(vi.mocked(prisma.frameworkConversationEval.upsert).mock.calls[0][0]).toMatchObject({
-      where: { messageId: 'a2' },
-      create: { messageId: 'a2', conversationId: 'c1', contextType: 'facilitation' },
+      where: { messageId: 'a1' },
+      create: { messageId: 'a1', conversationId: 'c1', contextType: 'facilitation' },
       update: { supervisorReport: expect.objectContaining({ verdict: 'concerns' }) },
     });
 
@@ -123,6 +123,37 @@ describe('superviseConversation', () => {
         entityId: 'c1',
       })
     );
+  });
+
+  it('includes a citations block in a turn projection when the turn carried citations', async () => {
+    vi.mocked(listScorableTurns).mockResolvedValue([
+      {
+        messageId: 'a1',
+        userQuestion: 'Q',
+        aiResponse: 'A',
+        citations: [{ id: 'doc-7' }] as never,
+      },
+    ]);
+    await superviseConversation({ conversationId: 'c1', actorUserId: 'a' });
+    const projected = vi.mocked(runSupervisorAssessment).mock.calls[0][0].stepOutputs['turn-1'];
+    expect(projected).toContain('Citations:');
+    expect(projected).toContain('doc-7');
+  });
+
+  it('anchors on the same first turn after the conversation grows (idempotent, no orphans)', async () => {
+    await superviseConversation({ conversationId: 'c1', actorUserId: 'a' });
+    // Conversation gains turns; re-supervise. The anchor must still be the first turn (a1).
+    vi.mocked(listScorableTurns).mockResolvedValue([
+      turn('a1'),
+      turn('a2'),
+      turn('a3'),
+      turn('a4'),
+    ]);
+    const second = await superviseConversation({ conversationId: 'c1', actorUserId: 'a' });
+    expect(second.messageId).toBe('a1');
+    for (const call of vi.mocked(prisma.frameworkConversationEval.upsert).mock.calls) {
+      expect((call[0] as { where: { messageId: string } }).where.messageId).toBe('a1');
+    }
   });
 
   it('rejects a conversation with no scorable turns (ValidationError, no LLM call)', async () => {

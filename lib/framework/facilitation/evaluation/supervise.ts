@@ -10,10 +10,13 @@
  *   - one `stepOutputs` entry per Q/A turn, keyed `turn-N`, so the judge can cite a specific turn;
  *   - a framework-conversation **rubric** (replacing the core default's workflow-centric criteria);
  *   - the engine-free `llmCall` shim copied from the retroactive execution-review route
- *     (`getModel` → `getProvider` → `provider.chat`, cost via `calculateCost`/`logCost`).
+ *     (`getModel` → `getProvider` → `provider.chat`, cost via `calculateCost`/`logCost`). The copy is
+ *     intentional: the shared home would be Sunrise-owned `lib/orchestration/supervisor`, which the
+ *     fork extends but does not edit.
  *
- * The verdict is upserted onto the LAST scorable turn's eval row — the natural conversation-level
- * anchor — so it works whether or not the metric scorer (t-1) has already scored the turns. Every
+ * The verdict is upserted onto the FIRST scorable turn's eval row — a conversation-level anchor whose
+ * `messageId` is stable as the conversation grows, so re-supervising keeps one verdict per
+ * conversation. It works whether or not the metric scorer (t-1) has already scored the turns. Every
  * run is audited. Errors from the provider bubble up (the route surfaces a 500); a conversation with
  * no scorable turns is a `ValidationError`.
  */
@@ -98,17 +101,26 @@ export async function superviseConversation(
   }
 
   // Project the conversation onto the supervisor's workflow-shaped input: one entry per Q/A turn,
-  // keyed `turn-N` so the judge can cite a specific turn. Each value carries the question, the
-  // response, and the citations so evidence quotes can be drawn from any of them.
-  const stepOutputs: Record<string, unknown> = {};
+  // keyed `turn-N` so the judge can cite a specific turn. Each value is a PLAIN STRING, not an
+  // object: the core's citation validator checks `serialiseStepOutput(stepOutput).includes(quote)`,
+  // and `serialiseStepOutput` returns a string verbatim but JSON-stringifies an object (escaping the
+  // newlines/quotes in multi-line assistant prose). An object value would make the judge's natural
+  // prose quotes fail the substring check — dropping the weakness and (with `minWeaknesses: 1`)
+  // spuriously downgrading the verdict. A readable string keeps the quoted text findable.
+  const stepOutputs: Record<string, string> = {};
   turns.forEach((turn, index) => {
-    stepOutputs[`turn-${index + 1}`] = {
-      userQuestion: turn.userQuestion,
-      aiResponse: turn.aiResponse,
-      citations: turn.citations,
-    };
+    const citationsBlock = turn.citations.length
+      ? `\n\nCitations: ${JSON.stringify(turn.citations)}`
+      : '';
+    stepOutputs[`turn-${index + 1}`] =
+      `User asked: ${turn.userQuestion}\n\nAssistant replied: ${turn.aiResponse}${citationsBlock}`;
   });
-  const terminalTurn = turns[turns.length - 1];
+  const finalTurn = turns[turns.length - 1];
+  // Anchor the conversation-level verdict on the FIRST turn's row. The first turn's messageId is
+  // stable as the conversation grows (the terminal turn is not), so re-supervising a longer
+  // conversation upserts the same row rather than orphaning the prior verdict on a now-non-terminal
+  // turn — keeping exactly one supervisor verdict per conversation.
+  const anchorTurn = turns[0];
 
   // Resolve the judge model + provider (same precedence as the retroactive execution-review route):
   // explicit override > EVALUATION_JUDGE_MODEL env > system default chat model.
@@ -159,7 +171,7 @@ export async function superviseConversation(
       contextId: conversation.contextId,
       turnCount: turns.length,
     },
-    outputData: { finalResponse: terminalTurn.aiResponse },
+    outputData: { finalResponse: finalTurn.aiResponse },
     // The supervisor core labels these "Workflow id" / "Workflow execution id" in its prompt; for a
     // conversation the natural identifiers are the surface + conversation id.
     workflowId: `framework-conversation:${conversation.contextType}`,
@@ -168,9 +180,11 @@ export async function superviseConversation(
     redTeamPrompts: FRAMEWORK_RED_TEAM_PROMPTS,
     requireEvidenceCitations: true,
     minWeaknesses: 1,
-    // Conversations are short and every turn matters equally (no linear terminal step), so give the
-    // judge the full text of every turn rather than truncating.
-    includeStepOutputs: 'all',
+    // 'auto' caps each turn at the core's per-step byte budget, so a long conversation can't overflow
+    // the judge's context and 500 the request (the workflow path defaults to 'auto' for the same
+    // reason). Turns under the cap are shown in full — the common case — and citations are validated
+    // against the untruncated `stepOutputs`, so a quote from a shown region still checks out.
+    includeStepOutputs: 'auto',
     temperature: 0.2,
     llmCall,
     triggeredBy: 'retroactive',
@@ -179,13 +193,15 @@ export async function superviseConversation(
   const report = assessment.report;
   const reportJson = report as unknown as Prisma.InputJsonValue;
 
-  // Anchor the conversation-level verdict on the terminal turn's eval row. Upsert so it works whether
-  // or not the metric scorer (t-1) already created a row for this turn: create carries the framework
-  // identifiers; update touches only the supervisor column, leaving any existing scores intact.
-  const row = await prisma.frameworkConversationEval.upsert({
-    where: { messageId: terminalTurn.messageId },
+  // Persist the verdict on the anchor (first) turn's eval row. Upsert so it works whether or not the
+  // metric scorer (t-1) already created a row for this turn: create carries the framework
+  // identifiers; update touches only the supervisor column, leaving any existing scores intact. A
+  // re-run overwrites the prior verdict outright — verdict history (the review route's
+  // `previousVerdicts[]`) is deliberately out of scope for v1.
+  await prisma.frameworkConversationEval.upsert({
+    where: { messageId: anchorTurn.messageId },
     create: {
-      messageId: terminalTurn.messageId,
+      messageId: anchorTurn.messageId,
       conversationId,
       contextType: conversation.contextType,
       contextId: conversation.contextId,
@@ -203,7 +219,7 @@ export async function superviseConversation(
     metadata: {
       conversationId,
       contextType: conversation.contextType,
-      messageId: terminalTurn.messageId,
+      messageId: anchorTurn.messageId,
       turnCount: turns.length,
       verdict: report.verdict,
       score: report.score,
@@ -215,7 +231,7 @@ export async function superviseConversation(
 
   return {
     conversationId,
-    messageId: row.messageId,
+    messageId: anchorTurn.messageId,
     verdict: report.verdict,
     score: report.score,
     summary: report.summary,
