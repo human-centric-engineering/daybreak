@@ -49,10 +49,11 @@ const VERSIONS: ModuleVersionsView = {
   ],
   nextCursor: null,
 };
-// The binding-tab props (t-4a): defaulted here so the shell tests focus on the shell.
+// The binding-tab props (t-4a/t-4b): defaulted here so the shell tests focus on the shell.
 const BINDING_PROPS = {
   agentBindings: [],
   agentRoles: { registered: true, roles: ['companion'] },
+  workflowBindings: [],
 };
 
 describe('ModuleDetail', () => {
@@ -74,6 +75,7 @@ describe('ModuleDetail', () => {
     expect(screen.getByRole('tab', { name: 'Versions' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Agents' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Workflows' })).toBeInTheDocument();
   });
 
   it('shows the Config tab content by default', () => {

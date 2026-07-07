@@ -27,11 +27,13 @@ import type {
   ModuleConfigFormView,
   ModuleSettingsView,
   ModuleVersionsView,
+  ModuleWorkflowBindingListItem,
 } from '@/lib/framework/modules/view';
 import { ConfigTab } from '@/components/admin/framework/module-detail/config-tab';
 import { VersionsTab } from '@/components/admin/framework/module-detail/versions-tab';
 import { SettingsTab } from '@/components/admin/framework/module-detail/settings-tab';
 import { AgentsTab } from '@/components/admin/framework/module-detail/agents-tab';
+import { WorkflowsTab } from '@/components/admin/framework/module-detail/workflows-tab';
 
 // Mirrors `modules-table.tsx`'s statusVariant (2 uses — the Settings tab renders its status
 // as an editable Select, not a badge, so this stays at 2; extract to a shared
@@ -58,6 +60,8 @@ interface ModuleDetailProps {
   agentBindings: ModuleAgentBindingListItem[] | null;
   /** The bindable seats + registration; `null` when that fetch failed (not "unregistered"). */
   agentRoles: ModuleAgentRolesView | null;
+  /** The module's workflow bindings (07's list); `null` when that fetch failed (not empty). */
+  workflowBindings: ModuleWorkflowBindingListItem[] | null;
 }
 
 export function ModuleDetail({
@@ -67,6 +71,7 @@ export function ModuleDetail({
   versions,
   agentBindings,
   agentRoles,
+  workflowBindings,
 }: ModuleDetailProps) {
   // Newest version is always the live config (no draft/published split); 0 before any save.
   const currentVersion = versions.versions[0]?.version ?? 0;
@@ -103,6 +108,11 @@ export function ModuleDetail({
       value: 'agents',
       label: 'Agents',
       node: <AgentsTab slug={slug} agentRoles={agentRoles} bindings={agentBindings} />,
+    },
+    {
+      value: 'workflows',
+      label: 'Workflows',
+      node: <WorkflowsTab slug={slug} bindings={workflowBindings} />,
     },
   ];
 
