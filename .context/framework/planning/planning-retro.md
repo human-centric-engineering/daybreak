@@ -490,3 +490,29 @@ startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registra
   (a product-content decision, per [[#B20 · Resolve a plan's open design questions inline, not via a separate refinement pass|B20]]'s
   "genuine product-scope fork" carve-out), not a promoted one — and if the owner declines it, drop it rather than
   carrying dead scope. Agents are config; the framework ships the machinery, the fork brings the personas. _Status: open._
+
+### B22 · Size "typed kinds under one table" by each kind's enforcement machinery, not one-per-kind
+
+- **Discovery.** [[f-policies]] is a `FacilitationPolicy` table with four typed kinds (auto-approval,
+  relevance-gating, guard-minimums, escalation). The naïve sizing is one task per kind (4 PRs). But the
+  kinds have wildly uneven build cost: **auto-approval** is a stored value with no runtime consumer (pure
+  data), **relevance-gating** enforces at the facilitation surface, **guard-minimums** needs a fork-carried
+  Sunrise-core seam, and **escalation** composes existing workflow/notify bridges. Cutting by _enforcement
+  machinery_ instead gave a truer shape: the thin stored kind **folded into the t-1 spine** (it proves the
+  typed-kind pattern end-to-end at almost no cost), the two enforced kinds each stood alone (distinct
+  surfaces — a chat-route gate vs a core guard seam), and the fourth (escalation) was **deferred** as a
+  conscious carve-out rather than padded in. Net: 4 indicative → **3 shipped + 1 deferred**, each PR a
+  cohesive vertical slice.
+- **Impact.** Positive. The build-cost cut kept the riskiest work (the core guard seam) isolated in its own
+  reviewable PR, let the anchor PR ship something provable (the spine + a working kind) instead of an inert
+  table, and surfaced the escalation deferral as an explicit decision at close-out (not a silent drop). The
+  one-per-kind cut would have produced a dead-table anchor PR and hidden the core-seam risk among sibling
+  kinds.
+- **Feedback.** When a feature is "several typed kinds under one table" (policies, conditions, step types,
+  event kinds), the feature-plan agent should size by asking, per kind: _what enforcement machinery does this
+  kind need, and where does it live?_ Fold **pure-data / no-consumer kinds into the spine** (they prove the
+  pattern cheaply); give **each kind with distinct enforcement machinery its own PR** (especially one that
+  touches a different tier — a core seam, a hot path); and treat a **deferrable kind as an explicit carve-out**
+  flagged at close-out, per [[#B20 · Resolve a plan's open design questions inline, not via a separate refinement pass|B20]].
+  The table spine is one task; the kinds are as many tasks as their machinery is distinct — not a fixed
+  one-per-kind. _Status: open._
