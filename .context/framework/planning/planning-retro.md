@@ -604,3 +604,29 @@ startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registra
   dead code). This is [[#B18 · A precedent borrowed for its shape can carry a rationale that doesn't transfer — re-derive it from the new domain|B18]] applied to **defensive code specifically** — the shape (a pgvector
   query) transfers; the _guard's justification_ (a drift that can occur) must be re-checked against the new
   data-flow, and here it evaporates. Same family as [[#B25 · A task pairing a new endpoint with its consuming UI — or leaning on an assumed reuse — is provisionally one PR; size it at build by the machinery you'll actually write|B25]]'s reuse-weight check, at the level of an individual guard. _Status: open._
+
+### B27 · An "instrumentation" feature's real deliverable is often wiring a shipped-but-dormant seam an earlier feature left for it — find the unwired receiver at recon, make it the anchor
+
+- **Discovery.** [[f-engagement]] read on the board like three additive surfaces (an event stream, a feedback
+  cap, a stats page). But recon found that the load-bearing deliverable was elsewhere: **f-module-bindings (07)
+  had shipped `runModuleWorkflowBindings` deliberately unwired** — its own header said _"Nothing calls this yet …
+  f-engagement wires the real event later"_ — so an operator's "when X happens in this module, run workflow Y"
+  was configured-but-dead across two shipped features. f-engagement's t-1 emit seam is what finally gave that
+  receiver a **producer**; that's the feature's highest-value effect, not the stats UI. The same pattern sat under
+  the data model: the `JourneyEvent` stream was created by f-journey-state (09) _for_ 08, already stamping
+  `moduleSlug`, so 08 added no table — it lit up dormant infrastructure two features had pre-positioned.
+- **Impact.** Positive once seen — recon promoted the wiring to t-1's explicit anchor (and the PR narrative could
+  say "this is the first production caller"), so a reviewer understood the stakes. The risk it _avoids_ is
+  treating such a feature as purely additive and under-sizing/under-testing the one integration that makes prior
+  work real (the isolation test on the two-limb seam was the most important test in the feature, not the stats
+  assertions). The tell at plan time: the plan's own words were "reuses `runModuleWorkflowBindings`" and "extends
+  the `JourneyEvent` stream" — "reuse/extend" language pointing at infrastructure a _different_ feature shipped.
+- **Feedback.** When a feature's plan describes it as **instrumenting / observing / reusing / extending** existing
+  infrastructure, at recon **classify each named seam as live or dormant**: grep the shipped receiver for its
+  production callers. A shipped seam with **no caller** (or a table with no writer) is a _latent integration this
+  feature owns_ — promote it to the anchor task, name it "first production caller" in the plan, and put the
+  load-bearing test on the wiring, not the new surface. This is the producer-side complement to the coordination
+  notes this plan already writes ("whichever of 07/08 lands the shared emit point owns it") — those flag the
+  seam; this says _the feature that lands the producer should treat that as its spine._ Generalises the
+  [[#B14 · A fork-first seam that composes with an upstream issue needs a live ledger, not just plan prose|B14]]
+  "dormant seam needs a live tracker" instinct from cross-repo seams to _intra-repo_ ones. _Status: open._
