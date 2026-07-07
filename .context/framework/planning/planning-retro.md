@@ -516,3 +516,27 @@ startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registra
   flagged at close-out, per [[#B20 · Resolve a plan's open design questions inline, not via a separate refinement pass|B20]].
   The table spine is one task; the kinds are as many tasks as their machinery is distinct — not a fixed
   one-per-kind. _Status: open._
+
+### B23 · When a large feature grows a separable second concern, shed it into its own feature at close-out rather than carry a heavy tail
+
+- **Discovery.** [[f-emergence]] (18) was planned as one feature spanning three concerns — escalation
+  (F15), the F17 proposal gate, and evaluation wiring — and flagged at plan time as "large (~5 PRs)".
+  The first three tasks (escalation + propose + approve/publish) delivered a **coherent, shippable
+  whole**: the emergence _gate_. The eval thread (ex-t-4/t-5) was governance _observability_ —
+  scoring/supervising conversations — that shared **no code** with the gate, and reconnaissance had
+  shown it was the heaviest, most-gap-laden part (no conversation-native scorer, framework convos emit
+  no eval logs, the #303 seed scaffold didn't exist). Rather than finish it as a tail of an
+  already-large feature, at close-out it was **split into its own claimable feature** ([[f-eval]], 20),
+  with the reconnaissance carried across intact.
+- **Impact.** Positive. f-emergence closed at a clean conceptual boundary (F15 + F17, 3 PRs) instead
+  of dragging on; the eval thread gets its own claim + plan pass (and its own owner) instead of
+  inheriting f-emergence's scope by accident; and the board now shows two honestly-sized features
+  where there was one oversized one. No work was lost — the recon moved with the split.
+- **Feedback.** A feature-plan agent should treat "this feature has grown a second, separable concern"
+  as a **close-out decision point**, not just a plan-time one: when the shipped tasks already form a
+  coherent whole and the remaining tasks (a) share little/no code with them and (b) are heavy enough
+  to warrant their own plan, **split the remainder into a new feature at close-out** rather than carry
+  it. The tell is a feature whose name lists two "+"-joined concerns (here "proposal pipeline **+**
+  evaluation wiring") — a candidate seam. Sibling to [[#B22 · Size "typed kinds under one table" by each kind's enforcement machinery, not one-per-kind|B22]]
+  (size by the real seam) applied at the _feature_ grain, and to the deferral discipline in
+  [[#B20 · Resolve a plan's open design questions inline, not via a separate refinement pass|B20]]. _Status: open._
