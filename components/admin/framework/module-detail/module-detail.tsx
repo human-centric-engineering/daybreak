@@ -3,8 +3,9 @@
  *
  * The tabbed shell for a single framework module: a header (identity + lifecycle status)
  * over a tab set. t-2 ships the **Config** and **Versions** tabs (UI over 06's shipped
- * config/version API); the `tabs` array is the extension point t-3 (Settings) and t-4
- * (Agents / Workflows / Knowledge bindings) append entries to — the host-first pattern.
+ * config/version API); t-3 appends the **Settings** tab (lifecycle writes + danger-zone
+ * delete). The `tabs` array is the extension point t-4 (Agents / Workflows / Knowledge
+ * bindings) appends further entries to — the host-first pattern.
  *
  * A composition-only server component (no client hooks) — it renders the client tabs and
  * passes them server-fetched props.
@@ -22,14 +23,16 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type {
   ModuleConfigFormView,
-  ModuleListItem,
+  ModuleSettingsView,
   ModuleVersionsView,
 } from '@/lib/framework/modules/view';
 import { ConfigTab } from '@/components/admin/framework/module-detail/config-tab';
 import { VersionsTab } from '@/components/admin/framework/module-detail/versions-tab';
+import { SettingsTab } from '@/components/admin/framework/module-detail/settings-tab';
 
-// Mirrors `modules-table.tsx`'s statusVariant (2 uses — extract to a shared
-// <ModuleStatusBadge> on the 3rd, which t-3's Settings tab will add).
+// Mirrors `modules-table.tsx`'s statusVariant (2 uses — the Settings tab renders its status
+// as an editable Select, not a badge, so this stays at 2; extract to a shared
+// <ModuleStatusBadge> on the 3rd badge use).
 function statusVariant(status: string): 'default' | 'secondary' | 'outline' {
   switch (status) {
     case 'active':
@@ -43,7 +46,8 @@ function statusVariant(status: string): 'default' | 'secondary' | 'outline' {
 
 interface ModuleDetailProps {
   slug: string;
-  identity: ModuleListItem;
+  /** The module's operator settings (identity + lifecycle window), read via `/modules/[slug]`. */
+  identity: ModuleSettingsView;
   /** null when the config fetch failed (distinct from a genuinely unregistered module). */
   config: ModuleConfigFormView | null;
   versions: ModuleVersionsView;
@@ -55,6 +59,13 @@ export function ModuleDetail({ slug, identity, config, versions }: ModuleDetailP
   // Re-key the Config tab on its own data, so a save/restore re-initialises the form after
   // `router.refresh()` regardless of whether the versions fetch succeeded.
   const configKey = config ? JSON.stringify(config.values) : 'unavailable';
+  // Re-key the Settings tab on its editable content, so a settings save re-initialises the
+  // form from the fresh row after `router.refresh()` (same pattern as the Config tab). It
+  // deliberately EXCLUDES `updatedAt` — otherwise a save on another tab (e.g. a config save,
+  // which also bumps `updatedAt`) would remount the Settings tab and discard its in-progress
+  // edits.
+  const { updatedAt: _settingsUpdatedAt, ...settingsContent } = identity;
+  const settingsKey = JSON.stringify(settingsContent);
 
   const tabs = [
     {
@@ -68,6 +79,11 @@ export function ModuleDetail({ slug, identity, config, versions }: ModuleDetailP
       node: (
         <VersionsTab slug={slug} versions={versions.versions} currentVersion={currentVersion} />
       ),
+    },
+    {
+      value: 'settings',
+      label: 'Settings',
+      node: <SettingsTab key={settingsKey} settings={identity} />,
     },
   ];
 

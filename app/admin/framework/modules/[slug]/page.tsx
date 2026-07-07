@@ -5,7 +5,7 @@ import { ModuleDetail } from '@/components/admin/framework/module-detail/module-
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import type {
   ModuleConfigFormView,
-  ModuleListItem,
+  ModuleSettingsView,
   ModuleVersionsView,
 } from '@/lib/framework/modules/view';
 import { logger } from '@/lib/logging';
@@ -18,22 +18,17 @@ export const metadata: Metadata = {
 const EMPTY_VERSIONS: ModuleVersionsView = { versions: [], nextCursor: null };
 
 /**
- * The module's identity row, found in the shipped list endpoint (`GET /modules`). t-2 is
- * UI over 06/03's already-shipped APIs, so it reads the list rather than adding a
- * single-module GET (that lands with the lifecycle writes in t-3). Returns `null` when the
- * module doesn't exist → the page 404s.
- *
- * Relies on `GET /modules` being unpaginated/uncapped (`listModules()` is a `findMany` with
- * no `take`), so `.find` never misses a module past a first page. If t-3 ever paginates the
- * list, this must switch to a single-module GET or the detail page will false-404.
+ * The module's operator settings (identity + lifecycle window), read via the single-module
+ * `GET /modules/[slug]` that t-3 added with the lifecycle writes. Returns `null` when the
+ * module doesn't exist (the endpoint 404s) → the page 404s. This shape backs both the header
+ * and the Settings tab's form.
  */
-async function getIdentity(slug: string): Promise<ModuleListItem | null> {
+async function getIdentity(slug: string): Promise<ModuleSettingsView | null> {
   try {
-    const res = await serverFetch('/api/v1/admin/framework/modules');
+    const res = await serverFetch(`/api/v1/admin/framework/modules/${encodeURIComponent(slug)}`);
     if (!res.ok) return null;
-    const body = await parseApiResponse<ModuleListItem[]>(res);
-    if (!body.success) return null;
-    return body.data.find((m) => m.slug === slug) ?? null;
+    const body = await parseApiResponse<ModuleSettingsView>(res);
+    return body.success ? body.data : null;
   } catch (err) {
     logger.error('framework module detail: identity fetch failed', err);
     return null;
@@ -78,10 +73,11 @@ async function getVersions(slug: string): Promise<ModuleVersionsView> {
 /**
  * Admin — Framework Module detail (f-ops-views t-2).
  *
- * Thin server component: fetches the module's identity, config form, and version list in
- * parallel, then hands them to the client `<ModuleDetail>` tabbed shell (Config + Versions
- * tabs; t-3/t-4 append Settings / binding tabs). 404s when the module doesn't exist; other
- * fetch failures degrade to empty state rather than throwing (the list-page precedent).
+ * Thin server component: fetches the module's settings, config form, and version list in
+ * parallel, then hands them to the `<ModuleDetail>` tabbed shell (Settings + Config +
+ * Versions tabs; t-4 appends the binding tabs). 404s when the module doesn't exist; the
+ * config/versions fetches degrade to empty state rather than throwing (the list-page
+ * precedent) — only a missing identity 404s.
  */
 export default async function FrameworkModuleDetailPage({
   params,

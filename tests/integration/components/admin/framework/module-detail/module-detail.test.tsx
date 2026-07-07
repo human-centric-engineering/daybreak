@@ -1,8 +1,8 @@
 /**
- * Integration test — ModuleDetail shell (f-ops-views t-2).
+ * Integration test — ModuleDetail shell (f-ops-views t-2 / t-3).
  *
- * The tabbed shell: header identity + status, and the Config / Versions tab triggers with
- * the Config tab active by default.
+ * The tabbed shell: header identity + status, and the Config / Versions / Settings tab
+ * triggers with the Config tab active by default.
  *
  * @see components/admin/framework/module-detail/module-detail.tsx
  */
@@ -12,7 +12,7 @@ import { render, screen } from '@testing-library/react';
 
 import type {
   ModuleConfigFormView,
-  ModuleListItem,
+  ModuleSettingsView,
   ModuleVersionsView,
 } from '@/lib/framework/modules/view';
 
@@ -20,12 +20,15 @@ vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn(), push: 
 
 import { ModuleDetail } from '@/components/admin/framework/module-detail/module-detail';
 
-const IDENTITY: ModuleListItem = {
+const IDENTITY: ModuleSettingsView = {
   id: 'mod-1',
   slug: 'onboarding',
   name: 'Onboarding',
   status: 'active',
   audience: 'all',
+  featureFlagName: null,
+  availableFrom: null,
+  availableUntil: null,
   isRegistered: true,
   updatedAt: '2026-02-01T00:00:00.000Z',
 };
@@ -58,6 +61,7 @@ describe('ModuleDetail', () => {
     expect(screen.getByText('onboarding')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Config' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Versions' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Settings' })).toBeInTheDocument();
   });
 
   it('shows the Config tab content by default', () => {

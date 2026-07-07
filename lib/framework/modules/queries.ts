@@ -11,6 +11,7 @@
 
 import type { Module } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
+import { NotFoundError } from '@/lib/api/errors';
 
 /**
  * List every framework module row, ordered by slug. Includes rows flagged
@@ -21,4 +22,49 @@ import { prisma } from '@/lib/db/client';
  */
 export async function listModules(): Promise<Module[]> {
   return prisma.module.findMany({ orderBy: { slug: 'asc' } });
+}
+
+/**
+ * The operator-editable settings of one module — the read backing `GET /modules/[slug]`
+ * and the shared load step for the write service (`updateModuleSettings` / `deleteModule`
+ * both start here). Selects only the settings-relevant columns (the potentially-large
+ * `config` blob is read via the `/config` endpoint, not here), keyed off `slug`. Throws
+ * `NotFoundError` — a missing module is a 404, not a swallowed empty. The `id` and `name`
+ * are included so a write caller can address the row and name it in the audit log without
+ * a second read.
+ */
+export interface ModuleSettings {
+  id: string;
+  slug: string;
+  name: string;
+  status: string;
+  audience: string;
+  featureFlagName: string | null;
+  availableFrom: Date | null;
+  availableUntil: Date | null;
+  isRegistered: boolean;
+  updatedAt: Date;
+}
+
+/** The column set backing {@link ModuleSettings} — shared by the read and the write path. */
+export const MODULE_SETTINGS_SELECT = {
+  id: true,
+  slug: true,
+  name: true,
+  status: true,
+  audience: true,
+  featureFlagName: true,
+  availableFrom: true,
+  availableUntil: true,
+  isRegistered: true,
+  updatedAt: true,
+} as const;
+
+export async function getModuleSettings(slug: string): Promise<ModuleSettings> {
+  const row = await prisma.module.findUnique({
+    where: { slug },
+    select: MODULE_SETTINGS_SELECT,
+  });
+  if (!row) throw new NotFoundError(`Module "${slug}" not found`);
+  return row;
 }

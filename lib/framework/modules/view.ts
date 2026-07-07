@@ -28,6 +28,34 @@ export interface ModuleListItem {
 }
 
 /**
+ * A framework module's operator-editable settings (`GET /modules/[slug]`) as the client
+ * consumes it. The superset of {@link ModuleListItem} — it adds the liveness-window inputs
+ * (`featureFlagName`, `availableFrom`, `availableUntil`) the Settings form edits, so the
+ * detail page fetches this single-module shape instead of finding the row in the list.
+ * `availableFrom` / `availableUntil` are ISO strings (JSON-serialized `DateTime`s) or null
+ * (open-ended); the config values themselves live behind the separate `/config` endpoint.
+ */
+export interface ModuleSettingsView {
+  id: string;
+  slug: string;
+  name: string;
+  /** Free-form lifecycle status (X1): draft | active | scheduled | retired | … */
+  status: string;
+  /** Free-form audience (X1): all | invite | flag-gated | … */
+  audience: string;
+  /** Optional feature-flag binding gating liveness; null = unbound. */
+  featureFlagName: string | null;
+  /** Availability-window start — ISO 8601 string, or null for open-ended. */
+  availableFrom: string | null;
+  /** Availability-window end — ISO 8601 string, or null for open-ended. */
+  availableUntil: string | null;
+  /** false = code removed but the row is retained for audit. */
+  isRegistered: boolean;
+  /** ISO 8601 string (a JSON-serialized `DateTime`), not a `Date`. */
+  updatedAt: string;
+}
+
+/**
  * The config-form payload (`GET /modules/[slug]/config`) as the client consumes it —
  * the server `ModuleConfigForm` with its `Prisma.JsonValue` values narrowed to a plain
  * object (a module's config is always a JSON object; the `{}` default holds for a fresh

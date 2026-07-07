@@ -1,9 +1,10 @@
 /**
- * Integration test — Framework Module detail page (f-ops-views t-2).
+ * Integration test — Framework Module detail page (f-ops-views t-2 / t-3).
  *
- * The server component fans out three parallel fetches (identity from the list, config,
- * versions) and renders the tabbed detail; a module that isn't in the list 404s, and each
- * fetch degrades to empty state (rather than throwing) on failure.
+ * The server component fans out three parallel fetches (identity via the single-module
+ * `GET /modules/[slug]`, config, versions) and renders the tabbed detail; a module that
+ * doesn't exist 404s, and the config/versions fetches degrade to empty state (rather than
+ * throwing) on failure.
  *
  * @see app/admin/framework/modules/[slug]/page.tsx
  */
@@ -31,6 +32,9 @@ const IDENTITY = {
   name: 'Demo Module',
   status: 'active',
   audience: 'all',
+  featureFlagName: null,
+  availableFrom: null,
+  availableUntil: null,
   isRegistered: true,
   updatedAt: '2026-02-01T00:00:00.000Z',
 };
@@ -53,7 +57,6 @@ const VERSIONS = {
 };
 
 interface Outcomes {
-  identityList?: unknown[];
   identityOk?: boolean;
   identitySuccess?: boolean;
   configOk?: boolean;
@@ -63,9 +66,16 @@ interface Outcomes {
   reject?: boolean;
 }
 
+// Classify a request path: config / versions are sub-paths of the bare module path, so
+// check the more specific segments first; anything else is the single-module identity GET.
+function classify(path: string): 'config' | 'versions' | 'identity' {
+  if (path.includes('/config')) return 'config';
+  if (path.includes('/versions')) return 'versions';
+  return 'identity';
+}
+
 async function setup(o: Outcomes = {}) {
   const {
-    identityList = [IDENTITY],
     identityOk = true,
     identitySuccess = true,
     configOk = true,
@@ -79,19 +89,19 @@ async function setup(o: Outcomes = {}) {
 
   vi.mocked(serverFetch).mockImplementation(async (path: string) => {
     if (reject) throw new Error('network down');
-    const ok = path.endsWith('/modules')
-      ? identityOk
-      : path.includes('/config')
-        ? configOk
-        : versionsOk;
+    const ok = { config: configOk, versions: versionsOk, identity: identityOk }[classify(path)];
     return { ok, __path: path } as unknown as Response;
   });
 
   vi.mocked(parseApiResponse).mockImplementation((async (res: { __path: string }) => {
-    const p = res.__path;
-    if (p.endsWith('/modules')) return { success: identitySuccess, data: identityList };
-    if (p.includes('/config')) return { success: configSuccess, data: CONFIG };
-    return { success: versionsSuccess, data: VERSIONS };
+    switch (classify(res.__path)) {
+      case 'config':
+        return { success: configSuccess, data: CONFIG };
+      case 'versions':
+        return { success: versionsSuccess, data: VERSIONS };
+      default:
+        return { success: identitySuccess, data: IDENTITY };
+    }
   }) as never);
 
   const { default: Page } = await import('@/app/admin/framework/modules/[slug]/page');
@@ -111,6 +121,7 @@ describe('FrameworkModuleDetailPage (server component)', () => {
     expect(screen.getByRole('heading', { name: 'Demo Module' })).toBeInTheDocument();
     expect(screen.getByText('Api Key')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Versions' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Settings' })).toBeInTheDocument();
   });
 
   it('still renders when config and versions fail (degraded, not thrown)', async () => {
@@ -126,15 +137,11 @@ describe('FrameworkModuleDetailPage (server component)', () => {
     expect(screen.getByRole('heading', { name: 'Demo Module' })).toBeInTheDocument();
   });
 
-  it('404s when the module is not in the list', async () => {
-    await expect(setup({ identityList: [] })).rejects.toThrow('NEXT_NOT_FOUND');
-  });
-
-  it('404s when the list fetch is not ok', async () => {
+  it('404s when the identity fetch is not ok (module not found)', async () => {
     await expect(setup({ identityOk: false })).rejects.toThrow('NEXT_NOT_FOUND');
   });
 
-  it('404s when the list envelope is unsuccessful', async () => {
+  it('404s when the identity envelope is unsuccessful', async () => {
     await expect(setup({ identitySuccess: false })).rejects.toThrow('NEXT_NOT_FOUND');
   });
 
