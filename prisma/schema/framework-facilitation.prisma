@@ -219,3 +219,31 @@ model StructureChangeProposal {
   @@index([status], map: "framework_scp_status_idx")
   @@map("framework_structure_change_proposal")
 }
+
+// Per-turn evaluation of a framework conversation (f-eval t-2..., spec §5.5 F14 — governance's
+// post-hoc face). One row per scored ASSISTANT turn: the existing named-metric scorer
+// (`scoreResponse`, which reuses the core eval judges) runs over facilitation/module conversation
+// turns read from `AiMessage`, and its scores land here. A framework-owned table rather than the
+// core `AiEvaluationLog` (which is mandatorily bound to a `userId`-owned `AiEvaluationSession` — the
+// wrong shape for a surface/context-keyed framework batch). `messageId` is a PLAIN scalar FK to core
+// `ai_message` (no Prisma `@relation`, X6); its `ON DELETE CASCADE` is hand-written, so an eval row
+// is erased with its message (which cascades from the user) — GDPR-clean, no separate hook.
+// `supervisorReport` holds the optional post-hoc supervisor verdict (t-2).
+model FrameworkConversationEval {
+  id               String   @id @default(cuid())
+  conversationId   String // the AiConversation scored
+  messageId        String   @unique // the assistant AiMessage turn — one eval per turn (re-scoring upserts)
+  contextType      String // 'facilitation' | 'module' — the framework surface
+  contextId        String? // role (facilitation) or module slug
+  faithfulness     Float? // 0..1, or null when the metric doesn't apply / the judge failed
+  groundedness     Float?
+  relevance        Float?
+  judgeReasoning   Json? // { faithfulness: { reasoning, evaluationSteps? }, groundedness: …, relevance: … }
+  costUsd          Float    @default(0) // sum of the three judge calls
+  supervisorReport Json? // optional post-hoc supervisor verdict (f-eval t-2)
+  scoredAt         DateTime @default(now())
+
+  @@index([conversationId])
+  @@index([contextType, contextId])
+  @@map("framework_conversation_eval")
+}
