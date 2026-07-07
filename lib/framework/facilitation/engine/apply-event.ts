@@ -32,7 +32,10 @@
 
 import type { JourneyEvent, Prisma, UserNodeState } from '@prisma/client';
 import { executeTransaction } from '@/lib/db/utils';
-import { NODE_STATE_STATUS } from '@/lib/framework/facilitation/journey/vocabulary';
+import {
+  NODE_STATE_STATUS,
+  JOURNEY_EVENT_TYPE,
+} from '@/lib/framework/facilitation/journey/vocabulary';
 import type { GraphStore } from '@/lib/framework/facilitation/engine/graph-store';
 import type { ModuleLiveness } from '@/lib/framework/modules/liveness';
 import type { SlotReadingView } from '@/lib/framework/facilitation/engine/conditions';
@@ -42,12 +45,11 @@ import {
   type LockReason,
 } from '@/lib/framework/facilitation/engine/availability';
 
-/** The `JourneyEvent.type` values the engine writes (free-form, X1). `f-engagement`
- *  adds more kinds to the same stream without a migration. */
-export const ENGINE_EVENT_TYPE = {
-  nodeEntered: 'node_entered',
-  nodeCompleted: 'node_completed',
-} as const;
+/** The `JourneyEvent.type` values the engine writes — the shared, client-safe
+ *  vocabulary (`JOURNEY_EVENT_TYPE`), re-exported under the engine's local name so
+ *  its existing consumers are unchanged. One source, so the client replay reducer
+ *  and this writer can't drift. */
+export const ENGINE_EVENT_TYPE = JOURNEY_EVENT_TYPE;
 
 /** A requested transition against one node of a journey. */
 export type TransitionKind = 'enter' | 'complete';

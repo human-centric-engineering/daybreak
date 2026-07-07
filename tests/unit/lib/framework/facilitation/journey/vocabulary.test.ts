@@ -5,6 +5,7 @@ import { describe, it, expect } from 'vitest';
 // `@/lib/db/client` into this pure vocabulary test (planning-retro B12).
 import {
   NODE_STATE_STATUS,
+  JOURNEY_EVENT_TYPE,
   type NodeStateStatus,
 } from '@/lib/framework/facilitation/journey/vocabulary';
 
@@ -38,5 +39,16 @@ describe('NODE_STATE_STATUS', () => {
     const all: NodeStateStatus[] = Object.values(NODE_STATE_STATUS);
     expect(all).toContain('active');
     expect(all).toHaveLength(5);
+  });
+});
+
+describe('JOURNEY_EVENT_TYPE', () => {
+  it('is the two engine traversal event types (the shared client-safe source)', () => {
+    // apply-event.ts re-exports this as ENGINE_EVENT_TYPE; the journey-explorer replay
+    // reducer imports it here — one source, so writer and reader can't drift.
+    expect(JOURNEY_EVENT_TYPE).toEqual({
+      nodeEntered: 'node_entered',
+      nodeCompleted: 'node_completed',
+    });
   });
 });

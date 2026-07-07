@@ -32,3 +32,19 @@ export const NODE_STATE_STATUS = {
 
 /** A known node-state status literal. */
 export type NodeStateStatus = (typeof NODE_STATE_STATUS)[keyof typeof NODE_STATE_STATUS];
+
+/**
+ * The journey-traversal `JourneyEvent.type` values the engine writes (spec §5.2,
+ * free-form/X1 — `f-engagement` adds more kinds to the same stream without a
+ * migration). Kept here, next to the status vocab, because this module is DB- and
+ * server-free so **both** the engine writer (`apply-event.ts` re-exports this as
+ * `ENGINE_EVENT_TYPE`) **and** the client journey-explorer replay reducer can share
+ * one source — a client bundle must not reach into the engine module for a string.
+ */
+export const JOURNEY_EVENT_TYPE = {
+  nodeEntered: 'node_entered',
+  nodeCompleted: 'node_completed',
+} as const;
+
+/** A known journey-traversal event-type literal. */
+export type JourneyEventType = (typeof JOURNEY_EVENT_TYPE)[keyof typeof JOURNEY_EVENT_TYPE];
