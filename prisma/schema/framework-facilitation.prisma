@@ -189,3 +189,33 @@ model FacilitationPolicy {
   @@index([kind, enabled])
   @@map("framework_facilitation_policy")
 }
+
+// Structure-change proposal (f-emergence t-2, spec §5.5 F17) — the one narrow gate through which
+// self-configuration (emergence) enters: a proposing agent (or an admin tool) writes a diff against
+// the current published map, and it flows ONE pipeline — schema validation → engine invariant check
+// → risk classification → approval → publish as a new version — so the deterministic spine is never
+// written raw. v1 targets the MAP subject only (`subjectType` CHECK-constrained; module-config/policy
+// subjects are an additive later scope). The full proposed map lives in `proposedDefinition` (map
+// versioning is whole-snapshot). `status` is a CHECK-constrained free string (X1). `createdBy` is a
+// PLAIN scalar (no `@relation`) that holds `"agent:<slug>"` for an agent author OR a user id — so it
+// is deliberately not a `User` FK (X6), mirroring `FacilitationGraphVersion.createdBy`. `reviewedBy`
+// (the approving admin) is a hand-FK to core `User`, `ON DELETE SET NULL` (retained audit).
+model StructureChangeProposal {
+  id                 String   @id @default(cuid())
+  subjectType        String // 'map' (v1); CHECK-constrained. module_config/policy are additive later
+  subjectId          String // the target map's graphSlug (v1)
+  baseVersion        Int? // the published version the diff was made against (conflict detection); null if none published yet
+  proposedDefinition Json // the full proposed map definition (whole-snapshot)
+  status             String   @default("pending") // pending | approved | rejected | published — CHECK-constrained
+  riskClass          String   @default("unclassified") // risk classification; the auto-approve taxonomy is deferred (§9.2)
+  createdBy          String // "agent:<slug>" or a user id — no @relation (admits agent authorship, X6)
+  reviewedBy         String? // approving/rejecting admin — FK to User.id; ON DELETE SET NULL hand-written
+  rejectionReason    String?  @db.Text
+  publishedVersionId String? // the FacilitationGraphVersion.id created on publish (set on approval, t-3)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([subjectType, subjectId, status], map: "framework_scp_subject_status_idx")
+  @@index([status], map: "framework_scp_status_idx")
+  @@map("framework_structure_change_proposal")
+}
