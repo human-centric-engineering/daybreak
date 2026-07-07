@@ -158,3 +158,26 @@ export interface ModuleWorkflowBindingListItem {
     hasPublishedVersion: boolean;
   } | null;
 }
+
+/**
+ * A module's knowledge scope as the Knowledge tab consumes it (`GET /modules/[slug]/knowledge`)
+ * — the server `ModuleKnowledgeScope` with its grant `createdAt`s narrowed to ISO strings. Each
+ * grant stitches the document/tag display fields, or `null` when it was removed (the grant was
+ * FK-cascaded away, so a stale row shouldn't appear — `null` is defensive).
+ */
+export interface ModuleKnowledgeDocumentListItem {
+  documentId: string;
+  createdAt: string;
+  document: { id: string; name: string; slug: string; status: string } | null;
+}
+
+export interface ModuleKnowledgeTagListItem {
+  tagId: string;
+  createdAt: string;
+  tag: { id: string; name: string; slug: string } | null;
+}
+
+export interface ModuleKnowledgeScopeView {
+  documents: ModuleKnowledgeDocumentListItem[];
+  tags: ModuleKnowledgeTagListItem[];
+}

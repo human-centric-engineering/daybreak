@@ -74,12 +74,13 @@ interface Outcomes {
 // single-module identity GET. ('/agent-roles' and '/agents' are distinct substrings.)
 function classify(
   path: string
-): 'config' | 'versions' | 'agentRoles' | 'agents' | 'workflows' | 'identity' {
+): 'config' | 'versions' | 'agentRoles' | 'agents' | 'workflows' | 'knowledge' | 'identity' {
   if (path.includes('/config')) return 'config';
   if (path.includes('/versions')) return 'versions';
   if (path.includes('/agent-roles')) return 'agentRoles';
   if (path.includes('/agents')) return 'agents';
   if (path.includes('/workflows')) return 'workflows';
+  if (path.includes('/knowledge')) return 'knowledge';
   return 'identity';
 }
 
@@ -108,6 +109,7 @@ async function setup(o: Outcomes = {}) {
       agentRoles: bindingsOk,
       agents: bindingsOk,
       workflows: bindingsOk,
+      knowledge: bindingsOk,
       identity: identityOk,
     }[classify(path)];
     return { ok, __path: path } as unknown as Response;
@@ -125,6 +127,8 @@ async function setup(o: Outcomes = {}) {
         return { success: bindingsSuccess, data: [] };
       case 'workflows':
         return { success: bindingsSuccess, data: [] };
+      case 'knowledge':
+        return { success: bindingsSuccess, data: { documents: [], tags: [] } };
       default:
         return { success: identitySuccess, data: IDENTITY };
     }
@@ -150,6 +154,7 @@ describe('FrameworkModuleDetailPage (server component)', () => {
     expect(screen.getByRole('tab', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Agents' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Workflows' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Knowledge' })).toBeInTheDocument();
   });
 
   it('still renders when config and versions fail (degraded, not thrown)', async () => {

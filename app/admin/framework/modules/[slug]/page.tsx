@@ -7,6 +7,7 @@ import type {
   ModuleAgentBindingListItem,
   ModuleAgentRolesView,
   ModuleConfigFormView,
+  ModuleKnowledgeScopeView,
   ModuleSettingsView,
   ModuleVersionsView,
   ModuleWorkflowBindingListItem,
@@ -126,14 +127,29 @@ async function getWorkflowBindings(slug: string): Promise<ModuleWorkflowBindingL
   }
 }
 
+/** The module's knowledge scope (07's read). Returns `null` on failure (not empty). */
+async function getKnowledgeScope(slug: string): Promise<ModuleKnowledgeScopeView | null> {
+  try {
+    const res = await serverFetch(
+      `/api/v1/admin/framework/modules/${encodeURIComponent(slug)}/knowledge`
+    );
+    if (!res.ok) return null;
+    const body = await parseApiResponse<ModuleKnowledgeScopeView>(res);
+    return body.success ? body.data : null;
+  } catch (err) {
+    logger.error('framework module detail: knowledge scope fetch failed', err);
+    return null;
+  }
+}
+
 /**
- * Admin — Framework Module detail (f-ops-views t-2 / t-4a / t-4b).
+ * Admin — Framework Module detail (f-ops-views t-2 / t-4a / t-4b / t-4c).
  *
  * Thin server component: fetches the module's settings, config form, version list, and agent +
- * workflow bindings in parallel, then hands them to the `<ModuleDetail>` tabbed shell (Config +
- * Versions + Settings + Agents + Workflows tabs; t-4c appends Knowledge). 404s when the module
- * doesn't exist; the non-identity fetches degrade (to null / empty) rather than throwing — only
- * a missing identity 404s.
+ * workflow bindings + knowledge scope in parallel, then hands them to the `<ModuleDetail>`
+ * tabbed shell (Config + Versions + Settings + Agents + Workflows + Knowledge tabs). 404s when
+ * the module doesn't exist; the non-identity fetches degrade (to null / empty) rather than
+ * throwing — only a missing identity 404s.
  */
 export default async function FrameworkModuleDetailPage({
   params,
@@ -142,7 +158,7 @@ export default async function FrameworkModuleDetailPage({
 }) {
   const { slug } = await params;
 
-  const [identity, config, versions, agentBindings, agentRoles, workflowBindings] =
+  const [identity, config, versions, agentBindings, agentRoles, workflowBindings, knowledgeScope] =
     await Promise.all([
       getIdentity(slug),
       getConfig(slug),
@@ -150,6 +166,7 @@ export default async function FrameworkModuleDetailPage({
       getAgentBindings(slug),
       getAgentRoles(slug),
       getWorkflowBindings(slug),
+      getKnowledgeScope(slug),
     ]);
 
   if (!identity) notFound();
@@ -163,6 +180,7 @@ export default async function FrameworkModuleDetailPage({
       agentBindings={agentBindings}
       agentRoles={agentRoles}
       workflowBindings={workflowBindings}
+      knowledgeScope={knowledgeScope}
     />
   );
 }
