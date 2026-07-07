@@ -9,7 +9,10 @@ vi.mock('@/lib/db/client', () => ({
   prisma: { facilitationPolicy: { findMany: vi.fn() } },
 }));
 
-import { listFacilitationPolicies } from '@/lib/framework/facilitation/policies/policy-queries';
+import {
+  listFacilitationPolicies,
+  listEnabledFacilitationPolicies,
+} from '@/lib/framework/facilitation/policies/policy-queries';
 import { prisma } from '@/lib/db/client';
 
 beforeEach(() => {
@@ -31,6 +34,16 @@ describe('listFacilitationPolicies', () => {
     expect(prisma.facilitationPolicy.findMany).toHaveBeenCalledWith({
       where: { kind: 'auto_approval' },
       orderBy: [{ kind: 'asc' }, { createdAt: 'asc' }],
+    });
+  });
+});
+
+describe('listEnabledFacilitationPolicies', () => {
+  it('filters to enabled rows of one kind, oldest-first', async () => {
+    await listEnabledFacilitationPolicies('relevance_gating');
+    expect(prisma.facilitationPolicy.findMany).toHaveBeenCalledWith({
+      where: { kind: 'relevance_gating', enabled: true },
+      orderBy: { createdAt: 'asc' },
     });
   });
 });

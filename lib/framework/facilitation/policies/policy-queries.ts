@@ -20,3 +20,14 @@ export async function listFacilitationPolicies(kind?: string): Promise<Facilitat
     orderBy: [{ kind: 'asc' }, { createdAt: 'asc' }],
   });
 }
+
+/**
+ * The ENABLED policies of one kind, for a runtime resolver (t-2+ enforcement). Uses the
+ * `[kind, enabled]` index; ordered oldest-first for a deterministic evaluation order.
+ */
+export async function listEnabledFacilitationPolicies(kind: string): Promise<FacilitationPolicy[]> {
+  return prisma.facilitationPolicy.findMany({
+    where: { kind, enabled: true },
+    orderBy: { createdAt: 'asc' },
+  });
+}
