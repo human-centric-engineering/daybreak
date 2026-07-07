@@ -9,6 +9,7 @@ import type {
   ModuleConfigFormView,
   ModuleSettingsView,
   ModuleVersionsView,
+  ModuleWorkflowBindingListItem,
 } from '@/lib/framework/modules/view';
 import { logger } from '@/lib/logging';
 
@@ -110,14 +111,29 @@ async function getAgentRoles(slug: string): Promise<ModuleAgentRolesView | null>
   }
 }
 
+/** The module's workflow bindings (07's list). Returns `null` on failure (not empty). */
+async function getWorkflowBindings(slug: string): Promise<ModuleWorkflowBindingListItem[] | null> {
+  try {
+    const res = await serverFetch(
+      `/api/v1/admin/framework/modules/${encodeURIComponent(slug)}/workflows`
+    );
+    if (!res.ok) return null;
+    const body = await parseApiResponse<ModuleWorkflowBindingListItem[]>(res);
+    return body.success ? body.data : null;
+  } catch (err) {
+    logger.error('framework module detail: workflow bindings fetch failed', err);
+    return null;
+  }
+}
+
 /**
- * Admin — Framework Module detail (f-ops-views t-2 / t-4a).
+ * Admin — Framework Module detail (f-ops-views t-2 / t-4a / t-4b).
  *
- * Thin server component: fetches the module's settings, config form, version list, and agent
- * bindings + declared seats in parallel, then hands them to the `<ModuleDetail>` tabbed shell
- * (Config + Versions + Settings + Agents tabs; t-4b/t-4c append Workflows / Knowledge). 404s
- * when the module doesn't exist; the non-identity fetches degrade to empty state rather than
- * throwing (the list-page precedent) — only a missing identity 404s.
+ * Thin server component: fetches the module's settings, config form, version list, and agent +
+ * workflow bindings in parallel, then hands them to the `<ModuleDetail>` tabbed shell (Config +
+ * Versions + Settings + Agents + Workflows tabs; t-4c appends Knowledge). 404s when the module
+ * doesn't exist; the non-identity fetches degrade (to null / empty) rather than throwing — only
+ * a missing identity 404s.
  */
 export default async function FrameworkModuleDetailPage({
   params,
@@ -126,13 +142,15 @@ export default async function FrameworkModuleDetailPage({
 }) {
   const { slug } = await params;
 
-  const [identity, config, versions, agentBindings, agentRoles] = await Promise.all([
-    getIdentity(slug),
-    getConfig(slug),
-    getVersions(slug),
-    getAgentBindings(slug),
-    getAgentRoles(slug),
-  ]);
+  const [identity, config, versions, agentBindings, agentRoles, workflowBindings] =
+    await Promise.all([
+      getIdentity(slug),
+      getConfig(slug),
+      getVersions(slug),
+      getAgentBindings(slug),
+      getAgentRoles(slug),
+      getWorkflowBindings(slug),
+    ]);
 
   if (!identity) notFound();
 
@@ -144,6 +162,7 @@ export default async function FrameworkModuleDetailPage({
       versions={versions}
       agentBindings={agentBindings}
       agentRoles={agentRoles}
+      workflowBindings={workflowBindings}
     />
   );
 }

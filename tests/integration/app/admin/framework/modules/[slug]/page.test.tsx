@@ -63,17 +63,23 @@ interface Outcomes {
   configSuccess?: boolean;
   versionsOk?: boolean;
   versionsSuccess?: boolean;
+  /** Applies to all three binding fetches (agents, agent-roles, workflows). */
+  bindingsOk?: boolean;
+  bindingsSuccess?: boolean;
   reject?: boolean;
 }
 
 // Classify a request path: config / versions / agents / agent-roles are sub-paths of the
 // bare module path, so check the more specific segments first; anything else is the
 // single-module identity GET. ('/agent-roles' and '/agents' are distinct substrings.)
-function classify(path: string): 'config' | 'versions' | 'agentRoles' | 'agents' | 'identity' {
+function classify(
+  path: string
+): 'config' | 'versions' | 'agentRoles' | 'agents' | 'workflows' | 'identity' {
   if (path.includes('/config')) return 'config';
   if (path.includes('/versions')) return 'versions';
   if (path.includes('/agent-roles')) return 'agentRoles';
   if (path.includes('/agents')) return 'agents';
+  if (path.includes('/workflows')) return 'workflows';
   return 'identity';
 }
 
@@ -87,6 +93,8 @@ async function setup(o: Outcomes = {}) {
     configSuccess = true,
     versionsOk = true,
     versionsSuccess = true,
+    bindingsOk = true,
+    bindingsSuccess = true,
     reject = false,
   } = o;
 
@@ -97,8 +105,9 @@ async function setup(o: Outcomes = {}) {
     const ok = {
       config: configOk,
       versions: versionsOk,
-      agentRoles: true,
-      agents: true,
+      agentRoles: bindingsOk,
+      agents: bindingsOk,
+      workflows: bindingsOk,
       identity: identityOk,
     }[classify(path)];
     return { ok, __path: path } as unknown as Response;
@@ -111,9 +120,11 @@ async function setup(o: Outcomes = {}) {
       case 'versions':
         return { success: versionsSuccess, data: VERSIONS };
       case 'agentRoles':
-        return { success: true, data: AGENT_ROLES };
+        return { success: bindingsSuccess, data: AGENT_ROLES };
       case 'agents':
-        return { success: true, data: [] };
+        return { success: bindingsSuccess, data: [] };
+      case 'workflows':
+        return { success: bindingsSuccess, data: [] };
       default:
         return { success: identitySuccess, data: IDENTITY };
     }
@@ -138,6 +149,7 @@ describe('FrameworkModuleDetailPage (server component)', () => {
     expect(screen.getByRole('tab', { name: 'Versions' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Settings' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Agents' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Workflows' })).toBeInTheDocument();
   });
 
   it('still renders when config and versions fail (degraded, not thrown)', async () => {
@@ -150,6 +162,16 @@ describe('FrameworkModuleDetailPage (server component)', () => {
 
   it('also degrades on config envelope failure and versions HTTP failure', async () => {
     render(await setup({ configSuccess: false, versionsOk: false }));
+    expect(screen.getByRole('heading', { name: 'Demo Module' })).toBeInTheDocument();
+  });
+
+  it('still renders when the binding fetches fail (HTTP not ok → null, not thrown)', async () => {
+    render(await setup({ bindingsOk: false }));
+    expect(screen.getByRole('heading', { name: 'Demo Module' })).toBeInTheDocument();
+  });
+
+  it('still renders when the binding envelopes are unsuccessful', async () => {
+    render(await setup({ bindingsSuccess: false }));
     expect(screen.getByRole('heading', { name: 'Demo Module' })).toBeInTheDocument();
   });
 

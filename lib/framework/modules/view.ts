@@ -128,3 +128,33 @@ export interface ModuleAgentRolesView {
   registered: boolean;
   roles: string[];
 }
+
+/**
+ * A module's workflow binding as the Workflows tab consumes it (`GET /modules/[slug]/workflows`)
+ * — the server `ModuleWorkflowBindingView` with its `DateTime`s narrowed to ISO strings and the
+ * opaque `inputTemplate` narrowed to a plain object (the bind schema stores a JSON object or
+ * null). `workflow` is the stitched display fields, or `null` when the bound workflow was
+ * removed. `hasPublishedVersion === false` means the binding "won't fire yet" (dispatch skips a
+ * workflow with no published version).
+ */
+export interface ModuleWorkflowBindingListItem {
+  id: string;
+  workflowId: string;
+  /** The module-lifecycle event that fires this binding (free-form, X1). */
+  eventType: string;
+  /** Gate firing without deleting the binding. */
+  enabled: boolean;
+  /** The operator's static run input, or null. */
+  inputTemplate: Record<string, unknown> | null;
+  /** ISO 8601 string (a JSON-serialized `DateTime`). */
+  createdAt: string;
+  updatedAt: string;
+  workflow: {
+    id: string;
+    name: string;
+    slug: string;
+    isActive: boolean;
+    /** false ⇒ the binding won't fire yet (dispatch skips an unpublished workflow). */
+    hasPublishedVersion: boolean;
+  } | null;
+}
