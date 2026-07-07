@@ -53,7 +53,8 @@ export const POST = withAdminAuth(async (request, session) => {
   log.info('Framework proactive-guidance nudges delivered', {
     scanned: result.scanned,
     candidates: result.candidates,
-    sent: result.sent,
+    emailsSent: result.emailsSent,
+    journeysNudged: result.journeysNudged,
     throttled: result.throttled,
     failed: result.failed,
     adminId: session.user.id,

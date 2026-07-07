@@ -54,7 +54,8 @@ describe('deliverProactiveNudges', () => {
       scanned: 4,
       candidates: 0,
       throttled: 0,
-      sent: 0,
+      emailsSent: 0,
+      journeysNudged: 0,
       noEmail: 0,
       failed: 0,
     });
@@ -82,7 +83,14 @@ describe('deliverProactiveNudges', () => {
       now,
     });
 
-    expect(result).toMatchObject({ candidates: 2, throttled: 1, sent: 1, noEmail: 0, failed: 0 });
+    expect(result).toMatchObject({
+      candidates: 2,
+      throttled: 1,
+      emailsSent: 1,
+      journeysNudged: 1,
+      noEmail: 0,
+      failed: 0,
+    });
     // Custom maxJourneys + a stalledBefore 10 days back reach the sweep.
     expect(runProactiveGuidanceSweep).toHaveBeenCalledWith({
       stalledBefore: new Date('2026-06-28T00:00:00Z'),
@@ -116,9 +124,34 @@ describe('deliverProactiveNudges', () => {
     ] as never);
 
     const result = await deliverProactiveNudges();
-    expect(result).toMatchObject({ sent: 0, noEmail: 1, failed: 0 });
+    expect(result).toMatchObject({ emailsSent: 0, noEmail: 1, failed: 0 });
     expect(sendEmail).not.toHaveBeenCalled();
     expect(prisma.frameworkJourneyNudge.upsert).not.toHaveBeenCalled();
+  });
+
+  it('sends ONE email per user for a multi-journey user, throttling all their journeys', async () => {
+    // Same owner, two stalled journeys — the generic nudge must not duplicate.
+    vi.mocked(runProactiveGuidanceSweep).mockResolvedValue({
+      scanned: 2,
+      candidates: [candidate('u1', 'j1'), candidate('u1', 'j2')],
+    });
+    vi.mocked(prisma.user.findMany).mockResolvedValue([
+      { id: 'u1', email: 'u1@test.dev', name: 'Ana' },
+    ] as never);
+
+    const result = await deliverProactiveNudges();
+    expect(result).toMatchObject({
+      candidates: 2,
+      throttled: 0,
+      emailsSent: 1, // one email, not two
+      journeysNudged: 2, // both journeys throttled
+    });
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    expect(prisma.frameworkJourneyNudge.upsert).toHaveBeenCalledTimes(2);
+    const throttledJourneyIds = vi
+      .mocked(prisma.frameworkJourneyNudge.upsert)
+      .mock.calls.map((c) => (c[0] as { where: { journeyId: string } }).where.journeyId);
+    expect(new Set(throttledJourneyIds)).toEqual(new Set(['j1', 'j2']));
   });
 
   it('counts a non-sent result as failed and does NOT throttle it (retried next sweep)', async () => {
@@ -132,7 +165,7 @@ describe('deliverProactiveNudges', () => {
     vi.mocked(sendEmail).mockResolvedValue({ status: 'disabled' } as never);
 
     const result = await deliverProactiveNudges();
-    expect(result).toMatchObject({ sent: 0, failed: 1 });
+    expect(result).toMatchObject({ emailsSent: 0, failed: 1 });
     expect(prisma.frameworkJourneyNudge.upsert).not.toHaveBeenCalled();
   });
 
@@ -150,6 +183,21 @@ describe('deliverProactiveNudges', () => {
       .mockRejectedValueOnce('string failure'); // non-Error branch (String(err))
 
     const result = await deliverProactiveNudges();
-    expect(result).toMatchObject({ candidates: 2, sent: 0, failed: 2 });
+    expect(result).toMatchObject({ candidates: 2, emailsSent: 0, failed: 2 });
+  });
+
+  it('counts the email as sent even if the throttle-record upsert fails (best-effort)', async () => {
+    vi.mocked(runProactiveGuidanceSweep).mockResolvedValue({
+      scanned: 1,
+      candidates: [candidate('u1', 'j1')],
+    });
+    vi.mocked(prisma.user.findMany).mockResolvedValue([
+      { id: 'u1', email: 'u1@test.dev', name: 'Ana' },
+    ] as never);
+    vi.mocked(prisma.frameworkJourneyNudge.upsert).mockRejectedValue(new Error('write conflict'));
+
+    const result = await deliverProactiveNudges();
+    // Email went out (counted), but the throttle row wasn't recorded (send not marked failed).
+    expect(result).toMatchObject({ emailsSent: 1, journeysNudged: 0, failed: 0 });
   });
 });

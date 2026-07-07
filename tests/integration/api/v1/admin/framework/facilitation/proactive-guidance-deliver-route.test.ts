@@ -41,7 +41,8 @@ beforeEach(() => {
     scanned: 3,
     candidates: 2,
     throttled: 1,
-    sent: 1,
+    emailsSent: 1,
+    journeysNudged: 1,
     noEmail: 0,
     failed: 0,
   });
@@ -58,8 +59,8 @@ describe('POST /proactive-guidance/deliver', () => {
     const res = await route.POST(req());
     expect(res.status).toBe(200);
     expect(svc.deliver).toHaveBeenCalledWith({});
-    const data = (await parse<{ data: { sent: number } }>(res)).data;
-    expect(data.sent).toBe(1);
+    const data = (await parse<{ data: { emailsSent: number } }>(res)).data;
+    expect(data.emailsSent).toBe(1);
   });
 
   it('passes body overrides through', async () => {

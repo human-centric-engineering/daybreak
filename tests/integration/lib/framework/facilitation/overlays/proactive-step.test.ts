@@ -35,7 +35,8 @@ beforeEach(() => {
     scanned: 3,
     candidates: 2,
     throttled: 0,
-    sent: 2,
+    emailsSent: 2,
+    journeysNudged: 2,
     noEmail: 0,
     failed: 0,
   });
@@ -57,7 +58,15 @@ describe('the proactive-guidance step executor', () => {
     const result = await executor(step({ stalledDays: 14, maxJourneys: 50 }), ctx);
     expect(deliverProactiveNudges).toHaveBeenCalledWith({ stalledDays: 14, maxJourneys: 50 });
     expect(result).toEqual({
-      output: { scanned: 3, candidates: 2, throttled: 0, sent: 2, noEmail: 0, failed: 0 },
+      output: {
+        scanned: 3,
+        candidates: 2,
+        throttled: 0,
+        emailsSent: 2,
+        journeysNudged: 2,
+        noEmail: 0,
+        failed: 0,
+      },
       tokensUsed: 0,
       costUsd: 0,
     });
