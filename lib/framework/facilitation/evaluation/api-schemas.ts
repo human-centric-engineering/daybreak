@@ -12,6 +12,15 @@ export const scoreConversationBodySchema = z.object({
   conversationId: cuidSchema,
 });
 
+/**
+ * POST /evaluations/supervise — run the post-hoc supervisor over a framework conversation (f-eval
+ * t-2). `modelOverride` forces a particular judge model; otherwise the configured judge model is used.
+ */
+export const superviseConversationBodySchema = z.object({
+  conversationId: cuidSchema,
+  modelOverride: z.string().min(1).max(200).optional(),
+});
+
 /** Validate the `?conversationId=` query param on GET /evaluations (a cuid); malformed ⇒ 400. */
 export function parseConversationIdParam(raw: string | null): string {
   const parsed = cuidSchema.safeParse(raw);

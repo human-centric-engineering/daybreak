@@ -13,19 +13,13 @@
 
 import type { FrameworkConversationEval, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
-import { NotFoundError, ValidationError } from '@/lib/api/errors';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { logger } from '@/lib/logging';
 import { scoreResponse, type MetricScores } from '@/lib/orchestration/evaluations/score-response';
-import { FACILITATION_SURFACE_CONTEXT_TYPE } from '@/lib/framework/facilitation/agents/surface';
-import { MODULE_SURFACE_CONTEXT_TYPE } from '@/lib/framework/guidance/surface';
+import { loadFrameworkConversation } from '@/lib/framework/facilitation/evaluation/conversation';
 import { listScorableTurns } from '@/lib/framework/facilitation/evaluation/turns';
 
 const ENTITY_TYPE = 'framework_conversation_eval';
-const FRAMEWORK_CONTEXT_TYPES: readonly string[] = [
-  FACILITATION_SURFACE_CONTEXT_TYPE,
-  MODULE_SURFACE_CONTEXT_TYPE,
-];
 
 export interface ScoreConversationArgs {
   conversationId: string;
@@ -69,19 +63,7 @@ export async function scoreConversation(
 ): Promise<ScoreConversationResult> {
   const { conversationId, actorUserId, clientIp } = args;
 
-  const conversation = await prisma.aiConversation.findUnique({
-    where: { id: conversationId },
-    select: { id: true, contextType: true, contextId: true },
-  });
-  if (!conversation) throw new NotFoundError(`Conversation "${conversationId}" not found`);
-  if (
-    conversation.contextType === null ||
-    !FRAMEWORK_CONTEXT_TYPES.includes(conversation.contextType)
-  ) {
-    throw new ValidationError('Only framework (facilitation/module) conversations can be scored', {
-      contextType: [`"${conversation.contextType ?? 'none'}" is not a framework surface`],
-    });
-  }
+  const conversation = await loadFrameworkConversation(conversationId);
 
   const turns = await listScorableTurns(conversationId);
   const results: FrameworkConversationEval[] = [];
