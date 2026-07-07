@@ -8,7 +8,8 @@
  *      uses the documented defaults.
  *
  * Admin-only; framework-tier path. Rate limiting is automatic via `proxy.ts`; the run is audited. The
- * sweep is read-only + LLM-free (guidance is deterministic), so it is side-effect-free and cheap.
+ * sweep is read-only (the sole write is the audit row) and LLM-free, but it does per-journey guidance
+ * reads (incl. per-move similarity queries when embeddings exist), serial and bounded by `maxJourneys`.
  */
 
 import { z } from 'zod';

@@ -9,8 +9,14 @@
  *
  * This is the compute half: it produces candidates. Delivery (email) + de-duplication (a throttle
  * table) + scheduling (a custom step type) arrive in t-3b; the on-demand admin trigger uses this to
- * PREVIEW who would be nudged. Guidance is deterministic (no LLM), so a sweep is cost-free beyond its
- * DB reads. Bounded by `maxJourneys`.
+ * PREVIEW who would be nudged.
+ *
+ * Cost: guidance is deterministic (no LLM, so no model spend), but each journey's `loadGuidance` runs
+ * several reads plus — when the map has embeddings (t-2) — a similarity query per ranked move, and the
+ * loop is sequential. So a sweep scales with journeys × moves in serial DB round-trips, bounded by
+ * `maxJourneys` (default 100). It only reads (the sole write is a fire-and-forget audit row). The
+ * scheduled path (t-3b) is where bounded-concurrency batching would earn its keep — and where journey
+ * ordering/starvation (this reads oldest-started first) is resolved by the not-recently-nudged filter.
  */
 
 import { loadGuidance } from '@/lib/framework/guidance/guidance';
