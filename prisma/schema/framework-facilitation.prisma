@@ -88,6 +88,7 @@ model UserJourney {
 
   nodeStates UserNodeState[]
   events     JourneyEvent[]
+  nudges     FrameworkJourneyNudge[]
 
   @@unique([userId, graphSlug, contextKey])
   @@map("framework_user_journey")
@@ -279,4 +280,27 @@ model FrameworkNodeEmbedding {
   @@unique([graphSlug, nodeKey, version])
   @@index([graphSlug, version])
   @@map("framework_node_embedding")
+}
+
+// Proactive-guidance nudge throttle (f-overlays t-3b, spec §5.4, F13). One row per journey the sweep
+// has emailed a "next step" nudge to, so a repeated sweep (a 60-second scheduler tick) does not
+// re-nudge the same journey — the delivery service skips journeys nudged within a throttle window and
+// upserts this row on each send. `nodeKey` records the step last nudged toward (audit/debug).
+//
+// `journeyId` is a real Prisma `@relation` to `UserJourney` (both framework-owned, so a reverse field
+// is fine — unlike an FK to a Sunrise table, X6), `ON DELETE CASCADE`: the throttle row dies with its
+// journey. `userId` is ALSO carried as a PLAIN scalar hand-FK to core `User`, `ON DELETE CASCADE`
+// hand-written in the migration (no `@relation`, X6) — the direct GDPR erasure path (spec §11), matching
+// the journey tables. `@@unique([journeyId])` keeps it to one throttle row per journey (upsert target).
+model FrameworkJourneyNudge {
+  id        String   @id @default(cuid())
+  userId    String // FK to User.id — no @relation; ON DELETE CASCADE hand-written in the migration (erasure path)
+  journeyId String   @unique // one throttle row per journey; the upsert key
+  nodeKey   String // the next-step node last nudged toward (audit/debug)
+  nudgedAt  DateTime @default(now())
+
+  journey UserJourney @relation(fields: [journeyId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("framework_journey_nudge")
 }
