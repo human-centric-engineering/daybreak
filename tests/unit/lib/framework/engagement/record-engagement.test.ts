@@ -27,6 +27,7 @@ vi.mock('@/lib/framework/modules/workflow-bindings', () => ({
 vi.mock('@/lib/logging', () => ({ logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() } }));
 
 import { recordModuleEngagement } from '@/lib/framework/engagement/record-engagement';
+import * as engagement from '@/lib/framework/engagement';
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -94,5 +95,10 @@ describe('recordModuleEngagement', () => {
 
     // The event write still happened — a downstream failure doesn't roll it back.
     expect(createMock).toHaveBeenCalledOnce();
+  });
+
+  it('exposes the seam and the engagement vocabulary through the feature barrel', () => {
+    expect(engagement.recordModuleEngagement).toBe(recordModuleEngagement);
+    expect(engagement.ENGAGEMENT_EVENT_TYPE.moduleEntered).toBe('module.entered');
   });
 });
