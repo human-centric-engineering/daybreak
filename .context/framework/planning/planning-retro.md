@@ -577,3 +577,30 @@ startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registra
 - **Discovery.** [[f-ops-views]] promoted t-4 (binding tabs) and t-5 (journey explorer) as one task each; **both split at build** — t-4 into a/b/c (one per binding kind), t-5 into a/b (read API vs UI) — along the same _UI-over-shipped-API vs builds-one-new-endpoint_ seam the feature already used for its top-level split. t-5's split was forced by a **reuse assumption that didn't survive contact**: the plan said "reuse the workflow-builder canvas in read-only mode," but build-time recon found its node/edge types render workflow-step config (not reusable) and there is **no layout library** in the deps — so the canvas was a genuine build (own Kahn-longest-path mapper + node components + replay reducer), machinery wholly distinct from the read API it consumes. Neither half was a foldable sliver ([[#B1|B1]]).
 - **Impact.** Positive — each split kept a PR reviewable and gave the UI a **reviewed, stable API contract** to mount on (the CLAUDE.md API-first rule falls out for free) — but the plan's "task = one PR" sizing was wrong for these two tasks in the same way, twice.
 - **Feedback.** Two provisional-sizing smells to catch at plan time and re-check at build: **(1)** a task that spans **a new endpoint _and_ its consuming UI** is usually two PRs, not one — the API is a self-contained, testable, security-relevant slice and the UI is another; size each by its own machinery, not by the user-facing feature. **(2)** a task whose sizing leans on **"reuse existing X"** must have that reuse **weight-checked before committing to one PR** — is X actually the shape you need, or merely adjacent? (The workflow canvas was adjacent: same library, wrong node vocabulary.) Extends [[#B22 · Size "typed kinds under one table" by each kind's enforcement machinery, not one-per-kind|B22]] (size by machinery) to the **API↔UI axis**, and [[#B17 · "Pure framework-tier / no upstream issue" is a build-time finding, not a plan-time fact — correct-behaviour-first can reveal a needed core seam|B17]] (a build-time finding, not a plan-time fact) to **reuse-weight**. _Status: open._
+
+### B26 · A safety guard copied from a sibling by analogy may protect against a failure mode the new usage structurally can't have — check the triggering condition exists before building it
+
+- **Discovery.** [[f-overlays]]'s plan prescribed, for the pgvector similarity query, mirroring knowledge
+  search's **dimension drift-guard** (`assertActiveModelMatchesStoredVectors` — fail loudly with "re-embed"
+  rather than crash on a `$N::vector` cast when the active embedding model's dimension no longer matches the
+  stored vectors). It's a real, load-bearing guard **in knowledge search**, because there a _fresh query
+  embedding_ (from whatever model is active _now_) is compared against vectors _embedded earlier_ — the two
+  can drift apart in dimension. But f-overlays' similarity is **node-to-node within one `(graphSlug, version)`
+  sync run**: both vectors come from the _same_ batch, same model, same fixed `vector(1536)` — there is no
+  fresh-vs-stored comparison, so **the drift the guard exists to catch is structurally impossible here.** t-2
+  shipped without it (documented in the PR); the guard would have been dead code guarding an unreachable state.
+- **Impact.** Small and positive — a planned mechanism _correctly dropped_ at build, saving code that would
+  have implied a risk that doesn't exist (and mislead the next reader into thinking node embeddings can drift
+  mid-query). But like [[#B18 · A precedent borrowed for its shape can carry a rationale that doesn't transfer — re-derive it from the new domain|B18]], it was **plan-prescribed**, so the feature doc's task row had to be
+  reconciled at close-out ("no dimension drift-guard needed — same-sync-run"). The tell was available at plan
+  time: the plan copied the guard from the sibling without asking _what two things the guard compares, and
+  whether the new usage compares them at all._
+- **Feedback.** When a plan says "mirror `X`'s guard / validation / invariant check", **identify the exact
+  failure state the guard detects and confirm the new usage can actually reach it** before baking it in. A
+  guard is not portable just because the surrounding mechanism (here: pgvector cosine query) is — it's
+  contingent on a _failure mode_, and a different data-flow may not have that mode. Concretely: ask "what
+  divergent inputs does this guard reconcile, and does my code ever hold those two inputs at once?" For
+  query-vs-stored embeddings the answer is yes (guard needed); for same-run node-to-node it's no (guard is
+  dead code). This is [[#B18 · A precedent borrowed for its shape can carry a rationale that doesn't transfer — re-derive it from the new domain|B18]] applied to **defensive code specifically** — the shape (a pgvector
+  query) transfers; the _guard's justification_ (a drift that can occur) must be re-checked against the new
+  data-flow, and here it evaporates. Same family as [[#B25 · A task pairing a new endpoint with its consuming UI — or leaning on an assumed reuse — is provisionally one PR; size it at build by the machinery you'll actually write|B25]]'s reuse-weight check, at the level of an individual guard. _Status: open._
