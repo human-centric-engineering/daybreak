@@ -31,6 +31,7 @@ import {
   resolveModuleSurface,
   MODULE_SURFACE_CONTEXT_TYPE,
 } from '@/lib/framework/guidance/surface';
+import { recordModuleEngagement, ENGAGEMENT_EVENT_TYPE } from '@/lib/framework/engagement';
 
 const surfaceChatRequestSchema = z.object({
   message: z.string().min(1),
@@ -67,6 +68,18 @@ export const POST = withAuth<{ slug: string }>(async (request, session, { params
     resumed: surface.conversationId !== undefined,
     userId: session.user.id,
   });
+
+  // A fresh surface conversation (nothing to resume) is a module *entry* — record it as
+  // an engagement event and fire any `module.entered` workflow bindings. Fire-and-forget:
+  // the seam is best-effort and non-throwing, so instrumentation never blocks or breaks
+  // the chat stream. A resumed conversation is not a new entry, so it emits nothing.
+  if (surface.conversationId === undefined) {
+    void recordModuleEngagement({
+      userId: session.user.id,
+      moduleSlug: slug,
+      type: ENGAGEMENT_EVENT_TYPE.moduleEntered,
+    });
+  }
 
   const events = streamChat({
     message: body.message,

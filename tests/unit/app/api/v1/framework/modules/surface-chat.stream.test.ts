@@ -33,12 +33,17 @@ vi.mock('@/lib/framework/guidance/surface', () => ({
   resolveModuleSurface: vi.fn(),
   MODULE_SURFACE_CONTEXT_TYPE: 'module',
 }));
+vi.mock('@/lib/framework/engagement', () => ({
+  recordModuleEngagement: vi.fn(),
+  ENGAGEMENT_EVENT_TYPE: { moduleEntered: 'module.entered' },
+}));
 
 import { auth } from '@/lib/auth/config';
 import { consumerChatLimiter, agentChatLimiter } from '@/lib/security/rate-limit';
 import { streamChat } from '@/lib/orchestration/chat';
 import { resolveModuleSurface } from '@/lib/framework/guidance/surface';
 import type { ModuleSurface } from '@/lib/framework/guidance/surface';
+import { recordModuleEngagement } from '@/lib/framework/engagement';
 
 const req = (body: unknown): NextRequest =>
   ({
@@ -87,6 +92,31 @@ describe('POST module surface chat', () => {
     );
     // The agent's per-agent RPM override is honoured (parity with the direct consumer route).
     expect(agentChatLimiter.check).toHaveBeenCalledWith('agent-1:user-1', 3);
+  });
+
+  it('does NOT record an entry when resuming an existing conversation', async () => {
+    // The default surface resolves conversationId 'conv-9' — a resume, not a new entry.
+    await POST(req({ message: 'hi' }), ctx());
+    expect(recordModuleEngagement).not.toHaveBeenCalled();
+  });
+
+  it('records a module.entered engagement event on a fresh conversation only', async () => {
+    vi.mocked(resolveModuleSurface).mockResolvedValue({
+      agentSlug: 'coach',
+      agentId: 'agent-1',
+      conversationId: undefined, // nothing to resume → a fresh entry
+      scope: { moduleSlug: 'onboarding' },
+      rateLimitRpm: 3,
+    } satisfies ModuleSurface);
+    const res = await POST(req({ message: 'hi' }), ctx());
+    expect(res.status).toBe(200);
+    expect(recordModuleEngagement).toHaveBeenCalledWith({
+      userId: 'user-1',
+      moduleSlug: 'onboarding',
+      type: 'module.entered',
+    });
+    // Fire-and-forget: the stream is returned regardless of the emit.
+    expect(streamChat).toHaveBeenCalled();
   });
 
   it('404s when the module has no usable agent surface', async () => {
