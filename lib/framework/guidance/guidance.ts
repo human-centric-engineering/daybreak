@@ -69,6 +69,9 @@ export async function loadGuidance(
   // Advisory "related places" overlay (f-overlays, F9): fill each move's `related` slot from node
   // similarity, STRICTLY downstream of the (already-computed) availability — it decorates moves and
   // never feeds eligibility. Keyed on the current published version; empty when nothing is embedded.
+  // (The version is re-read here rather than threaded from `assemble`; a republish+re-embed landing
+  // between the two reads could key `related` to the newer version — harmless, since `related` is
+  // advisory and a nodeKey absent from the narrated graph is simply not surfaced.)
   const version = await getPublishedMapVersion(key.graphSlug);
   const moves =
     version === null ? ranked : await enrichMovesWithRelated(key.graphSlug, version, ranked);

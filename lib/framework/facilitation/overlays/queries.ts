@@ -17,9 +17,10 @@ export async function countNodeEmbeddings(graphSlug: string, version: number): P
  * `framework_node_embedding`: both operands are stored vectors from the same sync run (one model, the
  * fixed `vector(1536)` column), so there is no fresh query embedding and the knowledge-search
  * model/dimension drift-guard does not apply. Excludes the node itself and gates on `maxDistance` so a
- * node with no genuine neighbour returns fewer (or none) rather than the "least dissimilar" node. F9:
- * this is read strictly into the advisory overlay — it never touches eligibility. Returns `[]` when the
- * node has no embedding row (graceful).
+ * node with no genuine neighbour returns fewer (or none) rather than the "least dissimilar" node. Ties
+ * break by `nodeKey` ascending so the advisory output is reproducible (matching `ranking.ts`). F9: this
+ * is read strictly into the advisory overlay — it never touches eligibility. Returns `[]` when the node
+ * has no embedding row (graceful).
  */
 export async function findRelatedNodes(
   graphSlug: string,
@@ -37,7 +38,7 @@ export async function findRelatedNodes(
         AND o."nodeKey" <> s."nodeKey"
       WHERE s."graphSlug" = $1 AND s."version" = $2 AND s."nodeKey" = $3
         AND (o.embedding <=> s.embedding) < $4
-      ORDER BY (o.embedding <=> s.embedding) ASC
+      ORDER BY (o.embedding <=> s.embedding) ASC, o."nodeKey" ASC
       LIMIT $5`,
     graphSlug,
     version,
