@@ -22,6 +22,7 @@
 
 import { prisma } from '@/lib/db/client';
 import { getFacilitationBindingByRole } from '@/lib/framework/facilitation/agents/binding-queries';
+import { isRoleAllowedAtStage } from '@/lib/framework/facilitation/policies/gating';
 
 /** The `AiConversation.contextType` a facilitation surface's conversation is tagged with. */
 export const FACILITATION_SURFACE_CONTEXT_TYPE = 'facilitation';
@@ -52,6 +53,12 @@ export async function resolveFacilitationSurface(
   userId: string,
   role: string
 ): Promise<FacilitationSurface | null> {
+  // Relevance/maturity gating (f-policies t-2): a policy may restrict which roles a user can reach
+  // given their journey stage/region. Disallowed → no surface (→ 404), same as an unbound seat.
+  // Checked first: fail-open (no policies) is one cheap query, and a denied role must 404 exactly
+  // like an unbound one (don't leak that the seat exists but is gated).
+  if (!(await isRoleAllowedAtStage(userId, role))) return null;
+
   const binding = await getFacilitationBindingByRole(role);
   if (
     binding === null ||

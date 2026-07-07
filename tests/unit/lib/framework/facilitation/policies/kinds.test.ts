@@ -57,6 +57,41 @@ describe('assertValidFacilitationPolicy', () => {
   });
 });
 
+describe('assertValidFacilitationPolicy — relevance_gating (t-2)', () => {
+  const valid = {
+    graphSlug: 'onboarding-map',
+    match: { stage: 'beginner' },
+    allowedRoles: ['onboarding', 'orientation'],
+  };
+
+  it('accepts a well-formed relevance_gating policy', () => {
+    expect(() => assertValidFacilitationPolicy('relevance_gating', valid)).not.toThrow();
+  });
+
+  it('defaults match to {} (whole-graph) when omitted', () => {
+    const result = assertValidFacilitationPolicy('relevance_gating', {
+      graphSlug: 'g',
+      allowedRoles: ['state'],
+    });
+    expect(result.payload).toMatchObject({ match: {} });
+  });
+
+  it('rejects an allowedRoles entry that is not a facilitation role', () => {
+    expect(() =>
+      assertValidFacilitationPolicy('relevance_gating', { ...valid, allowedRoles: ['made_up'] })
+    ).toThrow(ValidationError);
+  });
+
+  it('rejects a missing graphSlug or an empty allowedRoles', () => {
+    expect(() =>
+      assertValidFacilitationPolicy('relevance_gating', { match: {}, allowedRoles: ['state'] })
+    ).toThrow(ValidationError);
+    expect(() =>
+      assertValidFacilitationPolicy('relevance_gating', { graphSlug: 'g', allowedRoles: [] })
+    ).toThrow(ValidationError);
+  });
+});
+
 describe('facilitationPolicySchema (the discriminated union)', () => {
   it('rejects a mismatched kind/payload at the schema level', () => {
     expect(

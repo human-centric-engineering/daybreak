@@ -16,10 +16,14 @@ vi.mock('@/lib/db/client', () => ({
 vi.mock('@/lib/framework/facilitation/agents/binding-queries', () => ({
   getFacilitationBindingByRole: vi.fn(),
 }));
+vi.mock('@/lib/framework/facilitation/policies/gating', () => ({
+  isRoleAllowedAtStage: vi.fn(),
+}));
 
 import { resolveFacilitationSurface } from '@/lib/framework/facilitation/agents/surface';
 import { prisma } from '@/lib/db/client';
 import { getFacilitationBindingByRole } from '@/lib/framework/facilitation/agents/binding-queries';
+import { isRoleAllowedAtStage } from '@/lib/framework/facilitation/policies/gating';
 
 const agent = (over: Record<string, unknown> = {}) => ({
   id: 'agent-1',
@@ -41,6 +45,8 @@ const binding = (over: Record<string, unknown> = {}) => ({
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(prisma.aiConversation.findFirst).mockResolvedValue(null);
+  // Default: relevance gating allows (fail-open). The gating-specific test overrides this.
+  vi.mocked(isRoleAllowedAtStage).mockResolvedValue(true);
   // Default: the bound agent is public + no rate override.
   vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue({
     visibility: 'public',
@@ -60,6 +66,12 @@ describe('resolveFacilitationSurface', () => {
     });
     // Decision 4: facilitation carries no scope map, unlike the module surface.
     expect(surface).not.toHaveProperty('scope');
+  });
+
+  it('relevance gating denies the role → no surface (→ null), before any binding lookup', async () => {
+    vi.mocked(isRoleAllowedAtStage).mockResolvedValue(false);
+    expect(await resolveFacilitationSurface('user-1', 'synopsis')).toBeNull();
+    expect(getFacilitationBindingByRole).not.toHaveBeenCalled(); // gated before the binding read
   });
 
   it('gates on visibility — an internal (default) bound agent yields no surface (→ null)', async () => {

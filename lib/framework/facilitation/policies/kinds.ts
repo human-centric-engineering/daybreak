@@ -13,6 +13,7 @@
 
 import { z } from 'zod';
 import { ValidationError } from '@/lib/api/errors';
+import { isFacilitationRole } from '@/lib/framework/facilitation/agents/roles';
 
 /**
  * The declared policy kinds — the single vocabulary that MUST stay in lockstep across three
@@ -21,7 +22,7 @@ import { ValidationError } from '@/lib/api/errors';
  * so the const can't go stale; (3) is a migration the author writes (a union member the CHECK
  * lacks would let Zod pass a write the DB then rejects — so extend the CHECK in the same task).
  */
-export const FACILITATION_POLICY_KINDS = ['auto_approval'] as const;
+export const FACILITATION_POLICY_KINDS = ['auto_approval', 'relevance_gating'] as const;
 export type FacilitationPolicyKind = (typeof FACILITATION_POLICY_KINDS)[number];
 
 /**
@@ -42,12 +43,50 @@ const autoApprovalPolicySchema = z.object({
   payload: autoApprovalPayloadSchema,
 });
 
+/** A declared facilitation seat (validated against `FACILITATION_ROLES`) — a typo can't silently
+ *  narrow a gate's allow-list. */
+const facilitationRoleSchema = z
+  .string()
+  .refine(isFacilitationRole, { message: 'Not a facilitation role' });
+
+/**
+ * Relevance/maturity gating (spec §5.5, F14 · f-policies t-2) — "stage/region → allowed roles".
+ * A policy is GRAPH-SCOPED (`graphSlug`): it gates which facilitation roles a user may reach on
+ * that map given where they are in it. `match` selects a position (an empty `match` = the whole
+ * graph); `allowedRoles` is the roles permitted when the policy applies. Enforced at
+ * `resolveFacilitationSurface` — a role not in an applicable policy's `allowedRoles` yields no
+ * surface (→ 404). Fail-open: with no applicable policy, all roles are allowed.
+ */
+export const relevanceGatingPayloadSchema = z
+  .object({
+    graphSlug: z.string().min(1),
+    match: z
+      .object({
+        stage: z.string().min(1).optional(),
+        region: z.string().min(1).optional(),
+      })
+      .strict()
+      .default({}),
+    allowedRoles: z.array(facilitationRoleSchema).min(1),
+  })
+  .strict();
+
+export type RelevanceGatingPayload = z.infer<typeof relevanceGatingPayloadSchema>;
+
+const relevanceGatingPolicySchema = z.object({
+  kind: z.literal('relevance_gating'),
+  payload: relevanceGatingPayloadSchema,
+});
+
 /**
  * The discriminated union over every policy kind — validates that `payload` matches `kind`, and
- * rejects unknown kinds (the forward-compat guard). A single member today (the *pattern* is the
- * commitment); each later kind adds a member here.
+ * rejects unknown kinds (the forward-compat guard). Each kind adds a member here (and a value to
+ * the migration's `kind` CHECK + `FACILITATION_POLICY_KINDS`, kept in lockstep by the drift guard).
  */
-export const facilitationPolicySchema = z.discriminatedUnion('kind', [autoApprovalPolicySchema]);
+export const facilitationPolicySchema = z.discriminatedUnion('kind', [
+  autoApprovalPolicySchema,
+  relevanceGatingPolicySchema,
+]);
 
 export type FacilitationPolicyInput = z.infer<typeof facilitationPolicySchema>;
 
