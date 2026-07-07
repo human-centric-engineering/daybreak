@@ -12,6 +12,7 @@
 import type { ModuleAgentBinding } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { NotFoundError } from '@/lib/api/errors';
+import { getRegisteredModule } from '@/lib/framework/modules/registry';
 
 /** A binding enriched with the bound agent's display fields (or `null` if gone). */
 export interface ModuleAgentBindingView extends ModuleAgentBinding {
@@ -59,4 +60,31 @@ export async function listModuleBindings(moduleSlug: string): Promise<ModuleAgen
   const byId = new Map(agents.map((a) => [a.id, a]));
 
   return bindings.map((b) => ({ ...b, agent: byId.get(b.agentId) ?? null }));
+}
+
+/** The agent seats a module declares in code, plus whether its code is still registered. */
+export interface ModuleAgentRoles {
+  /** false ⇒ the module's code is removed, so it declares no bindable seats right now. */
+  registered: boolean;
+  /** The `agentRoles` the registered `ModuleDefinition` declares (the bindable seats). */
+  roles: string[];
+}
+
+/**
+ * The bindable agent seats of a module — read from the in-memory code registry
+ * (`ModuleDefinition.agentRoles`), the same source the bind service validates a role
+ * against, NOT the DB row (which carries no roles). Backs the Agents tab's role picker.
+ * An unknown module slug is a 404 (consistent with the other module reads); a module whose
+ * code was removed resolves to `{ registered: false, roles: [] }` (its row exists, but there
+ * are no seats to bind until the code returns).
+ */
+export async function getModuleAgentRoles(moduleSlug: string): Promise<ModuleAgentRoles> {
+  const moduleRow = await prisma.module.findUnique({
+    where: { slug: moduleSlug },
+    select: { id: true },
+  });
+  if (!moduleRow) throw new NotFoundError(`Module "${moduleSlug}" not found`);
+
+  const def = getRegisteredModule(moduleSlug);
+  return { registered: def !== undefined, roles: def?.agentRoles ?? [] };
 }

@@ -1,10 +1,10 @@
 /**
- * Integration test — Framework Module detail page (f-ops-views t-2 / t-3).
+ * Integration test — Framework Module detail page (f-ops-views t-2 / t-3 / t-4a).
  *
- * The server component fans out three parallel fetches (identity via the single-module
- * `GET /modules/[slug]`, config, versions) and renders the tabbed detail; a module that
- * doesn't exist 404s, and the config/versions fetches degrade to empty state (rather than
- * throwing) on failure.
+ * The server component fans out parallel fetches (identity via the single-module
+ * `GET /modules/[slug]`, config, versions, agent bindings, agent-roles) and renders the
+ * tabbed detail; a module that doesn't exist 404s, and the non-identity fetches degrade to
+ * empty state (rather than throwing) on failure.
  *
  * @see app/admin/framework/modules/[slug]/page.tsx
  */
@@ -66,13 +66,18 @@ interface Outcomes {
   reject?: boolean;
 }
 
-// Classify a request path: config / versions are sub-paths of the bare module path, so
-// check the more specific segments first; anything else is the single-module identity GET.
-function classify(path: string): 'config' | 'versions' | 'identity' {
+// Classify a request path: config / versions / agents / agent-roles are sub-paths of the
+// bare module path, so check the more specific segments first; anything else is the
+// single-module identity GET. ('/agent-roles' and '/agents' are distinct substrings.)
+function classify(path: string): 'config' | 'versions' | 'agentRoles' | 'agents' | 'identity' {
   if (path.includes('/config')) return 'config';
   if (path.includes('/versions')) return 'versions';
+  if (path.includes('/agent-roles')) return 'agentRoles';
+  if (path.includes('/agents')) return 'agents';
   return 'identity';
 }
+
+const AGENT_ROLES = { registered: true, roles: ['companion'] };
 
 async function setup(o: Outcomes = {}) {
   const {
@@ -89,7 +94,13 @@ async function setup(o: Outcomes = {}) {
 
   vi.mocked(serverFetch).mockImplementation(async (path: string) => {
     if (reject) throw new Error('network down');
-    const ok = { config: configOk, versions: versionsOk, identity: identityOk }[classify(path)];
+    const ok = {
+      config: configOk,
+      versions: versionsOk,
+      agentRoles: true,
+      agents: true,
+      identity: identityOk,
+    }[classify(path)];
     return { ok, __path: path } as unknown as Response;
   });
 
@@ -99,6 +110,10 @@ async function setup(o: Outcomes = {}) {
         return { success: configSuccess, data: CONFIG };
       case 'versions':
         return { success: versionsSuccess, data: VERSIONS };
+      case 'agentRoles':
+        return { success: true, data: AGENT_ROLES };
+      case 'agents':
+        return { success: true, data: [] };
       default:
         return { success: identitySuccess, data: IDENTITY };
     }
@@ -122,6 +137,7 @@ describe('FrameworkModuleDetailPage (server component)', () => {
     expect(screen.getByText('Api Key')).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Versions' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Settings' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Agents' })).toBeInTheDocument();
   });
 
   it('still renders when config and versions fail (degraded, not thrown)', async () => {

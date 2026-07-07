@@ -16,10 +16,12 @@ const db = vi.hoisted(() => ({
   moduleAgentBinding: { findMany: vi.fn() },
   aiAgent: { findMany: vi.fn() },
 }));
+const registry = vi.hoisted(() => ({ getRegisteredModule: vi.fn() }));
 
 vi.mock('@/lib/db/client', () => ({ prisma: db }));
+vi.mock('@/lib/framework/modules/registry', () => registry);
 
-import { listModuleBindings } from '@/lib/framework/modules/bindings/queries';
+import { listModuleBindings, getModuleAgentRoles } from '@/lib/framework/modules/bindings/queries';
 import { NotFoundError } from '@/lib/api/errors';
 
 function binding(over: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
@@ -116,5 +118,37 @@ describe('listModuleBindings', () => {
     });
     // Gone entirely (hard-deleted → FK cascade normally removes it) → null.
     expect(rows.find((r) => r.id === 'b3')?.agent).toBeNull();
+  });
+});
+
+describe('getModuleAgentRoles', () => {
+  it('404s for an unknown module', async () => {
+    db.module.findUnique.mockResolvedValue(null);
+    await expect(getModuleAgentRoles('ghost')).rejects.toBeInstanceOf(NotFoundError);
+    expect(registry.getRegisteredModule).not.toHaveBeenCalled();
+  });
+
+  it('returns the declared seats when the module is registered', async () => {
+    db.module.findUnique.mockResolvedValue({ id: 'm1' });
+    registry.getRegisteredModule.mockReturnValue({
+      slug: 'reading',
+      agentRoles: ['companion', 'coach'],
+    });
+    await expect(getModuleAgentRoles('reading')).resolves.toEqual({
+      registered: true,
+      roles: ['companion', 'coach'],
+    });
+  });
+
+  it('returns registered:false with no seats when the code was removed (row still exists)', async () => {
+    db.module.findUnique.mockResolvedValue({ id: 'm1' });
+    registry.getRegisteredModule.mockReturnValue(undefined);
+    await expect(getModuleAgentRoles('reading')).resolves.toEqual({ registered: false, roles: [] });
+  });
+
+  it('treats a registered module with no declared agentRoles as an empty seat list', async () => {
+    db.module.findUnique.mockResolvedValue({ id: 'm1' });
+    registry.getRegisteredModule.mockReturnValue({ slug: 'reading' });
+    await expect(getModuleAgentRoles('reading')).resolves.toEqual({ registered: true, roles: [] });
   });
 });

@@ -22,6 +22,8 @@ import Link from 'next/link';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type {
+  ModuleAgentBindingListItem,
+  ModuleAgentRolesView,
   ModuleConfigFormView,
   ModuleSettingsView,
   ModuleVersionsView,
@@ -29,6 +31,7 @@ import type {
 import { ConfigTab } from '@/components/admin/framework/module-detail/config-tab';
 import { VersionsTab } from '@/components/admin/framework/module-detail/versions-tab';
 import { SettingsTab } from '@/components/admin/framework/module-detail/settings-tab';
+import { AgentsTab } from '@/components/admin/framework/module-detail/agents-tab';
 
 // Mirrors `modules-table.tsx`'s statusVariant (2 uses — the Settings tab renders its status
 // as an editable Select, not a badge, so this stays at 2; extract to a shared
@@ -51,9 +54,20 @@ interface ModuleDetailProps {
   /** null when the config fetch failed (distinct from a genuinely unregistered module). */
   config: ModuleConfigFormView | null;
   versions: ModuleVersionsView;
+  /** The module's agent bindings (07's shipped list), stitched with agent display fields. */
+  agentBindings: ModuleAgentBindingListItem[];
+  /** The bindable seats the module declares + whether its code is registered. */
+  agentRoles: ModuleAgentRolesView;
 }
 
-export function ModuleDetail({ slug, identity, config, versions }: ModuleDetailProps) {
+export function ModuleDetail({
+  slug,
+  identity,
+  config,
+  versions,
+  agentBindings,
+  agentRoles,
+}: ModuleDetailProps) {
   // Newest version is always the live config (no draft/published split); 0 before any save.
   const currentVersion = versions.versions[0]?.version ?? 0;
   // Re-key the Config tab on its own data, so a save/restore re-initialises the form after
@@ -84,6 +98,18 @@ export function ModuleDetail({ slug, identity, config, versions }: ModuleDetailP
       value: 'settings',
       label: 'Settings',
       node: <SettingsTab key={settingsKey} settings={identity} />,
+    },
+    {
+      value: 'agents',
+      label: 'Agents',
+      node: (
+        <AgentsTab
+          slug={slug}
+          registered={agentRoles.registered}
+          roles={agentRoles.roles}
+          bindings={agentBindings}
+        />
+      ),
     },
   ];
 

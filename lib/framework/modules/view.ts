@@ -92,3 +92,39 @@ export interface ModuleVersionsView {
   versions: ModuleVersionSummary[];
   nextCursor: string | null;
 }
+
+/**
+ * A module's agent binding as the Agents tab consumes it (`GET /modules/[slug]/agents`) —
+ * the server `ModuleAgentBindingView` with its `DateTime`s narrowed to ISO strings and the
+ * opaque `config` override narrowed to a plain object (the bind schema stores a JSON object
+ * or null). `agent` is the stitched display fields, or `null` when the bound agent was
+ * removed (a stale binding surfaced for cleanup rather than silently dropped).
+ */
+export interface ModuleAgentBindingListItem {
+  id: string;
+  agentId: string;
+  /** The declared seat this agent fills. */
+  role: string;
+  /** The module's single lead seat (≤ 1 per module). */
+  isPrimary: boolean;
+  /** Opaque per-binding override, or null. */
+  config: Record<string, unknown> | null;
+  /** ISO 8601 string (a JSON-serialized `DateTime`). */
+  createdAt: string;
+  updatedAt: string;
+  agent: {
+    id: string;
+    name: string;
+    slug: string;
+    isActive: boolean;
+    /** Non-null ⇒ the agent was soft-deleted (tombstoned) after being bound. */
+    deletedAt: string | null;
+  } | null;
+}
+
+/** The `GET /modules/[slug]/agent-roles` payload — the bindable seats the module declares. */
+export interface ModuleAgentRolesView {
+  /** false ⇒ the module's code is removed, so no seats are bindable right now. */
+  registered: boolean;
+  roles: string[];
+}
