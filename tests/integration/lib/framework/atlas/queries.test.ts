@@ -170,6 +170,18 @@ describe('listPublishedMaps', () => {
     expect(logger.error).toHaveBeenCalledTimes(1); // the corrupt map is logged
   });
 
+  it('logs an orphaned publishedVersionId and reports the map unpublished', async () => {
+    p.facilitationGraph.findMany.mockResolvedValue([
+      { slug: 'orphan', name: 'Orphan', publishedVersionId: 'vGone' },
+    ] as never);
+    p.facilitationGraphVersion.findMany.mockResolvedValue([] as never); // the referenced row is gone
+
+    const result = await listPublishedMaps();
+
+    expect(result[0]).toMatchObject({ version: null, definition: null });
+    expect(logger.error).toHaveBeenCalledTimes(1); // a broken FK is surfaced, not silently swallowed
+  });
+
   it('short-circuits with no graphs', async () => {
     p.facilitationGraph.findMany.mockResolvedValue([] as never);
     expect(await listPublishedMaps()).toEqual([]);

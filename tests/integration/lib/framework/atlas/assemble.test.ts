@@ -239,6 +239,48 @@ describe('assembleComposition', () => {
     expect(maps[0].nodes).toHaveLength(2);
   });
 
+  it('builds a capability entity but NO dangling edge for a code module with no DB row', async () => {
+    seedDeployment();
+    // `ghost` is registered in code (has a capability) but is absent from listModules() — e.g. a
+    // boot sync that has not created its `framework_module` row yet.
+    const ghostDef = {
+      slug: 'ghost',
+      description: 'x',
+      agentRoles: [],
+      capabilities: [{ slug: 'do_thing' }],
+    };
+    readers.getRegisteredModules.mockReturnValue([readingDef, ghostDef]);
+
+    const { capabilities, edges } = await assembleComposition();
+
+    // The capability is a real, code-owned entity...
+    expect(capabilities.find((c) => c.id === 'ghost__do_thing')).toMatchObject({ kind: 'module' });
+    // ...but no module_capability edge points at the absent `ghost` module node.
+    const capEdges = edgesOfKind(edges, 'module_capability');
+    expect(capEdges.some((e) => e.source.id === 'ghost')).toBe(false);
+    expect(capEdges.some((e) => e.source.id === 'reading')).toBe(true); // the present module still edges
+  });
+
+  it('drops a knowledge grant with a name but no slug from BOTH entities and edges', async () => {
+    seedDeployment();
+    readers.listAllModuleKnowledgeGrants.mockResolvedValue([
+      {
+        moduleId: 'm1',
+        kind: 'document',
+        entityId: 'halfDoc',
+        name: 'Half',
+        slug: null,
+        status: 'ready',
+      },
+    ]);
+
+    const { knowledge, edges } = await assembleComposition();
+
+    // Name-without-slug must not become an entity NOR a dangling edge (the guards are symmetric).
+    expect(knowledge).toHaveLength(0);
+    expect(edgesOfKind(edges, 'module_knowledge')).toHaveLength(0);
+  });
+
   it('returns a valid empty-ish projection for a fresh deployment', async () => {
     readers.listModules.mockResolvedValue([]);
     readers.getRegisteredModule.mockReturnValue(undefined);

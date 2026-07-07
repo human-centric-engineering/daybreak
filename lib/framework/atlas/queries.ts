@@ -193,7 +193,21 @@ export async function listPublishedMaps(): Promise<AtlasPublishedMap[]> {
 
   return graphs.map((g): AtlasPublishedMap => {
     const published = g.publishedVersionId ? byId.get(g.publishedVersionId) : undefined;
-    if (!published) return { slug: g.slug, name: g.name, version: null, definition: null };
+    if (!published) {
+      // A `publishedVersionId` that points at a missing version row is a broken FK, not a genuinely
+      // unpublished map — surface it (the corrupt-blob branch below logs too) rather than silently
+      // reporting "unpublished". A truly-unpublished graph (null id) is expected and stays quiet.
+      if (g.publishedVersionId !== null) {
+        logger.error(
+          'atlas: published version row missing for a graph — reporting as unpublished',
+          {
+            slug: g.slug,
+            publishedVersionId: g.publishedVersionId,
+          }
+        );
+      }
+      return { slug: g.slug, name: g.name, version: null, definition: null };
+    }
 
     const parsed = mapDefinitionSchema.safeParse(published.definition);
     if (!parsed.success) {

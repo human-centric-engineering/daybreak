@@ -215,6 +215,12 @@ affordance.
 - **Engagement overlay toggles** — `f-engagement` (08)'s heat/replay overlays on the atlas canvas (a
   future cross-feature integration; 08 owns the overlay data).
 - **Lazy-load on unfold** — if a deployment outgrows the single full-projection call (open question 4).
+- **Shared `stitchAgents` / `stitchById` helper** (t-1 `/code-review`) — the collect-ids →
+  `findMany where id in` → `Map` → `?? null` batch-stitch now recurs across the atlas aggregate
+  readers and the shipped per-module + facilitation readers (agent-stitch is byte-identical in ≥4
+  sites). A shared helper in `lib/framework/shared/` is the rule-of-three extraction; deferred out of
+  t-1 because it touches shipped readers (`modules/bindings`, `facilitation/agents/binding-queries`)
+  and belongs in its own refactor, not the atlas anchor PR.
 
 ## Reference
 

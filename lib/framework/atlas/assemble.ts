@@ -17,6 +17,7 @@ import { listModules } from '@/lib/framework/modules/queries';
 import { getRegisteredModule, getRegisteredModules } from '@/lib/framework/modules/registry';
 import { moduleCapabilitySlug } from '@/lib/framework/modules/capabilities/namespace';
 import { listSlotDefinitions } from '@/lib/framework/data-slots/queries';
+import { SLOT_SCOPE, SLOT_SCOPE_MODULE_PREFIX } from '@/lib/framework/data-slots/vocabulary';
 import { listFacilitationBindings } from '@/lib/framework/facilitation/agents/binding-queries';
 import { FACILITATION_ROLE_VALUES } from '@/lib/framework/facilitation/agents/roles';
 import { listFacilitationPolicies } from '@/lib/framework/facilitation/policies/policy-queries';
@@ -34,16 +35,20 @@ import type {
   AtlasKnowledge,
   AtlasModule,
   AtlasSlot,
+  AtlasWorkflow,
   CompositionProjection,
 } from '@/lib/framework/atlas/view';
 
-/** The singleton id of the facilitation node (there is exactly one). */
+/** The singleton id of the facilitation node (there is exactly one). Safe as a bare literal — it is
+ *  the id under the `facilitation` endpoint *type*, which is type-discriminated from module/agent ids. */
 const FACILITATION_ID = 'facilitation';
 
-/** A slot owned by a module declares `scope = "module:<slug>"`; this returns the `<slug>` or null. */
+/** A slot owned by a module declares `scope = "module:<slug>"`; this returns the `<slug>` or null.
+ *  Uses the vocabulary's own prefix constant so the parse can't drift from the `moduleSlotScope` minter. */
 function moduleSlugOfScope(scope: string): string | null {
-  const prefix = 'module:';
-  return scope.startsWith(prefix) ? scope.slice(prefix.length) : null;
+  return scope.startsWith(SLOT_SCOPE_MODULE_PREFIX)
+    ? scope.slice(SLOT_SCOPE_MODULE_PREFIX.length)
+    : null;
 }
 
 /** The projection id of a knowledge grant (documents + tags share an id space otherwise). */
@@ -119,7 +124,8 @@ export async function assembleComposition(): Promise<CompositionProjection> {
   for (const b of agentBindings) if (b.agent) rememberAgent(b.agent);
   for (const b of facilitationBindings) if (b.agent) rememberAgent(b.agent);
 
-  const workflowsById = new Map<string, AtlasWorkflowLike>();
+  // The stitched workflow shape (id/name/slug/isActive/hasPublishedVersion) IS `AtlasWorkflow`.
+  const workflowsById = new Map<string, AtlasWorkflow>();
   for (const b of workflowBindings) {
     if (b.workflow && !workflowsById.has(b.workflow.id))
       workflowsById.set(b.workflow.id, b.workflow);
@@ -187,7 +193,9 @@ export async function assembleComposition(): Promise<CompositionProjection> {
 
   for (const g of knowledgeGrants) {
     const slug = slugByModuleId.get(g.moduleId);
-    if (!slug || g.name === null) continue;
+    // Mirror the ENTITY guard (name AND slug non-null) exactly — otherwise a grant whose stitched
+    // core row has a name but no slug would emit an edge to a knowledge node that was never created.
+    if (!slug || g.name === null || g.slug === null) continue;
     edges.push({
       kind: 'module_knowledge',
       source: { type: 'module', id: slug },
@@ -207,8 +215,12 @@ export async function assembleComposition(): Promise<CompositionProjection> {
     }
   }
 
-  // Module-declared capabilities (code registry → namespaced slug).
+  // Module-declared capabilities (code registry → namespaced slug). Guard the module endpoint on
+  // `moduleSlugs` like every other module-source edge: a module registered in code but with no
+  // `framework_module` row yet (pre-sync / a failed boot sync) is absent from `modules[]`, so its
+  // edge would dangle. The capability ENTITY is still built above (it is a real, code-owned tool).
   for (const def of getRegisteredModules()) {
+    if (!moduleSlugs.has(def.slug)) continue;
     for (const cap of def.capabilities ?? []) {
       edges.push({
         kind: 'module_capability',
@@ -230,7 +242,7 @@ export async function assembleComposition(): Promise<CompositionProjection> {
     });
   }
   for (const s of slotDefs) {
-    if (s.scope === 'facilitation') {
+    if (s.scope === SLOT_SCOPE.facilitation) {
       edges.push({
         kind: 'facilitation_slot',
         source: { type: 'facilitation', id: FACILITATION_ID },
@@ -274,13 +286,7 @@ export async function assembleComposition(): Promise<CompositionProjection> {
     modules,
     facilitation,
     agents: [...agentsById.values()],
-    workflows: [...workflowsById.values()].map((w) => ({
-      id: w.id,
-      name: w.name,
-      slug: w.slug,
-      isActive: w.isActive,
-      hasPublishedVersion: w.hasPublishedVersion,
-    })),
+    workflows: [...workflowsById.values()],
     slots,
     capabilities: [...capabilitiesById.values()],
     knowledge: [...knowledgeById.values()],
@@ -298,13 +304,4 @@ export async function assembleComposition(): Promise<CompositionProjection> {
     })),
     edges,
   };
-}
-
-/** The stitched-workflow shape carried on a binding (local — mirrors the reader's inline type). */
-interface AtlasWorkflowLike {
-  id: string;
-  name: string;
-  slug: string;
-  isActive: boolean;
-  hasPublishedVersion: boolean;
 }
