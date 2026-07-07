@@ -540,3 +540,34 @@ startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registra
   evaluation wiring") — a candidate seam. Sibling to [[#B22 · Size "typed kinds under one table" by each kind's enforcement machinery, not one-per-kind|B22]]
   (size by the real seam) applied at the _feature_ grain, and to the deferral discipline in
   [[#B20 · Resolve a plan's open design questions inline, not via a separate refinement pass|B20]]. _Status: open._
+
+### B24 · Copying a workflow-shaped core primitive into a new domain: the adapter must re-check what the primitive's contract silently assumes about the _shape_ of its inputs
+
+- **Discovery.** [[f-eval]] t-2 reused Sunrise-core `runSupervisorAssessment` — built for workflow
+  executions (`stepOutputs`/`inputData`/`outputData`) — over a framework _conversation_ by projecting
+  turns into its shape. Type-checking passed and the tests (with the core mocked) were green, but
+  `/code-review` surfaced three defects that only bite because the _input shape_ differs from what the
+  core's callers usually feed it: **(1)** the core's citation validator does
+  `serialiseStepOutput(stepOutput).includes(quote)`, and `serialiseStepOutput` JSON-stringifies an
+  **object** (escaping newlines/quotes) but returns a **string** verbatim — so passing turn objects
+  made the judge's natural prose quotes fail the substring check, silently dropping weaknesses and
+  (with `minWeaknesses:1`) **downgrading the verdict**; the workflow path rarely hits this because its
+  step outputs are often already strings. **(2)** `includeStepOutputs:'all'` (chosen because
+  "conversations are short") removed the per-step byte cap the workflow path relies on to avoid
+  overflowing the judge's context. **(3)** anchoring the one conversation-level verdict on the
+  _terminal_ turn's row (a per-turn store) orphaned prior verdicts when the conversation later grew —
+  re-anchored on the stable _first_ turn.
+- **Impact.** Positive — all three fixed in a review-fix commit before merge — but each was invisible to
+  type-check and to core-mocked unit tests. They were correctness bugs hiding in the _seam_ between the
+  copied primitive and the new domain's data.
+- **Feedback.** When a feature reuses a core primitive built for a different subject (workflow → here a
+  conversation), the plan/build should include an explicit **"contract re-derivation" step**: read the
+  primitive's validators and serialisers and ask what they assume about input _shape_ (string vs
+  object, size caps, one-vs-many anchor), not just its type signature. A green type-check on a copied
+  primitive is the most dangerous kind of green — it proves the shapes _compile_, not that the
+  primitive's silent assumptions still hold. Corollary: don't unit-test such an adapter with the core
+  fully mocked and stop there — either exercise the real primitive over representative data, or add a
+  test asserting the specific contract (here: "a prose quote spanning a newline still validates").
+  Sibling to [[#B18 · A precedent borrowed for its shape can carry a rationale that doesn't transfer — re-derive it from the new domain|B18]]
+  (a borrowed _precedent_ can carry a rationale that doesn't transfer; this is the same hazard for a
+  borrowed _primitive_). _Status: open._
