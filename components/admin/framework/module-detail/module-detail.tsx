@@ -36,6 +36,8 @@ import { SettingsTab } from '@/components/admin/framework/module-detail/settings
 import { AgentsTab } from '@/components/admin/framework/module-detail/agents-tab';
 import { WorkflowsTab } from '@/components/admin/framework/module-detail/workflows-tab';
 import { KnowledgeTab } from '@/components/admin/framework/module-detail/knowledge-tab';
+import { StatsTab } from '@/components/admin/framework/module-detail/stats-tab';
+import type { ModuleStats } from '@/lib/framework/engagement';
 
 // Mirrors `modules-table.tsx`'s statusVariant (2 uses — the Settings tab renders its status
 // as an editable Select, not a badge, so this stays at 2; extract to a shared
@@ -66,6 +68,8 @@ interface ModuleDetailProps {
   workflowBindings: ModuleWorkflowBindingListItem[] | null;
   /** The module's knowledge scope (07's read); `null` when that fetch failed (not empty). */
   knowledgeScope: ModuleKnowledgeScopeView | null;
+  /** The module's engagement stats (f-engagement t-3a); `null` when that fetch failed. */
+  stats: ModuleStats | null;
 }
 
 export function ModuleDetail({
@@ -77,6 +81,7 @@ export function ModuleDetail({
   agentRoles,
   workflowBindings,
   knowledgeScope,
+  stats,
 }: ModuleDetailProps) {
   // Newest version is always the live config (no draft/published split); 0 before any save.
   const currentVersion = versions.versions[0]?.version ?? 0;
@@ -123,6 +128,11 @@ export function ModuleDetail({
       value: 'knowledge',
       label: 'Knowledge',
       node: <KnowledgeTab slug={slug} scope={knowledgeScope} />,
+    },
+    {
+      value: 'stats',
+      label: 'Stats',
+      node: <StatsTab stats={stats} />,
     },
   ];
 

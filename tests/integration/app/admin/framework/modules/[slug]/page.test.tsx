@@ -74,17 +74,39 @@ interface Outcomes {
 // single-module identity GET. ('/agent-roles' and '/agents' are distinct substrings.)
 function classify(
   path: string
-): 'config' | 'versions' | 'agentRoles' | 'agents' | 'workflows' | 'knowledge' | 'identity' {
+):
+  | 'config'
+  | 'versions'
+  | 'agentRoles'
+  | 'agents'
+  | 'workflows'
+  | 'knowledge'
+  | 'stats'
+  | 'identity' {
   if (path.includes('/config')) return 'config';
   if (path.includes('/versions')) return 'versions';
   if (path.includes('/agent-roles')) return 'agentRoles';
   if (path.includes('/agents')) return 'agents';
   if (path.includes('/workflows')) return 'workflows';
   if (path.includes('/knowledge')) return 'knowledge';
+  if (path.includes('/stats')) return 'stats';
   return 'identity';
 }
 
 const AGENT_ROLES = { registered: true, roles: ['companion'] };
+const STATS = {
+  moduleSlug: 'demo',
+  uniqueUsers: 0,
+  entries: 0,
+  completions: 0,
+  returningUsers: 0,
+  feedback: {
+    count: 0,
+    averageRating: null,
+    distribution: { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 },
+    recentComments: [],
+  },
+};
 
 async function setup(o: Outcomes = {}) {
   const {
@@ -110,6 +132,7 @@ async function setup(o: Outcomes = {}) {
       agents: bindingsOk,
       workflows: bindingsOk,
       knowledge: bindingsOk,
+      stats: bindingsOk,
       identity: identityOk,
     }[classify(path)];
     return { ok, __path: path } as unknown as Response;
@@ -129,6 +152,8 @@ async function setup(o: Outcomes = {}) {
         return { success: bindingsSuccess, data: [] };
       case 'knowledge':
         return { success: bindingsSuccess, data: { documents: [], tags: [] } };
+      case 'stats':
+        return { success: bindingsSuccess, data: STATS };
       default:
         return { success: identitySuccess, data: IDENTITY };
     }
@@ -155,6 +180,7 @@ describe('FrameworkModuleDetailPage (server component)', () => {
     expect(screen.getByRole('tab', { name: 'Agents' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Workflows' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Knowledge' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Stats' })).toBeInTheDocument();
   });
 
   it('still renders when config and versions fail (degraded, not thrown)', async () => {

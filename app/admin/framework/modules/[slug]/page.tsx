@@ -12,6 +12,7 @@ import type {
   ModuleVersionsView,
   ModuleWorkflowBindingListItem,
 } from '@/lib/framework/modules/view';
+import type { ModuleStats } from '@/lib/framework/engagement';
 import { logger } from '@/lib/logging';
 
 export const metadata: Metadata = {
@@ -142,6 +143,22 @@ async function getKnowledgeScope(slug: string): Promise<ModuleKnowledgeScopeView
   }
 }
 
+/** The module's engagement stats (f-engagement t-3a). Returns `null` on failure, so the
+ *  Stats tab shows "couldn't load" rather than a false all-zero picture. */
+async function getStats(slug: string): Promise<ModuleStats | null> {
+  try {
+    const res = await serverFetch(
+      `/api/v1/admin/framework/modules/${encodeURIComponent(slug)}/stats`
+    );
+    if (!res.ok) return null;
+    const body = await parseApiResponse<ModuleStats>(res);
+    return body.success ? body.data : null;
+  } catch (err) {
+    logger.error('framework module detail: stats fetch failed', err);
+    return null;
+  }
+}
+
 /**
  * Admin — Framework Module detail (f-ops-views t-2 / t-4a / t-4b / t-4c).
  *
@@ -158,16 +175,25 @@ export default async function FrameworkModuleDetailPage({
 }) {
   const { slug } = await params;
 
-  const [identity, config, versions, agentBindings, agentRoles, workflowBindings, knowledgeScope] =
-    await Promise.all([
-      getIdentity(slug),
-      getConfig(slug),
-      getVersions(slug),
-      getAgentBindings(slug),
-      getAgentRoles(slug),
-      getWorkflowBindings(slug),
-      getKnowledgeScope(slug),
-    ]);
+  const [
+    identity,
+    config,
+    versions,
+    agentBindings,
+    agentRoles,
+    workflowBindings,
+    knowledgeScope,
+    stats,
+  ] = await Promise.all([
+    getIdentity(slug),
+    getConfig(slug),
+    getVersions(slug),
+    getAgentBindings(slug),
+    getAgentRoles(slug),
+    getWorkflowBindings(slug),
+    getKnowledgeScope(slug),
+    getStats(slug),
+  ]);
 
   if (!identity) notFound();
 
@@ -181,6 +207,7 @@ export default async function FrameworkModuleDetailPage({
       agentRoles={agentRoles}
       workflowBindings={workflowBindings}
       knowledgeScope={knowledgeScope}
+      stats={stats}
     />
   );
 }
