@@ -1,17 +1,23 @@
 /**
- * Node-embedding read queries (f-overlays t-1/t-2). Mocks the DB client; proves the count is scoped to
- * the (graphSlug, version) pair, and the similarity query's params + row mapping.
+ * Node-embedding + nudge read queries (f-overlays t-1/t-2/t-3b). Mocks the DB client; proves the count
+ * is scoped to the (graphSlug, version) pair, the similarity query's params + row mapping, and the
+ * nudge-throttle read.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 vi.mock('@/lib/db/client', () => ({
-  prisma: { frameworkNodeEmbedding: { count: vi.fn() }, $queryRawUnsafe: vi.fn() },
+  prisma: {
+    frameworkNodeEmbedding: { count: vi.fn() },
+    frameworkJourneyNudge: { findMany: vi.fn() },
+    $queryRawUnsafe: vi.fn(),
+  },
 }));
 
 import {
   countNodeEmbeddings,
   findRelatedNodes,
+  listRecentlyNudgedJourneyIds,
 } from '@/lib/framework/facilitation/overlays/queries';
 import { prisma } from '@/lib/db/client';
 
@@ -45,5 +51,27 @@ describe('findRelatedNodes', () => {
   it('returns [] when the node has no neighbours within the threshold', async () => {
     vi.mocked(prisma.$queryRawUnsafe).mockResolvedValue([]);
     expect(await findRelatedNodes('primary', 4, 'lonely', 3, 0.6)).toEqual([]);
+  });
+});
+
+describe('listRecentlyNudgedJourneyIds', () => {
+  it('returns the set of journeys nudged since the cutoff', async () => {
+    vi.mocked(prisma.frameworkJourneyNudge.findMany).mockResolvedValue([
+      { journeyId: 'j2' },
+    ] as never);
+    const since = new Date('2026-07-01T00:00:00Z');
+
+    const set = await listRecentlyNudgedJourneyIds(['j1', 'j2'], since);
+    expect(set).toEqual(new Set(['j2']));
+    expect(prisma.frameworkJourneyNudge.findMany).toHaveBeenCalledWith({
+      where: { journeyId: { in: ['j1', 'j2'] }, nudgedAt: { gte: since } },
+      select: { journeyId: true },
+    });
+  });
+
+  it('short-circuits an empty input without a query', async () => {
+    const set = await listRecentlyNudgedJourneyIds([], new Date());
+    expect(set).toEqual(new Set());
+    expect(prisma.frameworkJourneyNudge.findMany).not.toHaveBeenCalled();
   });
 });
