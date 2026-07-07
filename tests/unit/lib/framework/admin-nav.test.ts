@@ -32,6 +32,17 @@ describe('initFrameworkNav', () => {
     expect(modules?.icon).toBeDefined();
   });
 
+  it('registers a Journeys item (f-ops-views t-5b)', () => {
+    initFrameworkNav();
+
+    const framework = getRegisteredNavSections().find((s) => s.title === 'Framework');
+    const journeys = framework?.items?.find((i) => i.href === '/admin/framework/journeys');
+    expect(journeys).toBeDefined();
+    expect(journeys?.label).toBe('Journeys');
+    expect(journeys?.description).toBeTruthy();
+    expect(journeys?.icon).toBeDefined();
+  });
+
   it('is idempotent by title (repeated calls do not duplicate the section)', () => {
     initFrameworkNav();
     initFrameworkNav();
