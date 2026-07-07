@@ -18,7 +18,6 @@ export const metadata: Metadata = {
 };
 
 const EMPTY_VERSIONS: ModuleVersionsView = { versions: [], nextCursor: null };
-const EMPTY_AGENT_ROLES: ModuleAgentRolesView = { registered: false, roles: [] };
 
 /**
  * The module's operator settings (identity + lifecycle window), read via the single-module
@@ -73,33 +72,41 @@ async function getVersions(slug: string): Promise<ModuleVersionsView> {
   }
 }
 
-/** The module's agent bindings (07's list). Degrades to an empty list. */
-async function getAgentBindings(slug: string): Promise<ModuleAgentBindingListItem[]> {
+/**
+ * The module's agent bindings (07's list). Returns `null` on a fetch failure — distinct from
+ * a successful empty list, so a transient error never renders as the false "no agents are
+ * bound yet" (which would invite re-binding an agent that is actually already bound).
+ */
+async function getAgentBindings(slug: string): Promise<ModuleAgentBindingListItem[] | null> {
   try {
     const res = await serverFetch(
       `/api/v1/admin/framework/modules/${encodeURIComponent(slug)}/agents`
     );
-    if (!res.ok) return [];
+    if (!res.ok) return null;
     const body = await parseApiResponse<ModuleAgentBindingListItem[]>(res);
-    return body.success ? body.data : [];
+    return body.success ? body.data : null;
   } catch (err) {
     logger.error('framework module detail: agent bindings fetch failed', err);
-    return [];
+    return null;
   }
 }
 
-/** The bindable seats the module declares. Degrades to "unregistered, no seats". */
-async function getAgentRoles(slug: string): Promise<ModuleAgentRolesView> {
+/**
+ * The bindable seats the module declares. Returns `null` on a fetch failure — distinct from a
+ * successful `{ registered: false }`, so a transient error is never shown as the false claim
+ * "this module's code is not registered" (the same trap `getConfig` avoids).
+ */
+async function getAgentRoles(slug: string): Promise<ModuleAgentRolesView | null> {
   try {
     const res = await serverFetch(
       `/api/v1/admin/framework/modules/${encodeURIComponent(slug)}/agent-roles`
     );
-    if (!res.ok) return EMPTY_AGENT_ROLES;
+    if (!res.ok) return null;
     const body = await parseApiResponse<ModuleAgentRolesView>(res);
-    return body.success ? body.data : EMPTY_AGENT_ROLES;
+    return body.success ? body.data : null;
   } catch (err) {
     logger.error('framework module detail: agent roles fetch failed', err);
-    return EMPTY_AGENT_ROLES;
+    return null;
   }
 }
 

@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/select';
 import { FieldHelp } from '@/components/ui/field-help';
 import { apiClient, APIClientError } from '@/lib/api/client';
+import { apiFieldErrors } from '@/components/admin/framework/module-detail/api-field-errors';
 import { MODULE_STATUS } from '@/lib/framework/modules/status';
 import type { ModuleSettingsView } from '@/lib/framework/modules/view';
 
@@ -126,17 +127,7 @@ export function SettingsTab({ settings }: SettingsTabProps) {
       setSaved(true);
       router.refresh();
     } catch (err) {
-      const detail =
-        err instanceof APIClientError && err.details
-          ? Object.values(err.details)
-              .flat()
-              .filter((m): m is string => typeof m === 'string')
-          : [];
-      setErrors(
-        detail.length > 0
-          ? detail
-          : [err instanceof Error ? err.message : 'Failed to save settings']
-      );
+      setErrors(apiFieldErrors(err, 'Failed to save settings'));
     } finally {
       setSaving(false);
     }

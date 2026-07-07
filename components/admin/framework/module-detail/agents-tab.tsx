@@ -39,7 +39,11 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { apiClient, APIClientError } from '@/lib/api/client';
-import type { ModuleAgentBindingListItem } from '@/lib/framework/modules/view';
+import type {
+  ModuleAgentBindingListItem,
+  ModuleAgentRolesView,
+} from '@/lib/framework/modules/view';
+import { apiFieldErrors } from '@/components/admin/framework/module-detail/api-field-errors';
 
 /** The minimal agent fields the bind picker needs from the orchestration roster. */
 interface AgentRosterItem {
@@ -48,21 +52,24 @@ interface AgentRosterItem {
   slug: string;
 }
 
+/** The roster is capped at the roster endpoint's max page size; see the picker note below. */
+const ROSTER_LIMIT = 100;
+
 interface AgentsTabProps {
   slug: string;
-  /** false ⇒ the module's code is removed; existing bindings still show, but none can be added. */
-  registered: boolean;
-  /** The declared seats an agent can be bound into (empty ⇒ the module declares none). */
-  roles: string[];
-  bindings: ModuleAgentBindingListItem[];
+  /** The declared seats + registration; `null` ⇒ the seats fetch failed (not "unregistered"). */
+  agentRoles: ModuleAgentRolesView | null;
+  /** The current bindings; `null` ⇒ that fetch failed (not an empty binding set). */
+  bindings: ModuleAgentBindingListItem[] | null;
 }
 
-export function AgentsTab({ slug, registered, roles, bindings }: AgentsTabProps) {
+export function AgentsTab({ slug, agentRoles, bindings }: AgentsTabProps) {
   const router = useRouter();
   const base = `/api/v1/admin/framework/modules/${encodeURIComponent(slug)}/agents`;
 
   const [adding, setAdding] = useState(false);
   const [roster, setRoster] = useState<AgentRosterItem[] | null>(null);
+  const [rosterLoading, setRosterLoading] = useState(false);
   const [rosterError, setRosterError] = useState<string | null>(null);
 
   const [agentId, setAgentId] = useState('');
@@ -75,20 +82,35 @@ export function AgentsTab({ slug, registered, roles, bindings }: AgentsTabProps)
   const [rowBusy, setRowBusy] = useState<string | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
 
-  const canBind = registered && roles.length > 0;
+  // `null` agentRoles = the seats fetch failed → we can't offer the bind form, but this is a
+  // distinct "couldn't load" state, NOT the false "module is unregistered" claim.
+  const registered = agentRoles?.registered ?? false;
+  const roles = agentRoles?.roles ?? [];
+  const canBind = agentRoles !== null && registered && roles.length > 0;
+  // The picker shows only the first ROSTER_LIMIT agents (the roster endpoint's max page size);
+  // flag the likely-truncated case rather than silently hiding agents past the cap.
+  const rosterCapped = roster !== null && roster.length >= ROSTER_LIMIT;
 
   async function openForm() {
     setAdding(true);
     setErrors([]);
-    if (roster !== null) return; // already loaded
+    // Serialise the roster fetch: only fetch once, and never start a second while one is in
+    // flight — a late-arriving response (e.g. open → cancel → reopen) must not overwrite a
+    // newer one and leave a stale error over a populated roster.
+    if (roster !== null || rosterLoading) return;
     setRosterError(null);
+    setRosterLoading(true);
     try {
+      // `kind=chat` mirrors the agents list page: evaluation *judge* agents are not runtime
+      // agents, so they must not be offered as bindable module seats.
       const agents = await apiClient.get<AgentRosterItem[]>(
-        '/api/v1/admin/orchestration/agents?isActive=true&limit=100'
+        `/api/v1/admin/orchestration/agents?isActive=true&kind=chat&limit=${ROSTER_LIMIT}`
       );
       setRoster(agents);
     } catch (err) {
       setRosterError(err instanceof APIClientError ? err.message : 'Failed to load agents');
+    } finally {
+      setRosterLoading(false);
     }
   }
 
@@ -108,7 +130,7 @@ export function AgentsTab({ slug, registered, roles, bindings }: AgentsTabProps)
       setAdding(false);
       router.refresh();
     } catch (err) {
-      setErrors(fieldErrors(err, 'Failed to bind agent'));
+      setErrors(apiFieldErrors(err, 'Failed to bind agent'));
     } finally {
       setBusy(false);
     }
@@ -155,13 +177,19 @@ export function AgentsTab({ slug, registered, roles, bindings }: AgentsTabProps)
         )}
       </div>
 
-      {!registered && (
+      {agentRoles === null && (
+        <p className="text-muted-foreground text-sm" role="alert">
+          The module&rsquo;s seats couldn&rsquo;t be loaded, so the bind form is unavailable. Try
+          refreshing the page.
+        </p>
+      )}
+      {agentRoles !== null && !registered && (
         <p className="text-muted-foreground text-sm">
           This module&rsquo;s code is not registered, so agents can&rsquo;t be bound. Existing
           bindings are shown for cleanup.
         </p>
       )}
-      {registered && roles.length === 0 && (
+      {agentRoles !== null && registered && roles.length === 0 && (
         <p className="text-muted-foreground text-sm">This module declares no agent seats.</p>
       )}
 
@@ -219,6 +247,13 @@ export function AgentsTab({ slug, registered, roles, bindings }: AgentsTabProps)
             </div>
           )}
 
+          {rosterCapped && !rosterError && (
+            <p className="text-muted-foreground text-xs">
+              Showing the first {ROSTER_LIMIT} agents. If the one you want isn&rsquo;t listed,
+              deactivate unused agents to bring it into range.
+            </p>
+          )}
+
           {errors.length > 0 && (
             <ul className="text-destructive space-y-1 text-sm" role="alert">
               {errors.map((msg, i) => (
@@ -250,7 +285,11 @@ export function AgentsTab({ slug, registered, roles, bindings }: AgentsTabProps)
         </p>
       )}
 
-      {bindings.length === 0 ? (
+      {bindings === null ? (
+        <p className="text-muted-foreground text-sm" role="alert">
+          The current bindings couldn&rsquo;t be loaded. Try refreshing the page.
+        </p>
+      ) : bindings.length === 0 ? (
         <p className="text-muted-foreground text-sm">No agents are bound yet.</p>
       ) : (
         <div className="rounded-md border">
@@ -341,15 +380,4 @@ export function AgentsTab({ slug, registered, roles, bindings }: AgentsTabProps)
       )}
     </div>
   );
-}
-
-/** Flatten an APIClientError's field details to messages, else a fallback. */
-function fieldErrors(err: unknown, fallback: string): string[] {
-  if (err instanceof APIClientError && err.details) {
-    const msgs = Object.values(err.details)
-      .flat()
-      .filter((m): m is string => typeof m === 'string');
-    if (msgs.length > 0) return msgs;
-  }
-  return [err instanceof Error ? err.message : fallback];
 }

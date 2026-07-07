@@ -54,10 +54,10 @@ interface ModuleDetailProps {
   /** null when the config fetch failed (distinct from a genuinely unregistered module). */
   config: ModuleConfigFormView | null;
   versions: ModuleVersionsView;
-  /** The module's agent bindings (07's shipped list), stitched with agent display fields. */
-  agentBindings: ModuleAgentBindingListItem[];
-  /** The bindable seats the module declares + whether its code is registered. */
-  agentRoles: ModuleAgentRolesView;
+  /** The module's agent bindings (07's list); `null` when that fetch failed (not empty). */
+  agentBindings: ModuleAgentBindingListItem[] | null;
+  /** The bindable seats + registration; `null` when that fetch failed (not "unregistered"). */
+  agentRoles: ModuleAgentRolesView | null;
 }
 
 export function ModuleDetail({
@@ -102,14 +102,7 @@ export function ModuleDetail({
     {
       value: 'agents',
       label: 'Agents',
-      node: (
-        <AgentsTab
-          slug={slug}
-          registered={agentRoles.registered}
-          roles={agentRoles.roles}
-          bindings={agentBindings}
-        />
-      ),
+      node: <AgentsTab slug={slug} agentRoles={agentRoles} bindings={agentBindings} />,
     },
   ];
 

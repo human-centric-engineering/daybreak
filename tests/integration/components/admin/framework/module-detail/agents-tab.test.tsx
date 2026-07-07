@@ -53,7 +53,12 @@ const AGENTS_URL = '/api/v1/admin/framework/modules/reading/agents';
 
 function renderTab(props: Partial<Parameters<typeof AgentsTab>[0]> = {}) {
   return render(
-    <AgentsTab slug="reading" registered roles={['companion']} bindings={[binding()]} {...props} />
+    <AgentsTab
+      slug="reading"
+      agentRoles={{ registered: true, roles: ['companion'] }}
+      bindings={[binding()]}
+      {...props}
+    />
   );
 }
 
@@ -113,7 +118,7 @@ describe('AgentsTab', () => {
     await user.click(screen.getByRole('button', { name: /^bind$/i }));
 
     expect(apiClient.get).toHaveBeenCalledWith(
-      '/api/v1/admin/orchestration/agents?isActive=true&limit=100'
+      '/api/v1/admin/orchestration/agents?isActive=true&kind=chat&limit=100'
     );
     expect(apiClient.post).toHaveBeenCalledWith(AGENTS_URL, {
       body: { agentId: 'agent-1', role: 'companion', isPrimary: true },
@@ -194,15 +199,60 @@ describe('AgentsTab', () => {
   });
 
   it('hides the bind form for an unregistered module but still lists bindings', () => {
-    renderTab({ registered: false, roles: [] });
+    renderTab({ agentRoles: { registered: false, roles: [] } });
     expect(screen.queryByRole('button', { name: /bind agent/i })).not.toBeInTheDocument();
     expect(screen.getByText(/code is not registered/i)).toBeInTheDocument();
     expect(screen.getByText('Companion Agent')).toBeInTheDocument();
   });
 
   it('explains when a registered module declares no seats', () => {
-    renderTab({ registered: true, roles: [], bindings: [] });
+    renderTab({ agentRoles: { registered: true, roles: [] }, bindings: [] });
     expect(screen.queryByRole('button', { name: /bind agent/i })).not.toBeInTheDocument();
     expect(screen.getByText(/declares no agent seats/i)).toBeInTheDocument();
+  });
+
+  it('shows a "couldn\'t load seats" state (not "unregistered") when the roles fetch failed', () => {
+    renderTab({ agentRoles: null });
+    expect(screen.queryByRole('button', { name: /bind agent/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/seats couldn.t be loaded/i)).toBeInTheDocument();
+    // Must NOT make the false "unregistered" claim.
+    expect(screen.queryByText(/code is not registered/i)).not.toBeInTheDocument();
+    // Bindings still render for cleanup.
+    expect(screen.getByText('Companion Agent')).toBeInTheDocument();
+  });
+
+  it('shows a "couldn\'t load bindings" state (not "no agents") when the bindings fetch failed', () => {
+    renderTab({ bindings: null });
+    expect(screen.getByText(/current bindings couldn.t be loaded/i)).toBeInTheDocument();
+    expect(screen.queryByText(/no agents are bound yet/i)).not.toBeInTheDocument();
+  });
+
+  it('flags a truncated roster (first 100 shown)', async () => {
+    const user = userEvent.setup();
+    const bigRoster = Array.from({ length: 100 }, (_, i) => ({
+      id: `a${i}`,
+      name: `Agent ${i}`,
+      slug: `agent-${i}`,
+    }));
+    vi.mocked(apiClient.get).mockResolvedValue(bigRoster);
+
+    renderTab({ bindings: [] });
+    await user.click(screen.getByRole('button', { name: /bind agent/i }));
+
+    expect(await screen.findByText(/showing the first 100 agents/i)).toBeInTheDocument();
+  });
+
+  it('does not start a second roster fetch while one is in flight', async () => {
+    const user = userEvent.setup();
+    // A never-resolving fetch keeps the first request in flight.
+    vi.mocked(apiClient.get).mockReturnValue(new Promise(() => {}));
+
+    renderTab({ bindings: [] });
+    await user.click(screen.getByRole('button', { name: /bind agent/i }));
+    await user.click(screen.getByRole('button', { name: /cancel/i }));
+    await user.click(screen.getByRole('button', { name: /bind agent/i }));
+
+    // Still exactly one fetch — the in-flight guard blocked the reopen refetch.
+    expect(apiClient.get).toHaveBeenCalledTimes(1);
   });
 });

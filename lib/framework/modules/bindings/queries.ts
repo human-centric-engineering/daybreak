@@ -39,15 +39,21 @@ export interface ModuleAgentBindingView extends ModuleAgentBinding {
  * than silently dropped; a hard-deleted agent's binding is already gone via the FK
  * cascade. Unknown module ⇒ 404 (not an empty list).
  */
-export async function listModuleBindings(moduleSlug: string): Promise<ModuleAgentBindingView[]> {
-  const moduleRow = await prisma.module.findUnique({
+/** Resolve a module's id from its slug, or 404 — the existence guard the reads here share. */
+async function loadModuleIdBySlug(moduleSlug: string): Promise<string> {
+  const row = await prisma.module.findUnique({
     where: { slug: moduleSlug },
     select: { id: true },
   });
-  if (!moduleRow) throw new NotFoundError(`Module "${moduleSlug}" not found`);
+  if (!row) throw new NotFoundError(`Module "${moduleSlug}" not found`);
+  return row.id;
+}
+
+export async function listModuleBindings(moduleSlug: string): Promise<ModuleAgentBindingView[]> {
+  const moduleId = await loadModuleIdBySlug(moduleSlug);
 
   const bindings = await prisma.moduleAgentBinding.findMany({
-    where: { moduleId: moduleRow.id },
+    where: { moduleId },
     orderBy: [{ isPrimary: 'desc' }, { role: 'asc' }],
   });
   if (bindings.length === 0) return [];
@@ -79,12 +85,7 @@ export interface ModuleAgentRoles {
  * are no seats to bind until the code returns).
  */
 export async function getModuleAgentRoles(moduleSlug: string): Promise<ModuleAgentRoles> {
-  const moduleRow = await prisma.module.findUnique({
-    where: { slug: moduleSlug },
-    select: { id: true },
-  });
-  if (!moduleRow) throw new NotFoundError(`Module "${moduleSlug}" not found`);
-
+  await loadModuleIdBySlug(moduleSlug); // existence guard (404); the seats come from the registry
   const def = getRegisteredModule(moduleSlug);
   return { registered: def !== undefined, roles: def?.agentRoles ?? [] };
 }
