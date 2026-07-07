@@ -152,6 +152,7 @@ import {
   publishDefinition,
   rollback,
   getPublishedMap,
+  getPublishedMapVersion,
   listVersions,
   getVersion,
   validatePublishableMap,
@@ -440,6 +441,22 @@ describe('getPublishedMap', () => {
     const published = await getPublishedMap('main');
     expect(published).toMatchObject({ slug: 'main', version: 1 });
     expect(published?.definition.nodes).toHaveLength(2);
+  });
+});
+
+describe('getPublishedMapVersion', () => {
+  it('returns null for an unknown map and for a map with no published version', async () => {
+    await expect(getPublishedMapVersion('ghost')).resolves.toBeNull();
+    await createGraph({ slug: 'main', name: 'Main', userId: USER });
+    await expect(getPublishedMapVersion('main')).resolves.toBeNull();
+  });
+
+  it('returns the live published version number, tracking republishes', async () => {
+    await createGraph({ slug: 'main', name: 'Main', definition: validMap(), userId: USER }); // v1
+    await expect(getPublishedMapVersion('main')).resolves.toBe(1);
+    await saveDraft({ slug: 'main', definition: validMap('a'), userId: USER });
+    await publishDraft({ slug: 'main', userId: USER }); // v2
+    await expect(getPublishedMapVersion('main')).resolves.toBe(2);
   });
 });
 

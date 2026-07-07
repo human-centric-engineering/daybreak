@@ -22,6 +22,8 @@ import {
   type TransitionKind,
 } from '@/lib/framework/facilitation/engine/apply-event';
 import { getJourneyTimeline } from '@/lib/framework/facilitation/journey/queries';
+import { getPublishedMapVersion } from '@/lib/framework/facilitation/map/version-service';
+import { enrichMovesWithRelated } from '@/lib/framework/facilitation/overlays/related';
 import { assembleJourneyContext, type JourneyContext } from '@/lib/framework/guidance/assemble';
 import {
   rankMoves,
@@ -57,12 +59,23 @@ export async function loadGuidance(
   if (context === null) return null;
 
   const availability = computeAvailability(context.availabilityInput);
-  const moves = rankMoves({
+  const ranked = rankMoves({
     graph: context.availabilityInput.graph,
     availability,
     slotHeads: context.slotHeads,
     now: context.now.instant,
   });
+
+  // Advisory "related places" overlay (f-overlays, F9): fill each move's `related` slot from node
+  // similarity, STRICTLY downstream of the (already-computed) availability — it decorates moves and
+  // never feeds eligibility. Keyed on the current published version; empty when nothing is embedded.
+  // (The version is re-read here rather than threaded from `assemble`; a republish+re-embed landing
+  // between the two reads could key `related` to the newer version — harmless, since `related` is
+  // advisory and a nodeKey absent from the narrated graph is simply not surfaced.)
+  const version = await getPublishedMapVersion(key.graphSlug);
+  const moves =
+    version === null ? ranked : await enrichMovesWithRelated(key.graphSlug, version, ranked);
+
   return { context, availability, moves };
 }
 
