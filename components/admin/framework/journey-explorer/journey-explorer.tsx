@@ -19,7 +19,6 @@ import { useMemo, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { NODE_STATE_STATUS } from '@/lib/framework/facilitation/journey/vocabulary';
 import type { JourneyDetailView } from '@/lib/framework/facilitation/journey/view';
 import { JourneyCanvas } from '@/components/admin/framework/journey-explorer/journey-canvas';
 import {
@@ -28,6 +27,10 @@ import {
   replayStatuses,
   toFlowNodes,
 } from '@/components/admin/framework/journey-explorer/journey-mapper';
+import {
+  JOURNEY_STATUS_STYLES,
+  JOURNEY_STATUS_ORDER,
+} from '@/components/admin/framework/journey-explorer/journey-status-styles';
 
 type Mode = 'live' | 'replay';
 
@@ -36,13 +39,12 @@ function formatInstant(iso: string): string {
   return `${new Date(iso).toISOString().slice(0, 19).replace('T', ' ')}Z`;
 }
 
-const LEGEND: { status: string; label: string; dot: string }[] = [
-  { status: NODE_STATE_STATUS.completed, label: 'Completed', dot: 'bg-green-500' },
-  { status: NODE_STATE_STATUS.active, label: 'Active', dot: 'bg-amber-500' },
-  { status: NODE_STATE_STATUS.available, label: 'Available', dot: 'bg-blue-400' },
-  { status: NODE_STATE_STATUS.visited, label: 'Visited', dot: 'bg-slate-400' },
-  { status: NODE_STATE_STATUS.unvisited, label: 'Unvisited', dot: 'bg-muted-foreground/30' },
-];
+// Legend derives from the shared status-style map, so a colour change is one edit.
+const LEGEND = JOURNEY_STATUS_ORDER.map((status) => ({
+  status,
+  label: JOURNEY_STATUS_STYLES[status].label,
+  dot: JOURNEY_STATUS_STYLES[status].dot,
+}));
 
 interface JourneyExplorerProps {
   detail: JourneyDetailView;

@@ -10,24 +10,14 @@
 
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
-import { NODE_STATE_STATUS } from '@/lib/framework/facilitation/journey/vocabulary';
 import type { JourneyFlowNode } from '@/components/admin/framework/journey-explorer/journey-mapper';
-
-/** Border + fill per journey status. `unvisited` is the neutral fallback. */
-const STATUS_STYLES: Record<string, string> = {
-  [NODE_STATE_STATUS.completed]:
-    'border-green-500 bg-green-50 dark:border-green-500 dark:bg-green-950/40',
-  [NODE_STATE_STATUS.active]:
-    'border-amber-500 bg-amber-50 dark:border-amber-500 dark:bg-amber-950/40',
-  [NODE_STATE_STATUS.available]:
-    'border-blue-400 bg-blue-50 dark:border-blue-500 dark:bg-blue-950/40',
-  [NODE_STATE_STATUS.visited]:
-    'border-slate-400 bg-slate-50 dark:border-slate-500 dark:bg-slate-900/60',
-  [NODE_STATE_STATUS.unvisited]: 'border-border bg-background',
-};
+import {
+  JOURNEY_STATUS_STYLES,
+  UNVISITED_STATUS_STYLE,
+} from '@/components/admin/framework/journey-explorer/journey-status-styles';
 
 export function JourneyNode({ data }: NodeProps<JourneyFlowNode>) {
-  const statusStyle = STATUS_STYLES[data.status] ?? STATUS_STYLES[NODE_STATE_STATUS.unvisited];
+  const statusStyle = (JOURNEY_STATUS_STYLES[data.status] ?? UNVISITED_STATUS_STYLE).node;
 
   return (
     <div
