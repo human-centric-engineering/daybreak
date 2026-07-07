@@ -54,6 +54,7 @@ import {
 import { syncFrameworkCapabilities } from '@/lib/framework/capabilities/sync';
 import { dataSlotCapabilities } from '@/lib/framework/data-slots/capabilities';
 import { guidanceCapabilities } from '@/lib/framework/guidance/capabilities';
+import { engagementCapabilities } from '@/lib/framework/engagement/capabilities';
 import { registerProactiveGuidanceStep } from '@/lib/framework/facilitation/overlays/proactive-step';
 
 export function initFramework(): void {
@@ -76,6 +77,7 @@ export function initFramework(): void {
   // DB-row passes run in `syncFramework()` below.
   for (const capability of dataSlotCapabilities) registerFrameworkCapability(capability);
   for (const capability of guidanceCapabilities) registerFrameworkCapability(capability);
+  for (const capability of engagementCapabilities) registerFrameworkCapability(capability);
   // Proactive guidance (f-overlays t-3b, F13): the `framework_proactive_guidance` workflow step type,
   // so an operator can schedule the throttled nudge sweep via an `AiWorkflowSchedule` cron. Registering
   // the BE executor at init (the engine runs server-side); no workflow/schedule row is seeded.
