@@ -49,11 +49,22 @@ const VERSIONS: ModuleVersionsView = {
   ],
   nextCursor: null,
 };
+// The binding-tab props (t-4a): defaulted here so the shell tests focus on the shell.
+const BINDING_PROPS = {
+  agentBindings: [],
+  agentRoles: { registered: true, roles: ['companion'] },
+};
 
 describe('ModuleDetail', () => {
   it('renders the module identity, status, and both tab triggers', () => {
     render(
-      <ModuleDetail slug="onboarding" identity={IDENTITY} config={CONFIG} versions={VERSIONS} />
+      <ModuleDetail
+        slug="onboarding"
+        identity={IDENTITY}
+        config={CONFIG}
+        versions={VERSIONS}
+        {...BINDING_PROPS}
+      />
     );
 
     expect(screen.getByRole('heading', { name: 'Onboarding' })).toBeInTheDocument();
@@ -62,11 +73,18 @@ describe('ModuleDetail', () => {
     expect(screen.getByRole('tab', { name: 'Config' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Versions' })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: 'Settings' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Agents' })).toBeInTheDocument();
   });
 
   it('shows the Config tab content by default', () => {
     render(
-      <ModuleDetail slug="onboarding" identity={IDENTITY} config={CONFIG} versions={VERSIONS} />
+      <ModuleDetail
+        slug="onboarding"
+        identity={IDENTITY}
+        config={CONFIG}
+        versions={VERSIONS}
+        {...BINDING_PROPS}
+      />
     );
     expect(screen.getByText('Api Key')).toBeInTheDocument();
   });
@@ -78,6 +96,7 @@ describe('ModuleDetail', () => {
         identity={{ ...IDENTITY, status }}
         config={CONFIG}
         versions={VERSIONS}
+        {...BINDING_PROPS}
       />
     );
     expect(screen.getByText(status)).toBeInTheDocument();
@@ -90,6 +109,7 @@ describe('ModuleDetail', () => {
         identity={{ ...IDENTITY, isRegistered: false }}
         config={CONFIG}
         versions={{ versions: [], nextCursor: null }}
+        {...BINDING_PROPS}
       />
     );
     expect(screen.getByText('Unregistered')).toBeInTheDocument();

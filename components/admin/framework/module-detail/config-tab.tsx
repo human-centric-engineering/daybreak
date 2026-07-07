@@ -30,7 +30,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { FieldHelp } from '@/components/ui/field-help';
-import { APIClientError } from '@/lib/api/client';
+import { apiFieldErrors } from '@/components/admin/framework/module-detail/api-field-errors';
 import { saveModuleConfig } from '@/lib/framework/modules/config/client';
 import type { FieldDescriptor } from '@/lib/framework/modules/config/schema-descriptors';
 import type { ModuleConfigFormView } from '@/lib/framework/modules/view';
@@ -158,11 +158,7 @@ export function ConfigTab({ slug, form }: ConfigTabProps) {
       setChangeSummary('');
       router.refresh();
     } catch (err) {
-      const detail =
-        err instanceof APIClientError && Array.isArray(err.details?.config)
-          ? (err.details.config as string[])
-          : [err instanceof Error ? err.message : 'Failed to save config'];
-      setErrors(detail);
+      setErrors(apiFieldErrors(err, 'Failed to save config'));
     } finally {
       setSaving(false);
     }

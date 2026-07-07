@@ -4,6 +4,8 @@ import { notFound } from 'next/navigation';
 import { ModuleDetail } from '@/components/admin/framework/module-detail/module-detail';
 import { parseApiResponse, serverFetch } from '@/lib/api/server-fetch';
 import type {
+  ModuleAgentBindingListItem,
+  ModuleAgentRolesView,
   ModuleConfigFormView,
   ModuleSettingsView,
   ModuleVersionsView,
@@ -71,13 +73,51 @@ async function getVersions(slug: string): Promise<ModuleVersionsView> {
 }
 
 /**
- * Admin — Framework Module detail (f-ops-views t-2).
+ * The module's agent bindings (07's list). Returns `null` on a fetch failure — distinct from
+ * a successful empty list, so a transient error never renders as the false "no agents are
+ * bound yet" (which would invite re-binding an agent that is actually already bound).
+ */
+async function getAgentBindings(slug: string): Promise<ModuleAgentBindingListItem[] | null> {
+  try {
+    const res = await serverFetch(
+      `/api/v1/admin/framework/modules/${encodeURIComponent(slug)}/agents`
+    );
+    if (!res.ok) return null;
+    const body = await parseApiResponse<ModuleAgentBindingListItem[]>(res);
+    return body.success ? body.data : null;
+  } catch (err) {
+    logger.error('framework module detail: agent bindings fetch failed', err);
+    return null;
+  }
+}
+
+/**
+ * The bindable seats the module declares. Returns `null` on a fetch failure — distinct from a
+ * successful `{ registered: false }`, so a transient error is never shown as the false claim
+ * "this module's code is not registered" (the same trap `getConfig` avoids).
+ */
+async function getAgentRoles(slug: string): Promise<ModuleAgentRolesView | null> {
+  try {
+    const res = await serverFetch(
+      `/api/v1/admin/framework/modules/${encodeURIComponent(slug)}/agent-roles`
+    );
+    if (!res.ok) return null;
+    const body = await parseApiResponse<ModuleAgentRolesView>(res);
+    return body.success ? body.data : null;
+  } catch (err) {
+    logger.error('framework module detail: agent roles fetch failed', err);
+    return null;
+  }
+}
+
+/**
+ * Admin — Framework Module detail (f-ops-views t-2 / t-4a).
  *
- * Thin server component: fetches the module's settings, config form, and version list in
- * parallel, then hands them to the `<ModuleDetail>` tabbed shell (Settings + Config +
- * Versions tabs; t-4 appends the binding tabs). 404s when the module doesn't exist; the
- * config/versions fetches degrade to empty state rather than throwing (the list-page
- * precedent) — only a missing identity 404s.
+ * Thin server component: fetches the module's settings, config form, version list, and agent
+ * bindings + declared seats in parallel, then hands them to the `<ModuleDetail>` tabbed shell
+ * (Config + Versions + Settings + Agents tabs; t-4b/t-4c append Workflows / Knowledge). 404s
+ * when the module doesn't exist; the non-identity fetches degrade to empty state rather than
+ * throwing (the list-page precedent) — only a missing identity 404s.
  */
 export default async function FrameworkModuleDetailPage({
   params,
@@ -86,13 +126,24 @@ export default async function FrameworkModuleDetailPage({
 }) {
   const { slug } = await params;
 
-  const [identity, config, versions] = await Promise.all([
+  const [identity, config, versions, agentBindings, agentRoles] = await Promise.all([
     getIdentity(slug),
     getConfig(slug),
     getVersions(slug),
+    getAgentBindings(slug),
+    getAgentRoles(slug),
   ]);
 
   if (!identity) notFound();
 
-  return <ModuleDetail slug={slug} identity={identity} config={config} versions={versions} />;
+  return (
+    <ModuleDetail
+      slug={slug}
+      identity={identity}
+      config={config}
+      versions={versions}
+      agentBindings={agentBindings}
+      agentRoles={agentRoles}
+    />
+  );
 }
