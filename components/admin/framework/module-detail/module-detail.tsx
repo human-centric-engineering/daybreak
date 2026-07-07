@@ -59,9 +59,13 @@ export function ModuleDetail({ slug, identity, config, versions }: ModuleDetailP
   // Re-key the Config tab on its own data, so a save/restore re-initialises the form after
   // `router.refresh()` regardless of whether the versions fetch succeeded.
   const configKey = config ? JSON.stringify(config.values) : 'unavailable';
-  // Re-key the Settings tab on its own data, so a save re-initialises the form from the
-  // fresh row after `router.refresh()` (same pattern as the Config tab).
-  const settingsKey = JSON.stringify(identity);
+  // Re-key the Settings tab on its editable content, so a settings save re-initialises the
+  // form from the fresh row after `router.refresh()` (same pattern as the Config tab). It
+  // deliberately EXCLUDES `updatedAt` — otherwise a save on another tab (e.g. a config save,
+  // which also bumps `updatedAt`) would remount the Settings tab and discard its in-progress
+  // edits.
+  const { updatedAt: _settingsUpdatedAt, ...settingsContent } = identity;
+  const settingsKey = JSON.stringify(settingsContent);
 
   const tabs = [
     {

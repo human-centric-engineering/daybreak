@@ -92,8 +92,19 @@ export function SettingsTab({ settings }: SettingsTabProps) {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
-    const from = localToIso(availableFrom);
-    const until = localToIso(availableUntil);
+    // Send the ORIGINAL ISO for a window bound the operator didn't touch — the
+    // `datetime-local` control is minute-precision, so round-tripping an untouched bound
+    // through isoToLocal→localToIso would drop its seconds, silently shifting the stored
+    // value and recording a spurious audit change on an unrelated save. A bound is
+    // "untouched" iff its current input still equals the initial rendering of the row.
+    const from =
+      availableFrom === isoToLocal(settings.availableFrom)
+        ? settings.availableFrom
+        : localToIso(availableFrom);
+    const until =
+      availableUntil === isoToLocal(settings.availableUntil)
+        ? settings.availableUntil
+        : localToIso(availableUntil);
     if (from && until && new Date(from) > new Date(until)) {
       setErrors(['Availability window: the end must be on or after the start.']);
       return;

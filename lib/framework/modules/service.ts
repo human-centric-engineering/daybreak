@@ -13,15 +13,16 @@
  * start — so deleting it would only destroy its config/version history and then reappear
  * empty; operators turn a live module off by *retiring* it (a status PATCH), not deleting.
  * A hard delete cascades to the module's version history, agent bindings, and knowledge
- * scope, which shrinks the effective document access of previously-bound agents — so it
- * clears the knowledge-access resolver cache (`invalidateAllAgentAccess`, the documented
- * coarse/bulk path) to stop a stale, wider access set from lingering for the cache TTL.
+ * scope, which shrinks the effective document access of the agents bound to it — so it
+ * evicts exactly those agents from the knowledge-access resolver cache (the same per-agent
+ * eviction the knowledge grant/revoke service uses for the same scope change) to stop a
+ * stale, wider access set from lingering for the cache TTL.
  */
 
 import { prisma } from '@/lib/db/client';
 import { ConflictError, ValidationError } from '@/lib/api/errors';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
-import { invalidateAllAgentAccess } from '@/lib/orchestration/knowledge/resolveAgentDocumentAccess';
+import { invalidateAgentAccess } from '@/lib/orchestration/knowledge/resolveAgentDocumentAccess';
 import { mapPrismaWriteError } from '@/lib/framework/shared/prisma-errors';
 import {
   getModuleSettings,
@@ -134,6 +135,15 @@ export async function deleteModule(args: DeleteModuleArgs): Promise<void> {
     );
   }
 
+  // Capture the bound agents BEFORE the delete — the cascade drops the `ModuleAgentBinding`
+  // rows (the agents themselves survive), so this is the only point they can be enumerated.
+  // Only bound agents inherit the module's knowledge scope, so this is exactly the set whose
+  // cached access must be evicted.
+  const bindings = await prisma.moduleAgentBinding.findMany({
+    where: { moduleId: current.id },
+    select: { agentId: true },
+  });
+
   try {
     await prisma.module.delete({ where: { id: current.id } });
   } catch (err) {
@@ -142,12 +152,11 @@ export async function deleteModule(args: DeleteModuleArgs): Promise<void> {
     mapPrismaWriteError(err, { notFound: `Module "${slug}" not found` });
   }
 
-  // The cascade removed the module's knowledge scope, which every previously-bound agent
-  // inherited via the live `resolveModuleKnowledgeForAgent` contributor. Those agents are
-  // gone with the cascade (can't be enumerated for a per-agent eviction now), and a module
-  // delete is exactly the coarse "schema-shaped change" the resolver documents this bulk
-  // invalidation for — so clear the whole cache rather than risk a stale wider access set.
-  invalidateAllAgentAccess();
+  // Evict the (now stale, wider) cached access of each previously-bound agent — the same
+  // per-agent eviction `lib/framework/modules/knowledge/service.ts` uses for a scope change.
+  for (const agentId of new Set(bindings.map((b) => b.agentId))) {
+    invalidateAgentAccess(agentId);
+  }
 
   logAdminAction({
     userId,

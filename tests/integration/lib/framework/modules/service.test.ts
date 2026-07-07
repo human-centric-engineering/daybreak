@@ -15,9 +15,10 @@ import { Prisma } from '@prisma/client';
 
 const prismaMock = vi.hoisted(() => ({
   module: { findUnique: vi.fn(), update: vi.fn(), delete: vi.fn() },
+  moduleAgentBinding: { findMany: vi.fn() },
 }));
 const auditMock = vi.hoisted(() => ({ logAdminAction: vi.fn() }));
-const resolverMock = vi.hoisted(() => ({ invalidateAllAgentAccess: vi.fn() }));
+const resolverMock = vi.hoisted(() => ({ invalidateAgentAccess: vi.fn() }));
 
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => auditMock);
@@ -130,25 +131,50 @@ describe('updateModuleSettings', () => {
 describe('deleteModule', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('deletes an unregistered module, clears the resolver cache, and audits', async () => {
+  it('deletes an unregistered module, evicts each bound agent, and audits', async () => {
     prismaMock.module.findUnique.mockResolvedValue(current({ isRegistered: false }));
+    // Two bindings, one a duplicate agent (two roles) — the eviction set dedups.
+    prismaMock.moduleAgentBinding.findMany.mockResolvedValue([
+      { agentId: 'agent-1' },
+      { agentId: 'agent-2' },
+      { agentId: 'agent-1' },
+    ]);
     prismaMock.module.delete.mockResolvedValue(undefined);
 
     await deleteModule({ slug: 'onboarding', ...ARGS });
 
+    // Bindings enumerated for THIS module before the delete.
+    expect(prismaMock.moduleAgentBinding.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { moduleId: 'mod-1' } })
+    );
     expect(prismaMock.module.delete).toHaveBeenCalledWith({ where: { id: 'mod-1' } });
-    expect(resolverMock.invalidateAllAgentAccess).toHaveBeenCalledTimes(1);
+    // Exactly the bound agents, deduped — not a global cache clear.
+    expect(resolverMock.invalidateAgentAccess).toHaveBeenCalledTimes(2);
+    expect(resolverMock.invalidateAgentAccess).toHaveBeenCalledWith('agent-1');
+    expect(resolverMock.invalidateAgentAccess).toHaveBeenCalledWith('agent-2');
     expect(auditMock.logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'module.delete', entityId: 'mod-1' })
     );
   });
 
-  it('refuses to delete a registered module (409), without touching the cache', async () => {
+  it('deletes a module with no bindings without evicting anything', async () => {
+    prismaMock.module.findUnique.mockResolvedValue(current({ isRegistered: false }));
+    prismaMock.moduleAgentBinding.findMany.mockResolvedValue([]);
+    prismaMock.module.delete.mockResolvedValue(undefined);
+
+    await deleteModule({ slug: 'onboarding', ...ARGS });
+
+    expect(prismaMock.module.delete).toHaveBeenCalled();
+    expect(resolverMock.invalidateAgentAccess).not.toHaveBeenCalled();
+  });
+
+  it('refuses to delete a registered module (409), without enumerating or evicting', async () => {
     prismaMock.module.findUnique.mockResolvedValue(current({ isRegistered: true }));
 
     await expect(deleteModule({ slug: 'onboarding', ...ARGS })).rejects.toThrow(ConflictError);
+    expect(prismaMock.moduleAgentBinding.findMany).not.toHaveBeenCalled();
     expect(prismaMock.module.delete).not.toHaveBeenCalled();
-    expect(resolverMock.invalidateAllAgentAccess).not.toHaveBeenCalled();
+    expect(resolverMock.invalidateAgentAccess).not.toHaveBeenCalled();
     expect(auditMock.logAdminAction).not.toHaveBeenCalled();
   });
 
@@ -158,15 +184,16 @@ describe('deleteModule', () => {
     expect(prismaMock.module.delete).not.toHaveBeenCalled();
   });
 
-  it('maps a concurrent delete (P2025) to a clean 404', async () => {
+  it('maps a concurrent delete (P2025) to a clean 404, evicting nothing', async () => {
     prismaMock.module.findUnique.mockResolvedValue(current({ isRegistered: false }));
+    prismaMock.moduleAgentBinding.findMany.mockResolvedValue([{ agentId: 'agent-1' }]);
     prismaMock.module.delete.mockRejectedValue(
       new Prisma.PrismaClientKnownRequestError('gone', { code: 'P2025', clientVersion: 'x' })
     );
 
     await expect(deleteModule({ slug: 'onboarding', ...ARGS })).rejects.toThrow(NotFoundError);
-    // The cache clear and audit run only after a successful delete.
-    expect(resolverMock.invalidateAllAgentAccess).not.toHaveBeenCalled();
+    // The evictions and audit run only after a successful delete.
+    expect(resolverMock.invalidateAgentAccess).not.toHaveBeenCalled();
     expect(auditMock.logAdminAction).not.toHaveBeenCalled();
   });
 });

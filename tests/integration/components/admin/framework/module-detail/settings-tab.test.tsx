@@ -91,6 +91,23 @@ describe('SettingsTab', () => {
     );
   });
 
+  it('preserves an untouched sub-minute window bound instead of truncating it', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiClient.patch).mockResolvedValue(undefined);
+
+    // A bound with non-zero seconds (set via seed / API); the minute-precision control can't
+    // represent :45, so an untouched save must send the ORIGINAL ISO, not a truncated one.
+    render(<SettingsTab settings={settings({ availableFrom: '2026-07-01T12:30:45.000Z' })} />);
+    await user.click(screen.getByRole('button', { name: /save settings/i }));
+
+    expect(apiClient.patch).toHaveBeenCalledWith(
+      PATCH_URL,
+      expect.objectContaining({
+        body: expect.objectContaining({ availableFrom: '2026-07-01T12:30:45.000Z' }),
+      })
+    );
+  });
+
   it('blocks an incoherent window client-side without calling the API', async () => {
     const user = userEvent.setup();
     render(<SettingsTab settings={settings()} />);
