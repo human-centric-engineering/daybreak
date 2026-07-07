@@ -92,6 +92,41 @@ describe('assertValidFacilitationPolicy — relevance_gating (t-2)', () => {
   });
 });
 
+describe('assertValidFacilitationPolicy — guard_minimum (t-3)', () => {
+  const valid = {
+    scope: { type: 'facilitation_role', id: 'onboarding' },
+    minimums: { output: 'block' },
+  };
+
+  it('accepts a well-formed guard_minimum policy', () => {
+    expect(() => assertValidFacilitationPolicy('guard_minimum', valid)).not.toThrow();
+  });
+
+  it('rejects a scope id that is not a facilitation role', () => {
+    expect(() =>
+      assertValidFacilitationPolicy('guard_minimum', {
+        ...valid,
+        scope: { type: 'facilitation_role', id: 'made_up' },
+      })
+    ).toThrow(ValidationError);
+  });
+
+  it('rejects empty minimums (at least one guard required)', () => {
+    expect(() =>
+      assertValidFacilitationPolicy('guard_minimum', { scope: valid.scope, minimums: {} })
+    ).toThrow(ValidationError);
+  });
+
+  it('rejects an invalid guard mode', () => {
+    expect(() =>
+      assertValidFacilitationPolicy('guard_minimum', {
+        scope: valid.scope,
+        minimums: { output: 'nuke' },
+      })
+    ).toThrow(ValidationError);
+  });
+});
+
 describe('facilitationPolicySchema (the discriminated union)', () => {
   it('rejects a mismatched kind/payload at the schema level', () => {
     expect(

@@ -22,7 +22,11 @@ import { isFacilitationRole } from '@/lib/framework/facilitation/agents/roles';
  * so the const can't go stale; (3) is a migration the author writes (a union member the CHECK
  * lacks would let Zod pass a write the DB then rejects — so extend the CHECK in the same task).
  */
-export const FACILITATION_POLICY_KINDS = ['auto_approval', 'relevance_gating'] as const;
+export const FACILITATION_POLICY_KINDS = [
+  'auto_approval',
+  'relevance_gating',
+  'guard_minimum',
+] as const;
 export type FacilitationPolicyKind = (typeof FACILITATION_POLICY_KINDS)[number];
 
 /**
@@ -79,6 +83,43 @@ const relevanceGatingPolicySchema = z.object({
 });
 
 /**
+ * Guard-minimums per scope (spec §5.5, F16 · f-policies t-3) — a scope can MANDATE an inline guard
+ * floor (raise a guard to at least `warn_and_continue`/`block`). Ships scoped to a facilitation
+ * `role` (the v1 unit; a `module` scope is an additive future value). `minimums` names a floor for
+ * any of the three inline guards; at least one is required. Enforced via the generic core
+ * guard-floor seam (`registerGuardFloorContributor`) — a floor only ever RAISES a guard.
+ */
+const guardFloorModeSchema = z.enum(['log_only', 'warn_and_continue', 'block']);
+
+export const guardMinimumPayloadSchema = z
+  .object({
+    scope: z
+      .object({
+        type: z.literal('facilitation_role'),
+        id: facilitationRoleSchema,
+      })
+      .strict(),
+    minimums: z
+      .object({
+        input: guardFloorModeSchema.optional(),
+        output: guardFloorModeSchema.optional(),
+        citation: guardFloorModeSchema.optional(),
+      })
+      .strict()
+      .refine((m) => m.input !== undefined || m.output !== undefined || m.citation !== undefined, {
+        message: 'Provide at least one guard minimum (input/output/citation)',
+      }),
+  })
+  .strict();
+
+export type GuardMinimumPayload = z.infer<typeof guardMinimumPayloadSchema>;
+
+const guardMinimumPolicySchema = z.object({
+  kind: z.literal('guard_minimum'),
+  payload: guardMinimumPayloadSchema,
+});
+
+/**
  * The discriminated union over every policy kind — validates that `payload` matches `kind`, and
  * rejects unknown kinds (the forward-compat guard). Each kind adds a member here (and a value to
  * the migration's `kind` CHECK + `FACILITATION_POLICY_KINDS`, kept in lockstep by the drift guard).
@@ -86,6 +127,7 @@ const relevanceGatingPolicySchema = z.object({
 export const facilitationPolicySchema = z.discriminatedUnion('kind', [
   autoApprovalPolicySchema,
   relevanceGatingPolicySchema,
+  guardMinimumPolicySchema,
 ]);
 
 export type FacilitationPolicyInput = z.infer<typeof facilitationPolicySchema>;
