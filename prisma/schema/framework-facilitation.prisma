@@ -166,3 +166,26 @@ model FacilitationAgentBinding {
   @@index([agentId])
   @@map("framework_facilitation_agent")
 }
+
+// Facilitation policy (f-policies t-1) — the typed governance-policy kinds (spec §5.5, F14):
+// ONE table, a free-form `kind` discriminator (+ a raw-SQL CHECK in the migration — the §546
+// free-string-plus-CHECK convention for a closed framework vocab, never a Prisma enum), and a
+// per-kind Zod-validated `payload`. NOT a rules blob. Kinds resolve by loading the enabled rows
+// of a kind and matching in code (admin-authored table, tens of rows — no JSON indexing). t-1
+// ships `auto_approval`; `relevance_gating` (t-2), `guard_minimum` (t-3), `escalation` (t-4) add
+// their kind to the CHECK + the `facilitationPolicySchema` discriminated union as they land.
+// `createdBy` is a PLAIN scalar FK to core `User` (no Prisma `@relation`, X6; `ON DELETE SET NULL`
+// hand-written — a policy is retained-config audit that outlives its author's erasure, like
+// `ModuleVersion.createdBy`), so no erasure cascade/hook (unlike the user-data journey/slot tables).
+model FacilitationPolicy {
+  id        String   @id @default(cuid())
+  kind      String // discriminator (auto_approval | …); CHECK-constrained in the migration, payload validated by facilitationPolicySchema
+  enabled   Boolean  @default(true)
+  payload   Json // per-kind config, validated by the kind's Zod schema
+  createdBy String? // FK to User.id — no @relation; ON DELETE SET NULL hand-written in the migration (retain on erasure)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([kind, enabled])
+  @@map("framework_facilitation_policy")
+}
