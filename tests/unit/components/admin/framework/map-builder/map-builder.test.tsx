@@ -14,7 +14,7 @@
 
 import type { ReactNode } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const router = vi.hoisted(() => ({ refresh: vi.fn(), push: vi.fn() }));
@@ -38,16 +38,22 @@ vi.mock('@xyflow/react', async () => {
     ReactFlowProvider: ({ children }: { children: ReactNode }) => children,
     ReactFlow: ({
       nodes,
+      edges,
       onNodeClick,
+      onEdgeClick,
       onNodesChange,
+      onConnect,
       children,
     }: {
       nodes: { id: string; data: { label: string } }[];
+      edges: { id: string }[];
       onNodeClick?: (e: unknown, node: unknown) => void;
+      onEdgeClick?: (e: unknown, edge: { id: string }) => void;
       onNodesChange?: (changes: { type: string; id: string }[]) => void;
+      onConnect?: (connection: { source: string; target: string }) => void;
       children?: ReactNode;
     }) => (
-      <div data-testid="rf" data-node-count={nodes.length}>
+      <div data-testid="rf" data-node-count={nodes.length} data-edge-count={edges.length}>
         {nodes.map((n) => (
           <button key={n.id} data-testid={`rf-node-${n.id}`} onClick={(e) => onNodeClick?.(e, n)}>
             {n.data.label}
@@ -57,6 +63,14 @@ vi.mock('@xyflow/react', async () => {
           data-testid="rf-move"
           onClick={() => onNodesChange?.([{ type: 'position', id: 'm' }])}
         />
+        <button
+          data-testid="rf-connect"
+          onClick={() => onConnect?.({ source: 'm', target: 'n' })}
+        />
+        <button
+          data-testid="rf-select-edge"
+          onClick={(e) => edges[0] && onEdgeClick?.(e, edges[0])}
+        />
         {children}
       </div>
     ),
@@ -64,6 +78,7 @@ vi.mock('@xyflow/react', async () => {
     Controls: () => null,
     MiniMap: () => null,
     MarkerType: { ArrowClosed: 'arrowclosed' },
+    addEdge: (edge: unknown, eds: unknown[]) => [...eds, edge],
     useReactFlow: () => ({ screenToFlowPosition: (p: unknown) => p }),
     useNodesState: stateful(),
     useEdgesState: stateful(),
@@ -218,6 +233,31 @@ describe('MapBuilder discard', () => {
     await user.click(screen.getByRole('button', { name: 'Discard draft' }));
     expect(api.patch).not.toHaveBeenCalled();
   });
+
+  it('surfaces a discard failure as an inline alert', async () => {
+    window.confirm = vi.fn(() => true);
+    api.patch.mockRejectedValueOnce(new Error('network down'));
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph({ draftDefinition: PUBLISHED_DEF })} />);
+
+    await user.click(screen.getByRole('button', { name: 'Discard draft' }));
+    // A non-APIClientError maps to the generic fallback message.
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to discard the draft');
+  });
+});
+
+describe('MapBuilder node add', () => {
+  it('adds a node dropped from the palette', () => {
+    render(<MapBuilder graph={graph()} />);
+    expect(screen.getByTestId('rf')).toHaveAttribute('data-node-count', '1');
+
+    fireEvent.drop(screen.getByTestId('map-canvas'), {
+      dataTransfer: { getData: () => 'stage' },
+      clientX: 10,
+      clientY: 10,
+    });
+    expect(screen.getByTestId('rf')).toHaveAttribute('data-node-count', '2');
+  });
 });
 
 describe('MapBuilder delete', () => {
@@ -230,5 +270,71 @@ describe('MapBuilder delete', () => {
     await user.click(screen.getByRole('button', { name: /Delete node/ }));
 
     expect(screen.getByTestId('rf')).toHaveAttribute('data-node-count', '0');
+  });
+});
+
+describe('MapBuilder edges', () => {
+  it('draws a default edge on connect', async () => {
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph()} />);
+    expect(screen.getByTestId('rf')).toHaveAttribute('data-edge-count', '0');
+
+    await user.click(screen.getByTestId('rf-connect'));
+    expect(screen.getByTestId('rf')).toHaveAttribute('data-edge-count', '1');
+  });
+
+  it('does not add an exact-duplicate connection (same pair + type)', async () => {
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph()} />);
+
+    await user.click(screen.getByTestId('rf-connect'));
+    await user.click(screen.getByTestId('rf-connect'));
+    // Both draws default to prerequisite m→n → the second is deduped.
+    expect(screen.getByTestId('rf')).toHaveAttribute('data-edge-count', '1');
+  });
+
+  it('allows a second, differently-typed edge between the same pair', async () => {
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph()} />);
+
+    // Draw m→n (prerequisite), retype it to unlocks, then draw m→n again.
+    await user.click(screen.getByTestId('rf-connect'));
+    await user.click(screen.getByTestId('rf-select-edge'));
+    await user.click(screen.getByTestId('edge-type-unlocks'));
+    await user.click(screen.getByTestId('rf-connect'));
+    // The new prerequisite m→n is distinct from the existing unlocks m→n.
+    expect(screen.getByTestId('rf')).toHaveAttribute('data-edge-count', '2');
+  });
+
+  it('selects a drawn edge, retypes it, then deletes it', async () => {
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph()} />);
+    await user.click(screen.getByTestId('rf-connect'));
+    await user.click(screen.getByTestId('rf-select-edge'));
+
+    expect(screen.getByTestId('map-edge-panel')).toBeInTheDocument();
+    // A freshly-drawn edge defaults to prerequisite.
+    expect(screen.getByTestId('edge-type-prerequisite')).toHaveAttribute('aria-checked', 'true');
+
+    await user.click(screen.getByTestId('edge-type-unlocks'));
+    expect(screen.getByTestId('edge-type-unlocks')).toHaveAttribute('aria-checked', 'true');
+
+    await user.click(screen.getByRole('button', { name: /Delete edge/ }));
+    expect(screen.getByTestId('rf')).toHaveAttribute('data-edge-count', '0');
+    expect(screen.queryByTestId('map-edge-panel')).not.toBeInTheDocument();
+  });
+
+  it('shows the edge inspector in place of the node panel (mutually exclusive)', async () => {
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph()} />);
+
+    await user.click(screen.getByTestId('rf-node-m'));
+    expect(screen.getByTestId('map-node-panel')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('rf-connect'));
+    await user.click(screen.getByTestId('rf-select-edge'));
+
+    expect(screen.queryByTestId('map-node-panel')).not.toBeInTheDocument();
+    expect(screen.getByTestId('map-edge-panel')).toBeInTheDocument();
   });
 });

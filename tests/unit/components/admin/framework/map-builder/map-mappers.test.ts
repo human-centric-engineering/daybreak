@@ -89,6 +89,8 @@ describe('mapDefinitionToFlow', () => {
     };
     const { edges } = mapDefinitionToFlow(def);
     expect(edges).toHaveLength(1);
+    // Flow edges carry the custom edge type so `MapEdge` renders them.
+    expect(edges[0].type).toBe('map');
     expect(edges[0].data?.edgeType).toBe('unlocks');
     expect(edges[0].data?.condition).toEqual({ family: 'state', milestone: 'a', reached: true });
   });

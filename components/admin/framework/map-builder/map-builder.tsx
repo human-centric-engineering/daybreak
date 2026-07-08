@@ -19,21 +19,23 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertCircle, Check, Trash2 } from 'lucide-react';
-import { ReactFlowProvider, useEdgesState, useNodesState, type Edge } from '@xyflow/react';
+import { ReactFlowProvider, useEdgesState, useNodesState, type Connection } from '@xyflow/react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { logger } from '@/lib/logging';
-import { mapDefinitionSchema } from '@/lib/framework/facilitation/map/schema';
+import { mapDefinitionSchema, type EdgeType } from '@/lib/framework/facilitation/map/schema';
 
 import { MapCanvas } from '@/components/admin/framework/map-builder/map-canvas';
 import { MapPalette } from '@/components/admin/framework/map-builder/map-palette';
 import { mapNodeKind } from '@/components/admin/framework/map-builder/map-node-kinds';
+import { EdgeInspector } from '@/components/admin/framework/map-builder/edge-inspector';
+import { makeMapEdge } from '@/components/admin/framework/map-builder/add-map-edge';
 import {
   flowToMapDefinition,
   mapDefinitionToFlow,
-  type MapEdgeData,
+  type MapFlowEdge,
   type MapFlowNode,
 } from '@/components/admin/framework/map-builder/map-mappers';
 
@@ -55,21 +57,21 @@ function pickEditableDefinition(graph: MapEditorGraph): unknown {
   return graph.publishedVersion?.definition ?? null;
 }
 
-function toFlow(definition: unknown): { nodes: MapFlowNode[]; edges: Edge<MapEdgeData>[] } {
+function toFlow(definition: unknown): { nodes: MapFlowNode[]; edges: MapFlowEdge[] } {
   const parsed = mapDefinitionSchema.safeParse(definition);
   if (!parsed.success) return { nodes: [], edges: [] };
   return mapDefinitionToFlow(parsed.data);
 }
 
 /** Seed the canvas from the editable definition (draft-first, then published). */
-function seedFlow(graph: MapEditorGraph): { nodes: MapFlowNode[]; edges: Edge<MapEdgeData>[] } {
+function seedFlow(graph: MapEditorGraph): { nodes: MapFlowNode[]; edges: MapFlowEdge[] } {
   return toFlow(pickEditableDefinition(graph));
 }
 
 /** Seed the canvas from the published snapshot only (the discard fallback). */
 function publishedFlow(graph: MapEditorGraph): {
   nodes: MapFlowNode[];
-  edges: Edge<MapEdgeData>[];
+  edges: MapFlowEdge[];
 } {
   return toFlow(graph.publishedVersion?.definition ?? null);
 }
@@ -83,8 +85,9 @@ function MapBuilderInner({ graph }: { graph: MapEditorGraph }) {
   const seed = useMemo(() => seedFlow(graph), [graph]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<MapFlowNode>(seed.nodes);
-  const [edges, setEdges] = useEdgesState<Edge<MapEdgeData>>(seed.edges);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<MapFlowEdge>(seed.edges);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
 
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -115,6 +118,60 @@ function MapBuilderInner({ graph }: { graph: MapEditorGraph }) {
       setSaved(false);
     },
     [setEdges, setNodes]
+  );
+
+  // Node and edge selection are mutually exclusive — a click on one clears the other,
+  // so only one inspector shows at a time. A pane click (nodeId === null) clears both.
+  const handleNodeSelect = useCallback((nodeId: string | null) => {
+    setSelectedNodeId(nodeId);
+    setSelectedEdgeId(null);
+  }, []);
+
+  const handleEdgeSelect = useCallback((edgeId: string) => {
+    setSelectedEdgeId(edgeId);
+    setSelectedNodeId(null);
+  }, []);
+
+  // Drawing a connection materialises a default typed edge (decision 6:
+  // draw-then-inspect — the author retypes it in the edge inspector). We dedupe on
+  // source+target+*type* (not xyflow's `addEdge`, which ignores type) so the schema's
+  // allowance of several differently-typed edges between the same pair is drawable —
+  // while still blocking an exact-duplicate connection.
+  const handleConnect = useCallback(
+    (connection: Connection) => {
+      const edge = makeMapEdge(connection);
+      if (!edge) return;
+      setEdges((prev) => {
+        const dup = prev.some(
+          (e) =>
+            e.source === edge.source &&
+            e.target === edge.target &&
+            e.data?.edgeType === edge.data?.edgeType
+        );
+        return dup ? prev : [...prev, edge];
+      });
+      setSaved(false);
+    },
+    [setEdges]
+  );
+
+  const handleEdgeTypeChange = useCallback(
+    (edgeId: string, type: EdgeType) => {
+      setEdges((prev) =>
+        prev.map((e) => (e.id === edgeId ? { ...e, data: { ...e.data, edgeType: type } } : e))
+      );
+      setSaved(false);
+    },
+    [setEdges]
+  );
+
+  const handleEdgeDelete = useCallback(
+    (edgeId: string) => {
+      setEdges((prev) => prev.filter((e) => e.id !== edgeId));
+      setSelectedEdgeId(null);
+      setSaved(false);
+    },
+    [setEdges]
   );
 
   const handleSave = useCallback(async () => {
@@ -178,6 +235,7 @@ function MapBuilderInner({ graph }: { graph: MapEditorGraph }) {
   );
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
+  const selectedEdge = edges.find((e) => e.id === selectedEdgeId) ?? null;
 
   const statusPill =
     graph.publishedVersion === null
@@ -237,10 +295,21 @@ function MapBuilderInner({ graph }: { graph: MapEditorGraph }) {
           nodes={nodes}
           edges={edges}
           onNodesChange={handleNodesChange}
-          onNodeClick={setSelectedNodeId}
+          onEdgesChange={onEdgesChange}
+          onConnect={handleConnect}
+          onNodeClick={handleNodeSelect}
+          onEdgeClick={handleEdgeSelect}
           onNodeAdd={handleNodeAdd}
         />
-        {selectedNode && <SelectedNodePanel node={selectedNode} onDelete={handleNodeDelete} />}
+        {selectedNode ? (
+          <SelectedNodePanel node={selectedNode} onDelete={handleNodeDelete} />
+        ) : selectedEdge ? (
+          <EdgeInspector
+            edge={selectedEdge}
+            onTypeChange={handleEdgeTypeChange}
+            onDelete={handleEdgeDelete}
+          />
+        ) : null}
       </div>
     </div>
   );

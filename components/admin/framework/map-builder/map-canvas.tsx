@@ -10,10 +10,10 @@
  * (rejects unknown types), and computes the canvas-space position via
  * `screenToFlowPosition` before asking the parent to add the node.
  *
- * Edge *drawing* is t-2: nodes are draggable + selectable here, but not connectable,
- * and existing edges render read-only. Keyboard delete is disabled (`deleteKeyCode`
- * null) so node removal has a single path — the inspector's Delete button — that
- * also cleans up connected edges.
+ * Edge drawing (t-2): nodes are connectable — dragging from a node's handle fires
+ * `onConnect`, and the parent materialises a default typed edge. Keyboard delete is
+ * disabled (`deleteKeyCode` null) so node/edge removal has a single path — the
+ * inspector's Delete button — that also cleans up connected edges.
  */
 
 import { useCallback } from 'react';
@@ -25,7 +25,8 @@ import {
   MiniMap,
   ReactFlow,
   useReactFlow,
-  type Edge,
+  type OnConnect,
+  type OnEdgesChange,
   type OnNodesChange,
 } from '@xyflow/react';
 
@@ -34,18 +35,35 @@ import '@xyflow/react/dist/style.css';
 import { useTheme } from '@/hooks/use-theme';
 import { addMapNode, isNodeType } from '@/components/admin/framework/map-builder/add-map-node';
 import { mapNodeTypes } from '@/components/admin/framework/map-builder/map-node';
-import type { MapFlowNode } from '@/components/admin/framework/map-builder/map-mappers';
+import { mapEdgeTypes } from '@/components/admin/framework/map-builder/map-edge';
+import {
+  EDGE_FLOW_TYPE,
+  type MapFlowEdge,
+  type MapFlowNode,
+} from '@/components/admin/framework/map-builder/map-mappers';
 
 export interface MapCanvasProps {
   nodes: MapFlowNode[];
-  edges: Edge[];
+  edges: MapFlowEdge[];
   onNodesChange: OnNodesChange<MapFlowNode>;
+  onEdgesChange: OnEdgesChange<MapFlowEdge>;
+  onConnect: OnConnect;
   onNodeClick: (nodeId: string | null) => void;
+  onEdgeClick: (edgeId: string) => void;
   /** Called with a freshly-built node when the user drops a palette block. */
   onNodeAdd: (node: MapFlowNode) => void;
 }
 
-export function MapCanvas({ nodes, edges, onNodesChange, onNodeClick, onNodeAdd }: MapCanvasProps) {
+export function MapCanvas({
+  nodes,
+  edges,
+  onNodesChange,
+  onEdgesChange,
+  onConnect,
+  onNodeClick,
+  onEdgeClick,
+  onNodeAdd,
+}: MapCanvasProps) {
   const { screenToFlowPosition } = useReactFlow();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
@@ -86,17 +104,20 @@ export function MapCanvas({ nodes, edges, onNodesChange, onNodeClick, onNodeAdd 
           </p>
         </div>
       )}
-      <ReactFlow<MapFlowNode>
+      <ReactFlow<MapFlowNode, MapFlowEdge>
         nodes={nodes}
         edges={edges}
         nodeTypes={mapNodeTypes}
+        edgeTypes={mapEdgeTypes}
         onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        onConnect={onConnect}
         onNodeClick={(_, node) => onNodeClick(node.id)}
+        onEdgeClick={(_, edge) => onEdgeClick(edge.id)}
         onPaneClick={() => onNodeClick(null)}
         colorMode={isDark ? 'dark' : 'light'}
-        nodesConnectable={false}
         deleteKeyCode={null}
-        defaultEdgeOptions={{ markerEnd: { type: MarkerType.ArrowClosed } }}
+        defaultEdgeOptions={{ type: EDGE_FLOW_TYPE, markerEnd: { type: MarkerType.ArrowClosed } }}
         snapToGrid
         snapGrid={[16, 16]}
         fitView
