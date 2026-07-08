@@ -72,4 +72,14 @@ describe('FrameworkMapEditorPage (server component)', () => {
 
     expect(screen.getByRole('alert')).toHaveTextContent(/couldn’t be loaded/i);
   });
+
+  it('renders the couldn’t-load state when serverFetch throws', async () => {
+    const { serverFetch } = await import('@/lib/api/server-fetch');
+    vi.mocked(serverFetch).mockRejectedValue(new Error('network down'));
+
+    const { default: Page } = await import('@/app/admin/framework/maps/[slug]/page');
+    render(await Page({ params: Promise.resolve({ slug: 'demo' }) }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent(/couldn’t be loaded/i);
+  });
 });

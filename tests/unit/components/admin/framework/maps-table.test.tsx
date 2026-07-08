@@ -120,4 +120,37 @@ describe('MapsTable create', () => {
     expect(api.post).not.toHaveBeenCalled();
     expect(screen.getByRole('alert')).toHaveTextContent(/name and a slug are both required/i);
   });
+
+  it('honours a directly-edited slug and an optional description', async () => {
+    const user = userEvent.setup();
+    render(<MapsTable initialMaps={[]} />);
+
+    await user.click(screen.getByRole('button', { name: /New map/ }));
+    await user.type(screen.getByLabelText('Name'), 'Onboarding');
+    // Editing the slug decouples it from the name mirror. (The label carries a
+    // FieldHelp trigger, so locate the input by its placeholder.)
+    const slug = screen.getByPlaceholderText('onboarding-journey');
+    await user.clear(slug);
+    await user.type(slug, 'custom-slug');
+    await user.type(screen.getByLabelText(/Description/), 'What it does');
+    await user.click(screen.getByRole('button', { name: 'Create map' }));
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    expect(api.post).toHaveBeenCalledWith('/api/v1/admin/framework/maps', {
+      body: { slug: 'custom-slug', name: 'Onboarding', description: 'What it does' },
+    });
+  });
+
+  it('surfaces a create failure without routing away', async () => {
+    api.post.mockRejectedValueOnce(new Error('slug already in use'));
+    const user = userEvent.setup();
+    render(<MapsTable initialMaps={[]} />);
+
+    await user.click(screen.getByRole('button', { name: /New map/ }));
+    await user.type(screen.getByLabelText('Name'), 'Dup');
+    await user.click(screen.getByRole('button', { name: 'Create map' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('slug already in use');
+    expect(router.push).not.toHaveBeenCalled();
+  });
 });

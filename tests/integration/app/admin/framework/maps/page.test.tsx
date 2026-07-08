@@ -71,4 +71,18 @@ describe('FrameworkMapsPage (server component)', () => {
 
     expect(screen.getByText(/No facilitation maps yet/)).toBeInTheDocument();
   });
+
+  it('renders the empty state when the envelope is unsuccessful', async () => {
+    const { serverFetch, parseApiResponse } = await import('@/lib/api/server-fetch');
+    vi.mocked(serverFetch).mockResolvedValue({ ok: true } as Response);
+    vi.mocked(parseApiResponse).mockResolvedValue({
+      success: false,
+      error: { code: 'X', message: 'nope' },
+    });
+
+    const { default: Page } = await import('@/app/admin/framework/maps/page');
+    render(await Page());
+
+    expect(screen.getByText(/No facilitation maps yet/)).toBeInTheDocument();
+  });
 });

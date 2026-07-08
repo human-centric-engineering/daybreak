@@ -116,6 +116,27 @@ describe('MapBuilder header', () => {
     render(<MapBuilder graph={graph({ draftDefinition: PUBLISHED_DEF })} />);
     expect(screen.getByRole('button', { name: 'Discard draft' })).toBeEnabled();
   });
+
+  it('shows the Unpublished status when the map has no published version', () => {
+    render(<MapBuilder graph={graph({ publishedVersion: null })} />);
+    expect(screen.getByText('Unpublished')).toBeInTheDocument();
+  });
+
+  it('reflects a draft on a published map in the status pill', () => {
+    render(<MapBuilder graph={graph({ draftDefinition: PUBLISHED_DEF })} />);
+    expect(screen.getByText(/Published v2 · editing draft/)).toBeInTheDocument();
+  });
+});
+
+describe('MapBuilder selection', () => {
+  it('shows the selected node’s identity and module binding in the panel', async () => {
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph()} />);
+    await user.click(screen.getByTestId('rf-node-m'));
+    const panel = screen.getByTestId('map-node-panel');
+    expect(panel).toHaveTextContent('Module');
+    expect(panel).toHaveTextContent('m');
+  });
 });
 
 describe('MapBuilder save', () => {
@@ -136,6 +157,17 @@ describe('MapBuilder save', () => {
       y: 0,
     });
     expect(router.refresh).toHaveBeenCalled();
+  });
+
+  it('surfaces a save failure as an inline alert', async () => {
+    api.patch.mockRejectedValueOnce(new Error('boom'));
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph()} />);
+
+    await user.click(screen.getByRole('button', { name: 'Save draft' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('boom');
+    expect(router.refresh).not.toHaveBeenCalled();
   });
 });
 

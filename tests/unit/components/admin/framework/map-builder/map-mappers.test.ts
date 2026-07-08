@@ -137,6 +137,43 @@ describe('flowToMapDefinition', () => {
     expect(def.edges).toEqual([{ from: 'a', to: 'b', type: 'tangent' }]);
   });
 
+  it('round-trips every node field and a conditioned edge back to a valid definition', () => {
+    const def: MapDefinition = {
+      nodes: [
+        node('gate', {
+          type: 'milestone',
+          stage: 'level-1',
+          region: 'zone',
+          onFirstArrival: { workflowSlug: 'welcome', agentSlug: 'greeter' },
+        }),
+        node('zone', { type: 'region' }),
+        node('m', { type: 'module', moduleSlug: 'onboarding' }),
+      ],
+      edges: [
+        {
+          from: 'gate',
+          to: 'm',
+          type: 'unlocks',
+          condition: { family: 'slot', slug: 's', op: 'gte', value: 3 },
+        },
+      ],
+    };
+    const { nodes, edges } = mapDefinitionToFlow(def);
+    const back = flowToMapDefinition(nodes, edges);
+
+    expect(mapDefinitionSchema.safeParse(back).success).toBe(true);
+    const gate = back.nodes.find((n) => n.key === 'gate')!;
+    expect(gate.stage).toBe('level-1');
+    expect(gate.region).toBe('zone');
+    expect(gate.onFirstArrival).toEqual({ workflowSlug: 'welcome', agentSlug: 'greeter' });
+    expect(back.edges[0]).toEqual({
+      from: 'gate',
+      to: 'm',
+      type: 'unlocks',
+      condition: { family: 'slot', slug: 's', op: 'gte', value: 3 },
+    });
+  });
+
   it('preserves non-layout meta keys across the round-trip', () => {
     const def: MapDefinition = {
       nodes: [node('a', { meta: { note: 'hi', _layout: { x: 5, y: 5 } } })],

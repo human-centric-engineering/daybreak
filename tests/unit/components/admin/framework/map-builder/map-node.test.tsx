@@ -59,4 +59,9 @@ describe('MapNode', () => {
     expect(screen.getByText('stage-1')).toBeInTheDocument();
     expect(screen.getByTestId('map-node-stage')).toBeInTheDocument();
   });
+
+  it('paints a selection ring when selected', () => {
+    renderNode({ label: 'sel' }, true);
+    expect(screen.getByTestId('map-node-milestone').className).toContain('ring-primary');
+  });
 });
