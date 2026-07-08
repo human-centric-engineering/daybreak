@@ -16,7 +16,7 @@
  * `initLeafAdminNav()`. Registration is idempotent by section `title`.
  */
 
-import { Boxes, Route } from 'lucide-react';
+import { Boxes, Map, Route } from 'lucide-react';
 import { registerNavSection } from '@/lib/admin-nav/registry';
 
 export function initFrameworkNav(): void {
@@ -28,6 +28,12 @@ export function initFrameworkNav(): void {
         label: 'Modules',
         icon: Boxes,
         description: 'Registered modules — config, bindings, lifecycle',
+      },
+      {
+        href: '/admin/framework/maps',
+        label: 'Maps',
+        icon: Map,
+        description: 'Author and publish facilitation maps',
       },
       {
         href: '/admin/framework/journeys',
