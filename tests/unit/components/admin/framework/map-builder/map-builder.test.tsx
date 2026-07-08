@@ -14,7 +14,7 @@
 
 import type { ReactNode } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const router = vi.hoisted(() => ({ refresh: vi.fn(), push: vi.fn() }));
@@ -232,6 +232,31 @@ describe('MapBuilder discard', () => {
 
     await user.click(screen.getByRole('button', { name: 'Discard draft' }));
     expect(api.patch).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a discard failure as an inline alert', async () => {
+    window.confirm = vi.fn(() => true);
+    api.patch.mockRejectedValueOnce(new Error('network down'));
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph({ draftDefinition: PUBLISHED_DEF })} />);
+
+    await user.click(screen.getByRole('button', { name: 'Discard draft' }));
+    // A non-APIClientError maps to the generic fallback message.
+    expect(await screen.findByRole('alert')).toHaveTextContent('Failed to discard the draft');
+  });
+});
+
+describe('MapBuilder node add', () => {
+  it('adds a node dropped from the palette', () => {
+    render(<MapBuilder graph={graph()} />);
+    expect(screen.getByTestId('rf')).toHaveAttribute('data-node-count', '1');
+
+    fireEvent.drop(screen.getByTestId('map-canvas'), {
+      dataTransfer: { getData: () => 'stage' },
+      clientX: 10,
+      clientY: 10,
+    });
+    expect(screen.getByTestId('rf')).toHaveAttribute('data-node-count', '2');
   });
 });
 

@@ -42,6 +42,37 @@ describe('MapEdge', () => {
     expect(label).toHaveTextContent('Unlocks');
   });
 
+  it('renders a dashed advisory edge and a selected edge without crashing', () => {
+    const { rerender } = renderEdge({ edgeType: 'tangent' }, true);
+    expect(screen.getByTestId('map-edge-label-e1')).toHaveAttribute('data-edge-type', 'tangent');
+    rerender(
+      <MapEdge
+        {...({
+          id: 'e1',
+          sourceX: 0,
+          sourceY: 0,
+          targetX: 10,
+          targetY: 10,
+          data: { edgeType: 'related_to' },
+          selected: true,
+        } as unknown as EdgeProps)}
+      />
+    );
+    expect(screen.getByTestId('map-edge-label-e1')).toHaveAttribute('data-edge-type', 'related_to');
+  });
+
+  it('falls back to prerequisite when data is absent', () => {
+    render(
+      <MapEdge
+        {...({ id: 'e1', sourceX: 0, sourceY: 0, targetX: 1, targetY: 1 } as unknown as EdgeProps)}
+      />
+    );
+    expect(screen.getByTestId('map-edge-label-e1')).toHaveAttribute(
+      'data-edge-type',
+      'prerequisite'
+    );
+  });
+
   it('shows a gated badge only when the edge carries a condition', () => {
     const { rerender } = renderEdge({ edgeType: 'prerequisite' });
     expect(screen.queryByLabelText('gated')).not.toBeInTheDocument();
