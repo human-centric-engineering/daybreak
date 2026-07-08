@@ -15,8 +15,14 @@ import { BaseEdge, EdgeLabelRenderer, getBezierPath, type EdgeProps } from '@xyf
 import { Zap } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
-import { mapEdgeKind } from '@/components/admin/framework/map-builder/map-edge-kinds';
-import type { MapEdgeData } from '@/components/admin/framework/map-builder/map-mappers';
+import {
+  DEFAULT_EDGE_TYPE,
+  mapEdgeKind,
+} from '@/components/admin/framework/map-builder/map-edge-kinds';
+import {
+  EDGE_FLOW_TYPE,
+  type MapEdgeData,
+} from '@/components/admin/framework/map-builder/map-mappers';
 
 export function MapEdge({
   id,
@@ -30,7 +36,7 @@ export function MapEdge({
   selected,
   data,
 }: EdgeProps): React.ReactElement {
-  const edgeType = (data as MapEdgeData | undefined)?.edgeType ?? 'prerequisite';
+  const edgeType = (data as MapEdgeData | undefined)?.edgeType ?? DEFAULT_EDGE_TYPE;
   const hasCondition = Boolean((data as MapEdgeData | undefined)?.condition);
   const kind = mapEdgeKind(edgeType);
 
@@ -78,5 +84,6 @@ export function MapEdge({
 }
 
 /** The `edgeTypes` map for the map canvas (one custom type, styled by `data.edgeType`).
- *  Frozen at module scope per the React Flow recommendation. */
-export const mapEdgeTypes = { map: MapEdge } as const;
+ *  Frozen at module scope per the React Flow recommendation; the key is the shared
+ *  `EDGE_FLOW_TYPE` so the registry and `defaultEdgeOptions.type` can't drift. */
+export const mapEdgeTypes = { [EDGE_FLOW_TYPE]: MapEdge } as const;

@@ -19,13 +19,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertCircle, Check, Trash2 } from 'lucide-react';
-import {
-  addEdge,
-  ReactFlowProvider,
-  useEdgesState,
-  useNodesState,
-  type Connection,
-} from '@xyflow/react';
+import { ReactFlowProvider, useEdgesState, useNodesState, type Connection } from '@xyflow/react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -91,7 +85,7 @@ function MapBuilderInner({ graph }: { graph: MapEditorGraph }) {
   const seed = useMemo(() => seedFlow(graph), [graph]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState<MapFlowNode>(seed.nodes);
-  const [edges, setEdges] = useEdgesState<MapFlowEdge>(seed.edges);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<MapFlowEdge>(seed.edges);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
 
@@ -139,13 +133,23 @@ function MapBuilderInner({ graph }: { graph: MapEditorGraph }) {
   }, []);
 
   // Drawing a connection materialises a default typed edge (decision 6:
-  // draw-then-inspect — the author retypes it in the edge inspector). `addEdge`
-  // dedupes an identical source→target connection.
+  // draw-then-inspect — the author retypes it in the edge inspector). We dedupe on
+  // source+target+*type* (not xyflow's `addEdge`, which ignores type) so the schema's
+  // allowance of several differently-typed edges between the same pair is drawable —
+  // while still blocking an exact-duplicate connection.
   const handleConnect = useCallback(
     (connection: Connection) => {
       const edge = makeMapEdge(connection);
       if (!edge) return;
-      setEdges((prev) => addEdge(edge, prev));
+      setEdges((prev) => {
+        const dup = prev.some(
+          (e) =>
+            e.source === edge.source &&
+            e.target === edge.target &&
+            e.data?.edgeType === edge.data?.edgeType
+        );
+        return dup ? prev : [...prev, edge];
+      });
       setSaved(false);
     },
     [setEdges]
@@ -291,6 +295,7 @@ function MapBuilderInner({ graph }: { graph: MapEditorGraph }) {
           nodes={nodes}
           edges={edges}
           onNodesChange={handleNodesChange}
+          onEdgesChange={onEdgesChange}
           onConnect={handleConnect}
           onNodeClick={handleNodeSelect}
           onEdgeClick={handleEdgeSelect}

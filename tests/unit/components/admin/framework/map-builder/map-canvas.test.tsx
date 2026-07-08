@@ -54,6 +54,7 @@ function renderCanvas(over: Partial<React.ComponentProps<typeof MapCanvas>> = {}
     nodes: [],
     edges: [],
     onNodesChange: vi.fn(),
+    onEdgesChange: vi.fn(),
     onConnect: vi.fn(),
     onNodeClick: vi.fn(),
     onEdgeClick: vi.fn(),

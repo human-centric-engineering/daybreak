@@ -26,6 +26,7 @@ import {
   ReactFlow,
   useReactFlow,
   type OnConnect,
+  type OnEdgesChange,
   type OnNodesChange,
 } from '@xyflow/react';
 
@@ -35,15 +36,17 @@ import { useTheme } from '@/hooks/use-theme';
 import { addMapNode, isNodeType } from '@/components/admin/framework/map-builder/add-map-node';
 import { mapNodeTypes } from '@/components/admin/framework/map-builder/map-node';
 import { mapEdgeTypes } from '@/components/admin/framework/map-builder/map-edge';
-import type {
-  MapFlowEdge,
-  MapFlowNode,
+import {
+  EDGE_FLOW_TYPE,
+  type MapFlowEdge,
+  type MapFlowNode,
 } from '@/components/admin/framework/map-builder/map-mappers';
 
 export interface MapCanvasProps {
   nodes: MapFlowNode[];
   edges: MapFlowEdge[];
   onNodesChange: OnNodesChange<MapFlowNode>;
+  onEdgesChange: OnEdgesChange<MapFlowEdge>;
   onConnect: OnConnect;
   onNodeClick: (nodeId: string | null) => void;
   onEdgeClick: (edgeId: string) => void;
@@ -55,6 +58,7 @@ export function MapCanvas({
   nodes,
   edges,
   onNodesChange,
+  onEdgesChange,
   onConnect,
   onNodeClick,
   onEdgeClick,
@@ -106,13 +110,14 @@ export function MapCanvas({
         nodeTypes={mapNodeTypes}
         edgeTypes={mapEdgeTypes}
         onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onNodeClick={(_, node) => onNodeClick(node.id)}
         onEdgeClick={(_, edge) => onEdgeClick(edge.id)}
         onPaneClick={() => onNodeClick(null)}
         colorMode={isDark ? 'dark' : 'light'}
         deleteKeyCode={null}
-        defaultEdgeOptions={{ type: 'map', markerEnd: { type: MarkerType.ArrowClosed } }}
+        defaultEdgeOptions={{ type: EDGE_FLOW_TYPE, markerEnd: { type: MarkerType.ArrowClosed } }}
         snapToGrid
         snapGrid={[16, 16]}
         fitView

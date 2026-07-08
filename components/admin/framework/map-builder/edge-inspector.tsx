@@ -14,7 +14,10 @@ import { ArrowRight, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { MAP_EDGE_KINDS } from '@/components/admin/framework/map-builder/map-edge-kinds';
+import {
+  DEFAULT_EDGE_TYPE,
+  MAP_EDGE_KINDS,
+} from '@/components/admin/framework/map-builder/map-edge-kinds';
 import type { MapFlowEdge } from '@/components/admin/framework/map-builder/map-mappers';
 import type { EdgeType } from '@/lib/framework/facilitation/map/schema';
 
@@ -25,7 +28,7 @@ export interface EdgeInspectorProps {
 }
 
 export function EdgeInspector({ edge, onTypeChange, onDelete }: EdgeInspectorProps) {
-  const currentType = edge.data?.edgeType ?? 'prerequisite';
+  const currentType = edge.data?.edgeType ?? DEFAULT_EDGE_TYPE;
   const hasCondition = Boolean(edge.data?.condition);
 
   return (

@@ -283,6 +283,29 @@ describe('MapBuilder edges', () => {
     expect(screen.getByTestId('rf')).toHaveAttribute('data-edge-count', '1');
   });
 
+  it('does not add an exact-duplicate connection (same pair + type)', async () => {
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph()} />);
+
+    await user.click(screen.getByTestId('rf-connect'));
+    await user.click(screen.getByTestId('rf-connect'));
+    // Both draws default to prerequisite m→n → the second is deduped.
+    expect(screen.getByTestId('rf')).toHaveAttribute('data-edge-count', '1');
+  });
+
+  it('allows a second, differently-typed edge between the same pair', async () => {
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph()} />);
+
+    // Draw m→n (prerequisite), retype it to unlocks, then draw m→n again.
+    await user.click(screen.getByTestId('rf-connect'));
+    await user.click(screen.getByTestId('rf-select-edge'));
+    await user.click(screen.getByTestId('edge-type-unlocks'));
+    await user.click(screen.getByTestId('rf-connect'));
+    // The new prerequisite m→n is distinct from the existing unlocks m→n.
+    expect(screen.getByTestId('rf')).toHaveAttribute('data-edge-count', '2');
+  });
+
   it('selects a drawn edge, retypes it, then deletes it', async () => {
     const user = userEvent.setup();
     render(<MapBuilder graph={graph()} />);
