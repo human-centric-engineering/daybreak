@@ -66,6 +66,8 @@ export type MapFlowNode = Node<MapNodeData, 'map'>;
 export interface MapEdgeData extends Record<string, unknown> {
   edgeType: MapEdge['type'];
   condition?: MapCondition;
+  /** Authored edge metadata, opaque to the engine — preserved across the round-trip. */
+  meta?: Record<string, unknown>;
 }
 
 /** Read the persisted `{ x, y }` from a node's `meta._layout`, or null if absent/malformed. */
@@ -108,6 +110,7 @@ export function mapDefinitionToFlow(definition: MapDefinition): {
   const nodes: MapFlowNode[] = definition.nodes.map((node) => {
     const stored = readLayout(node.meta);
     const position = stored ?? autoPos.get(node.key) ?? { x: 0, y: 0 };
+    const dataMeta = stripLayout(node.meta);
     return {
       id: node.key,
       type: NODE_TYPE,
@@ -120,7 +123,7 @@ export function mapDefinitionToFlow(definition: MapDefinition): {
         ...(node.region ? { region: node.region } : {}),
         completionMode: node.completionMode,
         ...(node.onFirstArrival ? { onFirstArrival: node.onFirstArrival } : {}),
-        ...(stripLayout(node.meta) ? { meta: stripLayout(node.meta) } : {}),
+        ...(dataMeta ? { meta: dataMeta } : {}),
         hasError: false,
       },
     };
@@ -135,7 +138,11 @@ export function mapDefinitionToFlow(definition: MapDefinition): {
       source: e.from,
       target: e.to,
       label: e.type,
-      data: { edgeType: e.type, ...(e.condition ? { condition: e.condition } : {}) },
+      data: {
+        edgeType: e.type,
+        ...(e.condition ? { condition: e.condition } : {}),
+        ...(e.meta ? { meta: e.meta } : {}),
+      },
     }));
 
   return { nodes, edges };
@@ -180,6 +187,7 @@ export function flowToMapDefinition(
       to: e.target,
       type: e.data?.edgeType ?? 'prerequisite',
       ...(e.data?.condition ? { condition: e.data.condition } : {}),
+      ...(e.data?.meta ? { meta: e.data.meta } : {}),
     }));
 
   return { nodes: mapNodes, edges: mapEdges };

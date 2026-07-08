@@ -93,6 +93,15 @@ describe('mapDefinitionToFlow', () => {
     expect(edges[0].data?.condition).toEqual({ family: 'state', milestone: 'a', reached: true });
   });
 
+  it('carries edge meta into edge.data', () => {
+    const def: MapDefinition = {
+      nodes: [node('a'), node('b')],
+      edges: [{ from: 'a', to: 'b', type: 'related_to', meta: { note: 'why' } }],
+    };
+    const { edges } = mapDefinitionToFlow(def);
+    expect(edges[0].data?.meta).toEqual({ note: 'why' });
+  });
+
   it('drops an edge whose endpoint does not resolve', () => {
     const def: MapDefinition = {
       nodes: [node('a')],
@@ -182,6 +191,16 @@ describe('flowToMapDefinition', () => {
     const { nodes } = mapDefinitionToFlow(def);
     const back = flowToMapDefinition(nodes, []);
     expect(back.nodes[0].meta).toEqual({ note: 'hi', _layout: { x: 5, y: 5 } });
+  });
+
+  it('round-trips edge meta back into the definition', () => {
+    const def: MapDefinition = {
+      nodes: [node('a'), node('b')],
+      edges: [{ from: 'a', to: 'b', type: 'tangent', meta: { note: 'keep' } }],
+    };
+    const { nodes, edges } = mapDefinitionToFlow(def);
+    const back = flowToMapDefinition(nodes, edges);
+    expect(back.edges[0]).toEqual({ from: 'a', to: 'b', type: 'tangent', meta: { note: 'keep' } });
   });
 });
 

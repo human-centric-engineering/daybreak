@@ -141,6 +141,18 @@ describe('MapsTable create', () => {
     });
   });
 
+  it('resets the form when the dialog is cancelled and reopened', async () => {
+    const user = userEvent.setup();
+    render(<MapsTable initialMaps={[]} />);
+
+    await user.click(screen.getByRole('button', { name: /New map/ }));
+    await user.type(screen.getByLabelText('Name'), 'Scratch');
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await user.click(screen.getByRole('button', { name: /New map/ }));
+    expect(screen.getByLabelText('Name')).toHaveValue('');
+  });
+
   it('surfaces a create failure without routing away', async () => {
     api.post.mockRejectedValueOnce(new Error('slug already in use'));
     const user = userEvent.setup();

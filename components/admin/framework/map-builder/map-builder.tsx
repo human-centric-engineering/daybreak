@@ -55,10 +55,23 @@ function pickEditableDefinition(graph: MapEditorGraph): unknown {
   return graph.publishedVersion?.definition ?? null;
 }
 
-function seedFlow(graph: MapEditorGraph): { nodes: MapFlowNode[]; edges: Edge<MapEdgeData>[] } {
-  const parsed = mapDefinitionSchema.safeParse(pickEditableDefinition(graph));
+function toFlow(definition: unknown): { nodes: MapFlowNode[]; edges: Edge<MapEdgeData>[] } {
+  const parsed = mapDefinitionSchema.safeParse(definition);
   if (!parsed.success) return { nodes: [], edges: [] };
   return mapDefinitionToFlow(parsed.data);
+}
+
+/** Seed the canvas from the editable definition (draft-first, then published). */
+function seedFlow(graph: MapEditorGraph): { nodes: MapFlowNode[]; edges: Edge<MapEdgeData>[] } {
+  return toFlow(pickEditableDefinition(graph));
+}
+
+/** Seed the canvas from the published snapshot only (the discard fallback). */
+function publishedFlow(graph: MapEditorGraph): {
+  nodes: MapFlowNode[];
+  edges: Edge<MapEdgeData>[];
+} {
+  return toFlow(graph.publishedVersion?.definition ?? null);
 }
 
 function mapPath(slug: string): string {
@@ -135,13 +148,15 @@ function MapBuilderInner({ graph }: { graph: MapEditorGraph }) {
     setSaveError(null);
     try {
       await apiClient.patch(mapPath(graph.slug), { body: { definition: null } });
-      // Reload from the server so the canvas reflects the published snapshot the
-      // discard fell back to (or empties when there is no published version).
-      const fresh = await apiClient.get<MapEditorGraph>(mapPath(graph.slug));
-      const { nodes: freshNodes, edges: freshEdges } = seedFlow(fresh);
-      setNodes(freshNodes);
-      setEdges(freshEdges);
+      // Reset the canvas to the published snapshot the discard fell back to, read
+      // from the props already in hand (no publish happens in the editor, so it is
+      // still current). Doing this without a second request keeps discard atomic:
+      // the canvas can't be left showing the just-discarded draft if a reload fails.
+      const published = publishedFlow(graph);
+      setNodes(published.nodes);
+      setEdges(published.edges);
       setSelectedNodeId(null);
+      setSaved(false);
       setHasDraft(false);
       router.refresh();
     } catch (err) {
@@ -149,7 +164,18 @@ function MapBuilderInner({ graph }: { graph: MapEditorGraph }) {
       setSaveError(message);
       logger.error('Map draft discard failed', { slug: graph.slug, error: message });
     }
-  }, [graph.slug, router, setEdges, setNodes]);
+  }, [graph, router, setEdges, setNodes]);
+
+  // Clear the transient "Saved" indicator as soon as the canvas is actually edited
+  // (a node moved or removed) — not on a mere selection — so it never claims an
+  // unsaved position is persisted.
+  const handleNodesChange = useCallback<typeof onNodesChange>(
+    (changes) => {
+      if (changes.some((c) => c.type === 'position' || c.type === 'remove')) setSaved(false);
+      onNodesChange(changes);
+    },
+    [onNodesChange]
+  );
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
 
@@ -210,7 +236,7 @@ function MapBuilderInner({ graph }: { graph: MapEditorGraph }) {
         <MapCanvas
           nodes={nodes}
           edges={edges}
-          onNodesChange={onNodesChange}
+          onNodesChange={handleNodesChange}
           onNodeClick={setSelectedNodeId}
           onNodeAdd={handleNodeAdd}
         />

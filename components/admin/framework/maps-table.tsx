@@ -187,6 +187,20 @@ function CreateMapDialog({
   // Mirror the name into the slug until the author edits the slug directly.
   const effectiveSlug = slugTouched ? slug : slugify(name);
 
+  // The dialog stays mounted, so reset the form whenever it closes — otherwise a
+  // half-filled-then-cancelled create reopens with the previous values.
+  function handleOpenChange(next: boolean) {
+    if (!next) {
+      setName('');
+      setSlug('');
+      setSlugTouched(false);
+      setDescription('');
+      setError(null);
+      setSubmitting(false);
+    }
+    onOpenChange(next);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const finalSlug = slugify(effectiveSlug);
@@ -219,7 +233,7 @@ function CreateMapDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <form onSubmit={(e) => void handleSubmit(e)}>
           <DialogHeader>
@@ -278,7 +292,7 @@ function CreateMapDialog({
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
               Cancel
             </Button>
             <Button type="submit" disabled={submitting}>

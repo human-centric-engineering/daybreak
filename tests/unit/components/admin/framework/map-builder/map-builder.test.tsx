@@ -39,10 +39,12 @@ vi.mock('@xyflow/react', async () => {
     ReactFlow: ({
       nodes,
       onNodeClick,
+      onNodesChange,
       children,
     }: {
       nodes: { id: string; data: { label: string } }[];
       onNodeClick?: (e: unknown, node: unknown) => void;
+      onNodesChange?: (changes: { type: string; id: string }[]) => void;
       children?: ReactNode;
     }) => (
       <div data-testid="rf" data-node-count={nodes.length}>
@@ -51,6 +53,10 @@ vi.mock('@xyflow/react', async () => {
             {n.data.label}
           </button>
         ))}
+        <button
+          data-testid="rf-move"
+          onClick={() => onNodesChange?.([{ type: 'position', id: 'm' }])}
+        />
         {children}
       </div>
     ),
@@ -159,6 +165,17 @@ describe('MapBuilder save', () => {
     expect(router.refresh).toHaveBeenCalled();
   });
 
+  it('clears the Saved indicator when a node is moved', async () => {
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph()} />);
+
+    await user.click(screen.getByRole('button', { name: 'Save draft' }));
+    expect(await screen.findByText('Saved')).toBeInTheDocument();
+
+    await user.click(screen.getByTestId('rf-move'));
+    expect(screen.queryByText('Saved')).not.toBeInTheDocument();
+  });
+
   it('surfaces a save failure as an inline alert', async () => {
     api.patch.mockRejectedValueOnce(new Error('boom'));
     const user = userEvent.setup();
@@ -172,7 +189,7 @@ describe('MapBuilder save', () => {
 });
 
 describe('MapBuilder discard', () => {
-  it('PATCHes { definition: null } after confirm, then reloads', async () => {
+  it('PATCHes { definition: null } after confirm and resets to the published snapshot', async () => {
     window.confirm = vi.fn(() => true);
     const user = userEvent.setup();
     render(<MapBuilder graph={graph({ draftDefinition: PUBLISHED_DEF })} />);
@@ -184,7 +201,13 @@ describe('MapBuilder discard', () => {
         body: { definition: null },
       })
     );
-    expect(api.get).toHaveBeenCalledWith('/api/v1/admin/framework/maps/demo');
+    // Atomic: reset comes from the in-props published snapshot, not a second fetch.
+    expect(api.get).not.toHaveBeenCalled();
+    // Draft is gone → Discard disables, canvas still shows the published node.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Discard draft' })).toBeDisabled()
+    );
+    expect(screen.getByTestId('rf')).toHaveAttribute('data-node-count', '1');
   });
 
   it('does nothing when the confirm is dismissed', async () => {
