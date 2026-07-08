@@ -19,7 +19,14 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { AlertCircle, Check, Trash2 } from 'lucide-react';
-import { ReactFlowProvider, useEdgesState, useNodesState, type Connection } from '@xyflow/react';
+import {
+  ReactFlowProvider,
+  useEdgesState,
+  useNodesState,
+  useReactFlow,
+  type Connection,
+  type OnNodeDrag,
+} from '@xyflow/react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -32,6 +39,12 @@ import { MapPalette } from '@/components/admin/framework/map-builder/map-palette
 import { mapNodeKind } from '@/components/admin/framework/map-builder/map-node-kinds';
 import { EdgeInspector } from '@/components/admin/framework/map-builder/edge-inspector';
 import { makeMapEdge } from '@/components/admin/framework/map-builder/add-map-edge';
+import { MapEditorProvider } from '@/components/admin/framework/map-builder/map-editor-context';
+import {
+  isDescendant,
+  reparentNode,
+  toggleRegionCollapse,
+} from '@/components/admin/framework/map-builder/region-membership';
 import {
   flowToMapDefinition,
   mapDefinitionToFlow,
@@ -112,12 +125,64 @@ function MapBuilderInner({ graph }: { graph: MapEditorGraph }) {
 
   const handleNodeDelete = useCallback(
     (nodeId: string) => {
-      setNodes((prev) => prev.filter((n) => n.id !== nodeId));
+      setNodes((prev) => {
+        // Detaching a region: keep its direct members but pop them out to the top
+        // level (at their absolute position) so they don't dangle on a removed parent.
+        const childIds = prev.filter((n) => n.parentId === nodeId).map((n) => n.id);
+        let next: MapFlowNode[] = prev;
+        for (const childId of childIds) next = reparentNode(next, childId, null);
+        return next.filter((n) => n.id !== nodeId);
+      });
       setEdges((prev) => prev.filter((e) => e.source !== nodeId && e.target !== nodeId));
       setSelectedNodeId(null);
       setSaved(false);
     },
     [setEdges, setNodes]
+  );
+
+  // Region grouping: when a node drag ends, (un)group it based on which region it was
+  // dropped into. Pick the deepest intersecting region (most specific), never the node
+  // itself or a region nested under it (that would create a containment cycle).
+  const { getIntersectingNodes } = useReactFlow<MapFlowNode>();
+  const handleNodeDragStop = useCallback<OnNodeDrag<MapFlowNode>>(
+    (_event, dragged) => {
+      const byId = new Map(nodes.map((n) => [n.id, n]));
+      const depthOf = (id: string): number => {
+        let d = 0;
+        let cur = byId.get(id);
+        const seen = new Set<string>();
+        while (cur?.parentId && byId.has(cur.parentId) && !seen.has(cur.id)) {
+          seen.add(cur.id);
+          cur = byId.get(cur.parentId);
+          d += 1;
+        }
+        return d;
+      };
+      const candidates = getIntersectingNodes(dragged).filter(
+        (n) => n.type === 'region' && n.id !== dragged.id && !isDescendant(n.id, dragged.id, byId)
+      );
+      // Deepest (most-nested) region wins as the drop target.
+      const target = candidates.reduce<string | null>(
+        (best, n) => (best === null || depthOf(n.id) > depthOf(best) ? n.id : best),
+        null
+      );
+      setNodes((prev) => reparentNode(prev, dragged.id, target));
+      setSaved(false);
+    },
+    [getIntersectingNodes, nodes, setNodes]
+  );
+
+  const handleToggleCollapse = useCallback(
+    (regionId: string) => {
+      setNodes((prev) => toggleRegionCollapse(prev, regionId));
+      setSaved(false);
+    },
+    [setNodes]
+  );
+
+  const editorContext = useMemo(
+    () => ({ onToggleCollapse: handleToggleCollapse }),
+    [handleToggleCollapse]
   );
 
   // Node and edge selection are mutually exclusive — a click on one clears the other,
@@ -224,11 +289,14 @@ function MapBuilderInner({ graph }: { graph: MapEditorGraph }) {
   }, [graph, router, setEdges, setNodes]);
 
   // Clear the transient "Saved" indicator as soon as the canvas is actually edited
-  // (a node moved or removed) — not on a mere selection — so it never claims an
-  // unsaved position is persisted.
+  // (a node moved, resized, or removed) — not on a mere selection — so it never claims
+  // an unsaved change is persisted.
   const handleNodesChange = useCallback<typeof onNodesChange>(
     (changes) => {
-      if (changes.some((c) => c.type === 'position' || c.type === 'remove')) setSaved(false);
+      if (
+        changes.some((c) => c.type === 'position' || c.type === 'remove' || c.type === 'dimensions')
+      )
+        setSaved(false);
       onNodesChange(changes);
     },
     [onNodesChange]
@@ -248,70 +316,73 @@ function MapBuilderInner({ graph }: { graph: MapEditorGraph }) {
         : { label: `Published v${graph.publishedVersion.version}`, variant: 'outline' as const };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col">
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3">
-        <div className="flex flex-1 flex-wrap items-center gap-x-3 gap-y-1">
-          <h1 className="text-lg font-semibold">{graph.name}</h1>
-          <Badge variant="outline" className="font-mono text-xs">
-            {graph.slug}
-          </Badge>
-          <Badge variant={statusPill.variant} className="text-xs">
-            {statusPill.label}
-          </Badge>
-        </div>
-        <div className="flex items-center gap-2">
-          {saved && (
-            <span className="flex items-center gap-1 text-sm text-emerald-600 dark:text-emerald-400">
-              <Check className="h-4 w-4" /> Saved
-            </span>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void handleDiscard()}
-            disabled={!hasDraft}
+    <MapEditorProvider value={editorContext}>
+      <div className="flex h-[calc(100vh-4rem)] flex-col">
+        <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-3">
+          <div className="flex flex-1 flex-wrap items-center gap-x-3 gap-y-1">
+            <h1 className="text-lg font-semibold">{graph.name}</h1>
+            <Badge variant="outline" className="font-mono text-xs">
+              {graph.slug}
+            </Badge>
+            <Badge variant={statusPill.variant} className="text-xs">
+              {statusPill.label}
+            </Badge>
+          </div>
+          <div className="flex items-center gap-2">
+            {saved && (
+              <span className="flex items-center gap-1 text-sm text-emerald-600 dark:text-emerald-400">
+                <Check className="h-4 w-4" /> Saved
+              </span>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void handleDiscard()}
+              disabled={!hasDraft}
+            >
+              Discard draft
+            </Button>
+            <Button size="sm" onClick={() => void handleSave()} disabled={saving}>
+              {saving ? 'Saving…' : 'Save draft'}
+            </Button>
+          </div>
+        </header>
+
+        {saveError && (
+          <div
+            role="alert"
+            className="flex items-center gap-2 border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
           >
-            Discard draft
-          </Button>
-          <Button size="sm" onClick={() => void handleSave()} disabled={saving}>
-            {saving ? 'Saving…' : 'Save draft'}
-          </Button>
-        </div>
-      </header>
+            <AlertCircle className="h-4 w-4" />
+            <span>{saveError}</span>
+          </div>
+        )}
 
-      {saveError && (
-        <div
-          role="alert"
-          className="flex items-center gap-2 border-b border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200"
-        >
-          <AlertCircle className="h-4 w-4" />
-          <span>{saveError}</span>
-        </div>
-      )}
-
-      <div className="flex flex-1 overflow-hidden">
-        <MapPalette typeCounts={typeCounts} />
-        <MapCanvas
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={handleNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={handleConnect}
-          onNodeClick={handleNodeSelect}
-          onEdgeClick={handleEdgeSelect}
-          onNodeAdd={handleNodeAdd}
-        />
-        {selectedNode ? (
-          <SelectedNodePanel node={selectedNode} onDelete={handleNodeDelete} />
-        ) : selectedEdge ? (
-          <EdgeInspector
-            edge={selectedEdge}
-            onTypeChange={handleEdgeTypeChange}
-            onDelete={handleEdgeDelete}
+        <div className="flex flex-1 overflow-hidden">
+          <MapPalette typeCounts={typeCounts} />
+          <MapCanvas
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={handleNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={handleConnect}
+            onNodeDragStop={handleNodeDragStop}
+            onNodeClick={handleNodeSelect}
+            onEdgeClick={handleEdgeSelect}
+            onNodeAdd={handleNodeAdd}
           />
-        ) : null}
+          {selectedNode ? (
+            <SelectedNodePanel node={selectedNode} onDelete={handleNodeDelete} />
+          ) : selectedEdge ? (
+            <EdgeInspector
+              edge={selectedEdge}
+              onTypeChange={handleEdgeTypeChange}
+              onDelete={handleEdgeDelete}
+            />
+          ) : null}
+        </div>
       </div>
-    </div>
+    </MapEditorProvider>
   );
 }
 

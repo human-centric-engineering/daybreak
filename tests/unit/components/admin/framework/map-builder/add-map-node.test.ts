@@ -64,4 +64,13 @@ describe('addMapNode', () => {
     expect(addMapNode('stage', POS, [])?.data.moduleSlug).toBeUndefined();
     expect(addMapNode('region', POS, [])?.data.moduleSlug).toBeUndefined();
   });
+
+  it('drops a region as a sized, expanded group node', () => {
+    const region = addMapNode('region', POS, []);
+    expect(region?.type).toBe('region');
+    expect(region?.width).toBeGreaterThan(0);
+    expect(region?.height).toBeGreaterThan(0);
+    expect(region?.data.collapsed).toBe(false);
+    expect(region?.data.expandedHeight).toBe(region?.height);
+  });
 });

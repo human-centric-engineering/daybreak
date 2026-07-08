@@ -26,39 +26,77 @@ vi.mock('@/lib/api/client', () => ({
   APIClientError: class APIClientError extends Error {},
 }));
 
+// Controls what `getIntersectingNodes` returns for the drag-to-group tests.
+const intersect = vi.hoisted(() => ({ nodes: [] as { id: string; type: string }[] }));
+
 vi.mock('@/hooks/use-theme', () => ({ useTheme: () => ({ theme: 'light', setTheme: vi.fn() }) }));
 
 vi.mock('@xyflow/react', async () => {
   const react = await vi.importActual<typeof import('react')>('react');
+  const { useMapEditor } =
+    await import('@/components/admin/framework/map-builder/map-editor-context');
   const stateful = () => (initial: unknown) => {
     const [value, setValue] = react.useState(initial);
     return [value, setValue, vi.fn()];
   };
-  return {
-    ReactFlowProvider: ({ children }: { children: ReactNode }) => children,
-    ReactFlow: ({
-      nodes,
-      edges,
-      onNodeClick,
-      onEdgeClick,
-      onNodesChange,
-      onConnect,
-      children,
-    }: {
-      nodes: { id: string; data: { label: string } }[];
-      edges: { id: string }[];
-      onNodeClick?: (e: unknown, node: unknown) => void;
-      onEdgeClick?: (e: unknown, edge: { id: string }) => void;
-      onNodesChange?: (changes: { type: string; id: string }[]) => void;
-      onConnect?: (connection: { source: string; target: string }) => void;
-      children?: ReactNode;
-    }) => (
+  const ReactFlow = ({
+    nodes,
+    edges,
+    onNodeClick,
+    onEdgeClick,
+    onNodesChange,
+    onConnect,
+    onNodeDragStop,
+    children,
+  }: {
+    nodes: {
+      id: string;
+      type?: string;
+      parentId?: string;
+      hidden?: boolean;
+      data: { label: string; collapsed?: boolean };
+    }[];
+    edges: { id: string }[];
+    onNodeClick?: (e: unknown, node: unknown) => void;
+    onEdgeClick?: (e: unknown, edge: { id: string }) => void;
+    onNodesChange?: (changes: { type: string; id: string }[]) => void;
+    onConnect?: (connection: { source: string; target: string }) => void;
+    onNodeDragStop?: (e: unknown, node: unknown) => void;
+    children?: ReactNode;
+  }) => {
+    // Rendered inside `<MapEditorProvider>`, so the region-collapse callback the real
+    // `RegionNode` uses is reachable here for the collapse test.
+    const { onToggleCollapse } = useMapEditor();
+    return (
       <div data-testid="rf" data-node-count={nodes.length} data-edge-count={edges.length}>
         {nodes.map((n) => (
-          <button key={n.id} data-testid={`rf-node-${n.id}`} onClick={(e) => onNodeClick?.(e, n)}>
+          <button
+            key={n.id}
+            data-testid={`rf-node-${n.id}`}
+            data-parent={n.parentId ?? ''}
+            data-hidden={Boolean(n.hidden)}
+            data-collapsed={Boolean(n.data.collapsed)}
+            onClick={(e) => onNodeClick?.(e, n)}
+          >
             {n.data.label}
           </button>
         ))}
+        {nodes.map((n) => (
+          <button
+            key={`drag-${n.id}`}
+            data-testid={`rf-dragstop-${n.id}`}
+            onClick={(e) => onNodeDragStop?.(e, n)}
+          />
+        ))}
+        {nodes
+          .filter((n) => n.type === 'region')
+          .map((n) => (
+            <button
+              key={`collapse-${n.id}`}
+              data-testid={`rf-collapse-${n.id}`}
+              onClick={() => onToggleCollapse(n.id)}
+            />
+          ))}
         <button
           data-testid="rf-move"
           onClick={() => onNodesChange?.([{ type: 'position', id: 'm' }])}
@@ -73,13 +111,20 @@ vi.mock('@xyflow/react', async () => {
         />
         {children}
       </div>
-    ),
+    );
+  };
+  return {
+    ReactFlowProvider: ({ children }: { children: ReactNode }) => children,
+    ReactFlow,
     Background: () => null,
     Controls: () => null,
     MiniMap: () => null,
     MarkerType: { ArrowClosed: 'arrowclosed' },
     addEdge: (edge: unknown, eds: unknown[]) => [...eds, edge],
-    useReactFlow: () => ({ screenToFlowPosition: (p: unknown) => p }),
+    useReactFlow: () => ({
+      screenToFlowPosition: (p: unknown) => p,
+      getIntersectingNodes: () => intersect.nodes,
+    }),
     useNodesState: stateful(),
     useEdgesState: stateful(),
   };
@@ -114,10 +159,39 @@ function graph(over: Partial<MapEditorGraph> = {}): MapEditorGraph {
   };
 }
 
+const REGION_DEF = {
+  nodes: [
+    {
+      key: 'zone',
+      type: 'region',
+      completionMode: 'once',
+      meta: { _layout: { x: 0, y: 0 }, _size: { width: 300, height: 200 } },
+    },
+    {
+      key: 'm',
+      type: 'module',
+      moduleSlug: 'm',
+      completionMode: 'once',
+      meta: { _layout: { x: 400, y: 50 } },
+    },
+  ],
+  edges: [],
+};
+
+// `m` already inside `zone` — for the region-delete-detach test.
+const REGION_MEMBER_DEF = {
+  nodes: [
+    REGION_DEF.nodes[0],
+    { ...REGION_DEF.nodes[1], region: 'zone', meta: { _layout: { x: 40, y: 40 } } },
+  ],
+  edges: [],
+};
+
 beforeEach(() => {
   api.patch.mockReset().mockResolvedValue({});
   api.get.mockReset().mockResolvedValue(graph());
   router.refresh.mockReset();
+  intersect.nodes = [];
 });
 
 describe('MapBuilder header', () => {
@@ -336,5 +410,87 @@ describe('MapBuilder edges', () => {
 
     expect(screen.queryByTestId('map-node-panel')).not.toBeInTheDocument();
     expect(screen.getByTestId('map-edge-panel')).toBeInTheDocument();
+  });
+});
+
+describe('MapBuilder regions', () => {
+  it('groups a node into a region it is dropped onto, and ungroups it when dropped out', async () => {
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph({ draftDefinition: REGION_DEF })} />);
+    expect(screen.getByTestId('rf-node-m')).toHaveAttribute('data-parent', '');
+
+    // Drop `m` while it intersects `zone` → grouped.
+    intersect.nodes = [{ id: 'zone', type: 'region' }];
+    await user.click(screen.getByTestId('rf-dragstop-m'));
+    expect(screen.getByTestId('rf-node-m')).toHaveAttribute('data-parent', 'zone');
+
+    // Drop `m` where it intersects nothing → ungrouped.
+    intersect.nodes = [];
+    await user.click(screen.getByTestId('rf-dragstop-m'));
+    expect(screen.getByTestId('rf-node-m')).toHaveAttribute('data-parent', '');
+  });
+
+  it('never groups a region into itself', async () => {
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph({ draftDefinition: REGION_DEF })} />);
+    // `zone` reports itself as intersecting — the self-group must be rejected.
+    intersect.nodes = [{ id: 'zone', type: 'region' }];
+    await user.click(screen.getByTestId('rf-dragstop-zone'));
+    expect(screen.getByTestId('rf-node-zone')).toHaveAttribute('data-parent', '');
+  });
+
+  it('groups into the deepest (most-nested) intersecting region', async () => {
+    const user = userEvent.setup();
+    // `inner` is a region nested inside `zone`; a node dropped where both intersect
+    // should land in `inner`.
+    const nestedDef = {
+      nodes: [
+        REGION_DEF.nodes[0],
+        {
+          key: 'inner',
+          type: 'region',
+          region: 'zone',
+          completionMode: 'once',
+          meta: { _layout: { x: 20, y: 20 }, _size: { width: 120, height: 90 } },
+        },
+        REGION_DEF.nodes[1],
+      ],
+      edges: [],
+    };
+    render(<MapBuilder graph={graph({ draftDefinition: nestedDef })} />);
+
+    intersect.nodes = [
+      { id: 'zone', type: 'region' },
+      { id: 'inner', type: 'region' },
+    ];
+    await user.click(screen.getByTestId('rf-dragstop-m'));
+    expect(screen.getByTestId('rf-node-m')).toHaveAttribute('data-parent', 'inner');
+  });
+
+  it('collapses a region, hiding its members, and expands it back', async () => {
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph({ draftDefinition: REGION_MEMBER_DEF })} />);
+    expect(screen.getByTestId('rf-node-m')).toHaveAttribute('data-hidden', 'false');
+
+    await user.click(screen.getByTestId('rf-collapse-zone'));
+    expect(screen.getByTestId('rf-node-zone')).toHaveAttribute('data-collapsed', 'true');
+    expect(screen.getByTestId('rf-node-m')).toHaveAttribute('data-hidden', 'true');
+
+    await user.click(screen.getByTestId('rf-collapse-zone'));
+    expect(screen.getByTestId('rf-node-zone')).toHaveAttribute('data-collapsed', 'false');
+    expect(screen.getByTestId('rf-node-m')).toHaveAttribute('data-hidden', 'false');
+  });
+
+  it('detaches a region’s members when the region is deleted (they survive, unparented)', async () => {
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph({ draftDefinition: REGION_MEMBER_DEF })} />);
+    expect(screen.getByTestId('rf')).toHaveAttribute('data-node-count', '2');
+    expect(screen.getByTestId('rf-node-m')).toHaveAttribute('data-parent', 'zone');
+
+    await user.click(screen.getByTestId('rf-node-zone'));
+    await user.click(screen.getByRole('button', { name: /Delete node/ }));
+
+    expect(screen.getByTestId('rf')).toHaveAttribute('data-node-count', '1');
+    expect(screen.getByTestId('rf-node-m')).toHaveAttribute('data-parent', '');
   });
 });

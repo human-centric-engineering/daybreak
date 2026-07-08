@@ -18,7 +18,11 @@
 import type { XYPosition } from '@xyflow/react';
 
 import { NODE_TYPES, type NodeType } from '@/lib/framework/facilitation/map/schema';
-import type { MapFlowNode } from '@/components/admin/framework/map-builder/map-mappers';
+import {
+  REGION_FLOW_TYPE,
+  type MapFlowNode,
+} from '@/components/admin/framework/map-builder/map-mappers';
+import { REGION_DEFAULT_SIZE } from '@/components/admin/framework/map-builder/region-membership';
 
 /** Type guard: is `value` one of the four authored node kinds? */
 export function isNodeType(value: string): value is NodeType {
@@ -49,6 +53,27 @@ export function addMapNode(
   if (!isNodeType(type)) return null;
 
   const key = nextNodeKey(type, usedKeys);
+
+  // A region drops as a sized group container (its own React Flow node type); other
+  // kinds drop as ordinary `map` nodes.
+  if (type === 'region') {
+    return {
+      id: key,
+      type: REGION_FLOW_TYPE,
+      position,
+      width: REGION_DEFAULT_SIZE.width,
+      height: REGION_DEFAULT_SIZE.height,
+      data: {
+        label: key,
+        nodeType: type,
+        completionMode: 'once',
+        collapsed: false,
+        expandedHeight: REGION_DEFAULT_SIZE.height,
+        hasError: false,
+      },
+    };
+  }
+
   return {
     id: key,
     type: 'map',

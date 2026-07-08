@@ -19,10 +19,10 @@ import type { Edge } from '@xyflow/react';
 import {
   flowToMapDefinition,
   mapDefinitionToFlow,
-  stripLayout,
   type MapEdgeData,
   type MapFlowNode,
 } from '@/components/admin/framework/map-builder/map-mappers';
+import { stripReserved } from '@/components/admin/framework/map-builder/region-membership';
 import { mapDefinitionSchema, type MapDefinition } from '@/lib/framework/facilitation/map/schema';
 
 type DefNode = MapDefinition['nodes'][number];
@@ -206,11 +206,87 @@ describe('flowToMapDefinition', () => {
   });
 });
 
-describe('stripLayout', () => {
-  it('removes only the _layout key and returns undefined when nothing is left', () => {
-    expect(stripLayout({ _layout: { x: 1, y: 2 } })).toBeUndefined();
-    expect(stripLayout({ _layout: { x: 1, y: 2 }, note: 'a' })).toEqual({ note: 'a' });
-    expect(stripLayout(undefined)).toBeUndefined();
-    expect(stripLayout({})).toBeUndefined();
+describe('regions (parent/child round-trip)', () => {
+  const REGION_DEF: MapDefinition = {
+    nodes: [
+      node('zone', {
+        type: 'region',
+        meta: { _layout: { x: 100, y: 100 }, _size: { width: 300, height: 200 } },
+      }),
+      node('m', { region: 'zone', meta: { _layout: { x: 130, y: 150 } } }),
+    ],
+    edges: [],
+  };
+
+  it('loads a region as a sized group and its member as a parent-relative child', () => {
+    const { nodes } = mapDefinitionToFlow(REGION_DEF);
+    const zone = nodes.find((n) => n.id === 'zone')!;
+    const m = nodes.find((n) => n.id === 'm')!;
+
+    expect(zone.type).toBe('region');
+    expect(zone.width).toBe(300);
+    expect(zone.height).toBe(200);
+
+    expect(m.parentId).toBe('zone');
+    expect(m.extent).toBe('parent');
+    expect(m.data.region).toBe('zone');
+    // Position is relative to the region origin (130-100, 150-100).
+    expect(m.position).toEqual({ x: 30, y: 50 });
+  });
+
+  it('emits the region parent before its child', () => {
+    const { nodes } = mapDefinitionToFlow(REGION_DEF);
+    expect(nodes.findIndex((n) => n.id === 'zone')).toBeLessThan(
+      nodes.findIndex((n) => n.id === 'm')
+    );
+  });
+
+  it('round-trips membership + absolute position + region size back to the definition', () => {
+    const { nodes } = mapDefinitionToFlow(REGION_DEF);
+    const back = flowToMapDefinition(nodes, []);
+    expect(mapDefinitionSchema.safeParse(back).success).toBe(true);
+
+    const m = back.nodes.find((n) => n.key === 'm')!;
+    expect(m.region).toBe('zone');
+    expect(m.meta?._layout).toEqual({ x: 130, y: 150 }); // absolute restored
+
+    const zone = back.nodes.find((n) => n.key === 'zone')!;
+    expect(zone.meta?._size).toEqual({ width: 300, height: 200 });
+  });
+
+  it('hides members of a collapsed region on load and persists the collapsed flag', () => {
+    const def: MapDefinition = {
+      nodes: [
+        node('zone', { type: 'region', meta: { _layout: { x: 0, y: 0 }, _collapsed: true } }),
+        node('m', { region: 'zone', meta: { _layout: { x: 10, y: 10 } } }),
+      ],
+      edges: [],
+    };
+    const { nodes } = mapDefinitionToFlow(def);
+    expect(nodes.find((n) => n.id === 'm')?.hidden).toBe(true);
+    expect(nodes.find((n) => n.id === 'zone')?.data.collapsed).toBe(true);
+
+    const back = flowToMapDefinition(nodes, []);
+    expect(back.nodes.find((n) => n.key === 'zone')?.meta?._collapsed).toBe(true);
+  });
+
+  it('treats a member whose region is not a region-type node as top-level', () => {
+    const def: MapDefinition = {
+      nodes: [node('a'), node('b', { region: 'a', meta: { _layout: { x: 5, y: 5 } } })],
+      edges: [],
+    };
+    const { nodes } = mapDefinitionToFlow(def);
+    // `a` is a milestone, not a region → `b` is not parented.
+    expect(nodes.find((n) => n.id === 'b')?.parentId).toBeUndefined();
+  });
+});
+
+describe('stripReserved', () => {
+  it('removes the reserved UI keys and returns undefined when nothing is left', () => {
+    expect(stripReserved({ _layout: { x: 1, y: 2 } })).toBeUndefined();
+    expect(stripReserved({ _size: { width: 1, height: 2 }, _collapsed: true })).toBeUndefined();
+    expect(stripReserved({ _layout: { x: 1, y: 2 }, note: 'a' })).toEqual({ note: 'a' });
+    expect(stripReserved(undefined)).toBeUndefined();
+    expect(stripReserved({})).toBeUndefined();
   });
 });
