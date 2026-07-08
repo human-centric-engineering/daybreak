@@ -100,6 +100,62 @@ describe('SimulatorPanel', () => {
     expect(bRow).toHaveTextContent('Prerequisite "a" not met');
   });
 
+  it('coerces boolean and text slot values by their form', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(screen.getByTestId('sim-add-slot'));
+    await user.type(screen.getByTestId('sim-slot-slug-0'), 'active');
+    await user.type(screen.getByTestId('sim-slot-value-0'), 'true');
+    await user.click(screen.getByTestId('sim-add-slot'));
+    await user.type(screen.getByTestId('sim-slot-slug-1'), 'tier');
+    await user.type(screen.getByTestId('sim-slot-value-1'), 'gold');
+    await user.click(screen.getByTestId('sim-run'));
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    const body = (api.post.mock.calls[0][1] as { body: { slots: unknown[] } }).body;
+    expect(body.slots).toEqual([
+      { slug: 'active', value: true },
+      { slug: 'tier', value: 'gold' },
+    ]);
+  });
+
+  it('narrates every lock-reason kind and the empty-moves case', async () => {
+    api.post.mockResolvedValueOnce({
+      nodes: [
+        {
+          nodeKey: 'm',
+          available: false,
+          lockReasons: [{ kind: 'module', moduleSlug: 'coach', reason: 'flag' }],
+        },
+        { nodeKey: 'c', available: false, lockReasons: [{ kind: 'completed' }] },
+        {
+          nodeKey: 'g',
+          available: false,
+          lockReasons: [
+            { kind: 'condition', from: 'a', edgeType: 'prerequisite', condition: undefined },
+          ],
+        },
+        {
+          nodeKey: 'u',
+          available: false,
+          lockReasons: [{ kind: 'unlock', candidates: ['x', 'y'] }],
+        },
+      ],
+      validMoves: [],
+      firsts: [],
+      ranked: [],
+    });
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(screen.getByTestId('sim-run'));
+
+    expect(await screen.findByText(/No available moves/i)).toBeInTheDocument();
+    expect(screen.getByTestId('sim-node-m')).toHaveTextContent('Module "coach" is not live (flag)');
+    expect(screen.getByTestId('sim-node-c')).toHaveTextContent('Already completed');
+    expect(screen.getByTestId('sim-node-g')).toHaveTextContent('prerequisite condition from "a"');
+    expect(screen.getByTestId('sim-node-u')).toHaveTextContent('Needs one of: x, y');
+  });
+
   it('surfaces a dry-run failure inline', async () => {
     api.post.mockRejectedValueOnce(new Error('boom'));
     const user = userEvent.setup();

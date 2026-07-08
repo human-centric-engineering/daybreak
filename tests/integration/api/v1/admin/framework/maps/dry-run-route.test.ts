@@ -66,7 +66,11 @@ beforeEach(() => {
 
 describe('POST /maps/[slug]/dry-run', () => {
   it('runs the pure engine over the body definition + synthetic completions', async () => {
-    const res = await dryRunRoute.POST(req({ definition: MAP, completions: ['a'] }), ctx);
+    // A bare slot (no confidence/capturedAt) exercises the handler's default arms.
+    const res = await dryRunRoute.POST(
+      req({ definition: MAP, completions: ['a'], slots: [{ slug: 'unused', value: 1 }] }),
+      ctx
+    );
     expect(res.status).toBe(200);
     const body = await parse<DryRunBody>(res);
     expect(body.success).toBe(true);
@@ -103,6 +107,32 @@ describe('POST /maps/[slug]/dry-run', () => {
       )
     );
     expect(late.data.nodes.find((n) => n.nodeKey === 'b')?.available).toBe(true);
+  });
+
+  it('passes synthetic slots (with confidence + capturedAt) through, defaulting the clock', async () => {
+    const gated = {
+      nodes: MAP.nodes,
+      edges: [
+        {
+          from: 'a',
+          to: 'b',
+          type: 'prerequisite',
+          condition: { family: 'slot', slug: 'readiness', op: 'gte', value: 7, minConfidence: 8 },
+        },
+      ],
+    };
+    // No `now` in the body → the handler defaults it; confidence 9 clears the gate min.
+    const res = await dryRunRoute.POST(
+      req({
+        definition: gated,
+        completions: ['a'],
+        slots: [{ slug: 'readiness', value: 8, confidence: 9, capturedAt: '2026-07-01T00:00:00Z' }],
+      }),
+      ctx
+    );
+    expect(res.status).toBe(200);
+    const body = await parse<DryRunBody>(res);
+    expect(body.data.nodes.find((n) => n.nodeKey === 'b')?.available).toBe(true);
   });
 
   it('400s a malformed definition instead of crashing', async () => {
