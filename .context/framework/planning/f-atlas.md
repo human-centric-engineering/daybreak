@@ -219,6 +219,12 @@ affordance.
 - **Engagement overlay toggles** — `f-engagement` (08)'s heat/replay overlays on the atlas canvas (a
   future cross-feature integration; 08 owns the overlay data).
 - **Lazy-load on unfold** — if a deployment outgrows the single full-projection call (open question 4).
+- **Shared read-only canvas decorations** (t-2a `/code-review`) — the `<Background>`/`<Controls>`/
+  `<MiniMap>` config + `useTheme`/`colorMode`/`defaultEdgeOptions`/`proOptions` boilerplate now recurs
+  across THREE framework canvases (journey-explorer, map-builder, atlas — rule-of-three met). Extracting
+  the shared decorations (e.g. `components/admin/framework/canvas/`) is worthwhile, but it refactors two
+  **shipped** canvases (one just merged in #110), so it belongs in its own coordinated PR, not the atlas
+  anchor. Keep the per-canvas interaction flags + `nodeTypes` local.
 - **Shared `stitchAgents` / `stitchById` helper** (t-1 `/code-review`) — the collect-ids →
   `findMany where id in` → `Map` → `?? null` batch-stitch now recurs across the atlas aggregate
   readers and the shipped per-module + facilitation readers (agent-stitch is byte-identical in ≥4

@@ -208,6 +208,32 @@ describe('compositionToFlow — edges', () => {
     ).toBeDefined();
   });
 
+  it('keeps both edges (with unique ids) when one agent fills two roles in a module', () => {
+    // ModuleAgentBinding is @@unique([moduleId, agentId, role]) — the same agent CAN hold two roles.
+    const { edges } = compositionToFlow(
+      projection({
+        edges: [
+          {
+            kind: 'module_agent',
+            source: { type: 'module', id: 'reading' },
+            target: { type: 'agent', id: 'a1' },
+            label: 'companion',
+          },
+          {
+            kind: 'module_agent',
+            source: { type: 'module', id: 'reading' },
+            target: { type: 'agent', id: 'a1' },
+            label: 'reviewer',
+          },
+        ],
+      })
+    );
+    const roleEdges = edges.filter((e) => e.source === 'module:reading' && e.target === 'agent:a1');
+    expect(roleEdges).toHaveLength(2); // both roles kept, not collapsed
+    expect(new Set(roleEdges.map((e) => e.id)).size).toBe(2); // unique React Flow ids
+    expect(roleEdges.map((e) => e.label).sort()).toEqual(['companion', 'reviewer']);
+  });
+
   it('collapses a map`s places to ONE map→module edge and skips a dangling edge', () => {
     const { edges } = compositionToFlow(projection());
     // The two `main::*` places binding `reading` collapse to a single map:main→module:reading edge.

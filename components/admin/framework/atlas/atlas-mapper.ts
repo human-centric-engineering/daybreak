@@ -178,8 +178,11 @@ export function compositionToFlow(projection: CompositionProjection): {
     // Both endpoints must be real nodes; skip a dangling edge defensively (t-1 already guards these).
     if (!dataById.has(sourceId) || !dataById.has(targetId)) continue;
 
-    const key = `${e.kind}:${sourceId}->${targetId}`;
-    if (seenEdge.has(key)) continue; // dedup collapsed map_module (many places → one map→module)
+    // The label is part of the identity: an agent bound to one module under two roles (or a workflow
+    // under two eventTypes) is TWO distinct edges, and each React Flow edge needs a unique id. Only
+    // `map_module` (labelless — every place resolves to '') collapses to one map→module edge.
+    const key = `${e.kind}:${sourceId}->${targetId}:${e.label ?? ''}`;
+    if (seenEdge.has(key)) continue;
     seenEdge.add(key);
 
     flowEdges.push({
@@ -221,13 +224,11 @@ export function compositionToFlow(projection: CompositionProjection): {
   const orphanX = (primaryIds.length + 1) * PRIMARY_GAP_X;
   const nodes: AtlasFlowNode[] = [];
   for (const [id, data] of dataById) {
-    const pos =
-      positioned.get(id) ??
-      (() => {
-        const p = { x: orphanX, y: PRIMARY_Y + orphanRow * SATELLITE_GAP_Y };
-        orphanRow += 1;
-        return p;
-      })();
+    let pos = positioned.get(id);
+    if (!pos) {
+      pos = { x: orphanX, y: PRIMARY_Y + orphanRow * SATELLITE_GAP_Y };
+      orphanRow += 1;
+    }
     nodes.push({ id, type: 'atlas', position: pos, data });
   }
 
