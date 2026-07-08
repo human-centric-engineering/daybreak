@@ -27,6 +27,7 @@ import {
   useReactFlow,
   type OnConnect,
   type OnEdgesChange,
+  type OnNodeDrag,
   type OnNodesChange,
 } from '@xyflow/react';
 
@@ -48,6 +49,8 @@ export interface MapCanvasProps {
   onNodesChange: OnNodesChange<MapFlowNode>;
   onEdgesChange: OnEdgesChange<MapFlowEdge>;
   onConnect: OnConnect;
+  /** Called when a node drag ends, so the parent can (un)group it into a region. */
+  onNodeDragStop: OnNodeDrag<MapFlowNode>;
   onNodeClick: (nodeId: string | null) => void;
   onEdgeClick: (edgeId: string) => void;
   /** Called with a freshly-built node when the user drops a palette block. */
@@ -60,6 +63,7 @@ export function MapCanvas({
   onNodesChange,
   onEdgesChange,
   onConnect,
+  onNodeDragStop,
   onNodeClick,
   onEdgeClick,
   onNodeAdd,
@@ -112,6 +116,7 @@ export function MapCanvas({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onNodeDragStop={onNodeDragStop}
         onNodeClick={(_, node) => onNodeClick(node.id)}
         onEdgeClick={(_, edge) => onEdgeClick(edge.id)}
         onPaneClick={() => onNodeClick(null)}

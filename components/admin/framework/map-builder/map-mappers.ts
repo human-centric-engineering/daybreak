@@ -29,22 +29,29 @@ import type {
   MapNode,
   NodeType,
 } from '@/lib/framework/facilitation/map/schema';
+import {
+  LAYOUT_KEY,
+  REGION_COLLAPSED_HEIGHT,
+  REGION_DEFAULT_SIZE,
+  SIZE_KEY,
+  COLLAPSED_KEY,
+  absoluteFlowPosition,
+  readCollapsed,
+  readLayout,
+  readSize,
+  stripReserved,
+} from '@/components/admin/framework/map-builder/region-membership';
 
-/** The reserved `meta` key holding a node's canvas position. */
-const LAYOUT_KEY = '_layout';
-
-/** React Flow node type discriminator for every map node (styling keys off `data.nodeType`). */
+/** React Flow node type discriminator for an ordinary map node (styling keys off `data.nodeType`). */
 const NODE_TYPE = 'map' as const;
+
+/** React Flow node type discriminator for a region container (F5). */
+export const REGION_FLOW_TYPE = 'region' as const;
 
 /** React Flow edge type discriminator for every map edge (styling keys off `data.edgeType`). */
 export const EDGE_FLOW_TYPE = 'map' as const;
 
-interface StoredLayout {
-  x: number;
-  y: number;
-}
-
-/** The data payload the custom `MapNode` renders / the editor round-trips. */
+/** The data payload the custom `MapNode` / `RegionNode` renders and the editor round-trips. */
 export interface MapNodeData extends Record<string, unknown> {
   /** The node key — its stable map identity, shown as the label. */
   label: string;
@@ -53,17 +60,21 @@ export interface MapNodeData extends Record<string, unknown> {
   moduleSlug?: string;
   /** Maturity level this node belongs to. */
   stage?: string;
-  /** Key of the containing region node (F5). */
+  /** Key of the containing region node (F5); kept in sync with the flow `parentId`. */
   region?: string;
   completionMode: CompletionMode;
   onFirstArrival?: { workflowSlug?: string; agentSlug?: string };
-  /** Authored metadata, minus the internal `_layout` (re-derived from `position`). */
+  /** Region-only: whether the container is collapsed (members hidden, box shrunk). */
+  collapsed?: boolean;
+  /** Region-only: the height to restore to on expand (remembered while collapsed). */
+  expandedHeight?: number;
+  /** Authored metadata, minus the reserved UI keys (re-derived from the flow node). */
   meta?: Record<string, unknown>;
   /** Transient live-validation flag (t-3 paints a ring). Never persisted. */
   hasError?: boolean;
 }
 
-export type MapFlowNode = Node<MapNodeData, 'map'>;
+export type MapFlowNode = Node<MapNodeData, 'map' | 'region'>;
 
 /** Edge payload carrying the typed-edge vocabulary through the round-trip. */
 export interface MapEdgeData extends Record<string, unknown> {
@@ -75,34 +86,13 @@ export interface MapEdgeData extends Record<string, unknown> {
 
 export type MapFlowEdge = Edge<MapEdgeData>;
 
-/** Read the persisted `{ x, y }` from a node's `meta._layout`, or null if absent/malformed. */
-function readLayout(meta: Record<string, unknown> | undefined): StoredLayout | null {
-  const raw = meta?.[LAYOUT_KEY];
-  if (typeof raw !== 'object' || raw === null) return null;
-  const obj = raw as Record<string, unknown>;
-  if (typeof obj.x !== 'number' || typeof obj.y !== 'number') return null;
-  return { x: obj.x, y: obj.y };
-}
-
 /**
- * Strip the internal `_layout` key from a `meta` bag so it never reaches the node
- * data payload (position is the single source of truth on the canvas). Returns
- * `undefined` when nothing meaningful is left, so an unadorned node stays clean.
- */
-export function stripLayout(
-  meta: Record<string, unknown> | undefined
-): Record<string, unknown> | undefined {
-  if (!meta) return undefined;
-  if (!(LAYOUT_KEY in meta)) return Object.keys(meta).length > 0 ? meta : undefined;
-  const copy = { ...meta };
-  delete copy[LAYOUT_KEY];
-  return Object.keys(copy).length > 0 ? copy : undefined;
-}
-
-/**
- * Convert a stored `MapDefinition` into React Flow nodes + edges. Positions come
- * from each node's persisted `meta._layout`; unpositioned nodes are seeded by
- * `layoutJourney` (the longest-path layered layout the explorer already ships).
+ * Convert a stored `MapDefinition` into React Flow nodes + edges. Positions come from
+ * each node's persisted `meta._layout` (absolute); unpositioned nodes are seeded by
+ * `layoutJourney`. Region membership (`node.region`) becomes React Flow parent/child:
+ * a member gets `parentId` + `extent:'parent'` and a **parent-relative** position, and
+ * regions render as sized group containers (`type:'region'`, collapsed members hidden).
+ * Parents are emitted before their children (a React Flow requirement).
  */
 export function mapDefinitionToFlow(definition: MapDefinition): {
   nodes: MapFlowNode[];
@@ -111,26 +101,92 @@ export function mapDefinitionToFlow(definition: MapDefinition): {
   const auto = layoutJourney(definition);
   const autoPos = new Map(auto.baseNodes.map((n) => [n.key, n.position]));
   const keys = new Set(definition.nodes.map((n) => n.key));
+  const byKey = new Map(definition.nodes.map((n) => [n.key, n]));
 
-  const nodes: MapFlowNode[] = definition.nodes.map((node) => {
-    const stored = readLayout(node.meta);
-    const position = stored ?? autoPos.get(node.key) ?? { x: 0, y: 0 };
-    const dataMeta = stripLayout(node.meta);
+  // Absolute position for every node (stored, else auto-laid-out).
+  const absByKey = new Map<string, { x: number; y: number }>();
+  for (const node of definition.nodes) {
+    absByKey.set(node.key, readLayout(node.meta) ?? autoPos.get(node.key) ?? { x: 0, y: 0 });
+  }
+
+  // A node's containing region, only when it resolves to a real region-type node.
+  const parentOf = (node: MapNode): string | undefined =>
+    node.region && byKey.get(node.region)?.type === 'region' ? node.region : undefined;
+
+  const collapsedByKey = new Map<string, boolean>();
+  for (const n of definition.nodes) {
+    if (n.type === 'region') collapsedByKey.set(n.key, readCollapsed(n.meta));
+  }
+
+  // Region-containment depth, for the parents-before-children ordering + hidden calc.
+  const depthOf = (node: MapNode): number => {
+    let d = 0;
+    let cur: string | undefined = parentOf(node);
+    const seen = new Set<string>();
+    while (cur && byKey.has(cur) && !seen.has(cur)) {
+      seen.add(cur);
+      d += 1;
+      const next = byKey.get(cur);
+      cur = next ? parentOf(next) : undefined;
+    }
+    return d;
+  };
+  const anyAncestorCollapsed = (node: MapNode): boolean => {
+    let cur: string | undefined = parentOf(node);
+    const seen = new Set<string>();
+    while (cur && !seen.has(cur)) {
+      seen.add(cur);
+      if (collapsedByKey.get(cur)) return true;
+      const next = byKey.get(cur);
+      cur = next ? parentOf(next) : undefined;
+    }
+    return false;
+  };
+
+  const ordered = [...definition.nodes].sort((a, b) => depthOf(a) - depthOf(b));
+
+  const nodes: MapFlowNode[] = ordered.map((node) => {
+    const abs = absByKey.get(node.key) ?? { x: 0, y: 0 };
+    const parentId = parentOf(node);
+    const parentAbs = parentId ? (absByKey.get(parentId) ?? { x: 0, y: 0 }) : { x: 0, y: 0 };
+    const position = parentId ? { x: abs.x - parentAbs.x, y: abs.y - parentAbs.y } : abs;
+    const hidden = anyAncestorCollapsed(node);
+    const dataMeta = stripReserved(node.meta);
+
+    const data: MapNodeData = {
+      label: node.key,
+      nodeType: node.type,
+      ...(node.moduleSlug ? { moduleSlug: node.moduleSlug } : {}),
+      ...(node.stage ? { stage: node.stage } : {}),
+      ...(parentId ? { region: parentId } : {}),
+      completionMode: node.completionMode,
+      ...(node.onFirstArrival ? { onFirstArrival: node.onFirstArrival } : {}),
+      ...(dataMeta ? { meta: dataMeta } : {}),
+      hasError: false,
+    };
+
+    if (node.type === 'region') {
+      const size = readSize(node.meta) ?? REGION_DEFAULT_SIZE;
+      const collapsed = collapsedByKey.get(node.key) ?? false;
+      return {
+        id: node.key,
+        type: REGION_FLOW_TYPE,
+        position,
+        width: size.width,
+        height: collapsed ? REGION_COLLAPSED_HEIGHT : size.height,
+        ...(parentId ? { parentId, extent: 'parent' as const } : {}),
+        ...(hidden ? { hidden: true } : {}),
+        data: { ...data, collapsed, expandedHeight: size.height },
+      };
+    }
+
     return {
       id: node.key,
       type: NODE_TYPE,
       position,
-      data: {
-        label: node.key,
-        nodeType: node.type,
-        ...(node.moduleSlug ? { moduleSlug: node.moduleSlug } : {}),
-        ...(node.stage ? { stage: node.stage } : {}),
-        ...(node.region ? { region: node.region } : {}),
-        completionMode: node.completionMode,
-        ...(node.onFirstArrival ? { onFirstArrival: node.onFirstArrival } : {}),
-        ...(dataMeta ? { meta: dataMeta } : {}),
-        hasError: false,
-      },
+      ...(parentId ? { parentId, extent: 'parent' as const } : {}),
+      ...(hidden ? { hidden: true } : {}),
+      data,
     };
   });
 
@@ -156,31 +212,50 @@ export function mapDefinitionToFlow(definition: MapDefinition): {
 }
 
 /**
- * Convert React Flow nodes + edges back into a `MapDefinition`, stashing each node's
- * x/y into `meta._layout` so the next open restores the layout exactly. The output
- * is shaped to satisfy `mapDefinitionSchema` (the PATCH-body validator): node `key`
- * is the flow node id, `completionMode` is always present, and a `module` node
- * carries its `moduleSlug`.
+ * Convert React Flow nodes + edges back into a `MapDefinition`, resolving each node's
+ * **absolute** x/y (a member's position is parent-relative on the canvas) back into
+ * `meta._layout`, and a region's size + collapsed state into `meta._size` /
+ * `meta._collapsed`. Membership comes from the flow `parentId` → `node.region`. The
+ * output satisfies `mapDefinitionSchema`: node `key` is the flow id, `completionMode`
+ * is always present, and a `module` node carries its `moduleSlug`.
  */
 export function flowToMapDefinition(
   nodes: readonly MapFlowNode[],
   edges: readonly Edge<MapEdgeData>[]
 ): MapDefinition {
   const nodeIds = new Set(nodes.map((n) => n.id));
+  const byId = new Map(nodes.map((n) => [n.id, n]));
 
   const mapNodes: MapNode[] = nodes.map((node) => {
     const d = node.data;
-    const baseMeta = stripLayout(d.meta) ?? {};
+    const abs = absoluteFlowPosition(node, byId);
+    const baseMeta = stripReserved(d.meta) ?? {};
     const meta: Record<string, unknown> = {
       ...baseMeta,
-      [LAYOUT_KEY]: { x: node.position.x, y: node.position.y },
+      [LAYOUT_KEY]: { x: abs.x, y: abs.y },
     };
+
+    if (node.type === REGION_FLOW_TYPE) {
+      // Persist the EXPANDED size: while collapsed the live height is the header
+      // height, so fall back to the remembered `expandedHeight`.
+      const width = node.width ?? node.measured?.width ?? REGION_DEFAULT_SIZE.width;
+      const height = d.collapsed
+        ? (d.expandedHeight ?? REGION_DEFAULT_SIZE.height)
+        : (node.height ?? node.measured?.height ?? REGION_DEFAULT_SIZE.height);
+      meta[SIZE_KEY] = { width, height };
+      if (d.collapsed) meta[COLLAPSED_KEY] = true;
+    }
+
+    // Membership is authoritative from the flow parent; fall back to `data.region`
+    // for a node that has one but isn't parented (shouldn't happen post-load).
+    const region = node.parentId ?? d.region;
+
     return {
       key: node.id,
       type: d.nodeType,
       ...(d.moduleSlug ? { moduleSlug: d.moduleSlug } : {}),
       ...(d.stage ? { stage: d.stage } : {}),
-      ...(d.region ? { region: d.region } : {}),
+      ...(region ? { region } : {}),
       completionMode: d.completionMode,
       ...(d.onFirstArrival ? { onFirstArrival: d.onFirstArrival } : {}),
       meta,

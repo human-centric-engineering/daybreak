@@ -15,6 +15,7 @@ import { Handle, Position, type NodeProps } from '@xyflow/react';
 
 import { cn } from '@/lib/utils';
 import { mapNodeKind } from '@/components/admin/framework/map-builder/map-node-kinds';
+import { RegionNode } from '@/components/admin/framework/map-builder/region-group';
 import type { MapFlowNode } from '@/components/admin/framework/map-builder/map-mappers';
 
 export function MapNode({ data, selected }: NodeProps<MapFlowNode>) {
@@ -53,6 +54,7 @@ export function MapNode({ data, selected }: NodeProps<MapFlowNode>) {
   );
 }
 
-/** The `nodeTypes` map for the map canvas (one custom type). Frozen at module scope
- *  per the React Flow recommendation, so the canvas doesn't rebuild it per render. */
-export const mapNodeTypes = { map: MapNode } as const;
+/** The `nodeTypes` map for the map canvas: ordinary places (`map`) + region
+ *  containers (`region`). Frozen at module scope per the React Flow recommendation,
+ *  so the canvas doesn't rebuild it per render. */
+export const mapNodeTypes = { map: MapNode, region: RegionNode } as const;
