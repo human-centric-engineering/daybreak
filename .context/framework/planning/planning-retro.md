@@ -630,3 +630,18 @@ startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registra
   seam; this says _the feature that lands the producer should treat that as its spine._ Generalises the
   [[#B14 · A fork-first seam that composes with an upstream issue needs a live ledger, not just plan prose|B14]]
   "dormant seam needs a live tracker" instinct from cross-repo seams to _intra-repo_ ones. _Status: open._
+
+### B28 · A cross-cutting deferral parked in a feature's own doc is abandoned once that feature ships — promote it to the active board at close-out
+
+- **Discovery.** [[f-atlas]] accrued three "own-PR-later" deferrals across its tasks (a shared read-only-canvas
+  primitive at rule-of-three, a shared `stitchById` reader helper, region-container nodes). Each was dutifully
+  recorded in the feature's own **Follow-ups** section — the correct home _while the feature is in flight_. But at
+  close-out the feature doc becomes a **graveyard**: nobody re-reads a shipped feature's plan, so a cross-cutting
+  item that outlives the feature silently becomes "not done, left behind." Simon: _"If it's not put somewhere
+  useful and actionable, what you call deferred is actually just not done."_
+- **Feedback.** Make it a **close-out step**: cross-cutting deferrals (things that touch other features / are their
+  own PR, vs. within-feature next-task work) get **promoted to a live board surface** — here a "Cross-cutting
+  follow-ups" subsection under the board — as part of the close-out reconcile, not left only in the shipping
+  feature's Follow-ups. The test for a deferral's home: _"will the person who actions this see it here after this
+  feature ships, or is this a graveyard?"_ Sharpens the "deferrals need an actionable home" principle from "record it where the actioner
+  looks" to "and re-home it when the original location stops being looked at." _Status: open._
