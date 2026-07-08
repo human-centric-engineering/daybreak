@@ -141,7 +141,15 @@ function MapBuilderInner({
   const [publishing, setPublishing] = useState(false);
   const [publishError, setPublishError] = useState<string | null>(null);
   const [published, setPublished] = useState(false);
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+
+  // Clear any stale publish error whenever the dialog is opened or dismissed, so a prior
+  // failed publish's alert never bleeds into a fresh dialog.
+  const handlePublishDialogOpenChange = useCallback((open: boolean) => {
+    setPublishError(null);
+    setPublishDialogOpen(open);
+  }, []);
 
   const typeCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -347,6 +355,8 @@ function MapBuilderInner({
   // Publish promotes the SAVED draft to a new immutable version (workflow-builder
   // model). The publish gate (`validatePublishableMap`) 400s on an invalid draft — its
   // message surfaces in the dialog; the live-validation panel already shows which nodes.
+  // The parent owns the dialog open state, so it closes it directly on success (rather
+  // than coupling close to the transient "Published" flash).
   const handlePublish = useCallback(
     async (changeSummary: string | undefined) => {
       setPublishing(true);
@@ -358,16 +368,12 @@ function MapBuilderInner({
         );
         setPublishedVersion(result.version.version);
         setHasDraft(false);
+        setPublishDialogOpen(false);
         setPublished(true);
         setTimeout(() => setPublished(false), 2500);
         router.refresh();
       } catch (err) {
-        const message =
-          err instanceof APIClientError
-            ? err.message
-            : err instanceof Error
-              ? err.message
-              : 'Failed to publish';
+        const message = err instanceof Error ? err.message : 'Failed to publish';
         setPublishError(message);
         logger.error('Map publish failed', { slug: graph.slug, error: message });
       } finally {
@@ -378,21 +384,21 @@ function MapBuilderInner({
   );
 
   // Roll back to a prior version: the service mints a NEW version copying the target and
-  // pins it (history is never rewound), returning that new snapshot — so reload the
-  // canvas from it and sync the pill. Rethrows so the history dialog surfaces the error.
+  // pins it, but — unlike publish — it does NOT clear any in-progress draft. So don't
+  // assume the draft is gone: re-read the fresh server state and drive the canvas +
+  // draft flag + pill off it (the workflow-builder's revert pattern), keeping the client
+  // coherent with what a reload would show. Rethrows so the history dialog shows errors.
   const handleRollback = useCallback(
     async (targetVersion: number) => {
-      const result = await apiClient.post<{ version: { version: number; definition: unknown } }>(
-        `${mapPath(graph.slug)}/rollback`,
-        { body: { targetVersion } }
-      );
-      const reverted = toFlow(result.version.definition);
-      setNodes(reverted.nodes);
-      setEdges(reverted.edges);
+      await apiClient.post(`${mapPath(graph.slug)}/rollback`, { body: { targetVersion } });
+      const fresh = await apiClient.get<MapEditorGraph>(mapPath(graph.slug));
+      const flow = toFlow(pickEditableDefinition(fresh));
+      setNodes(flow.nodes);
+      setEdges(flow.edges);
       setSelectedNodeId(null);
       setSelectedEdgeId(null);
-      setPublishedVersion(result.version.version);
-      setHasDraft(false);
+      setPublishedVersion(fresh.publishedVersion?.version ?? null);
+      setHasDraft(fresh.draftDefinition !== null && fresh.draftDefinition !== undefined);
       setSaved(false);
       router.refresh();
     },
@@ -478,6 +484,8 @@ function MapBuilderInner({
             <PublishControls
               hasDraft={hasDraft}
               nextVersion={(publishedVersion ?? 0) + 1}
+              open={publishDialogOpen}
+              onOpenChange={handlePublishDialogOpenChange}
               publishing={publishing}
               errorMessage={publishError}
               published={published}

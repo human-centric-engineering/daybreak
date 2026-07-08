@@ -638,12 +638,18 @@ describe('MapBuilder version controls', () => {
     expect(await screen.findByTestId('map-version-2')).toHaveTextContent('live');
   });
 
-  it('rolls back a prior version and reloads the canvas from the new snapshot', async () => {
-    api.get.mockResolvedValueOnce(VERSION_LIST).mockResolvedValueOnce({
-      ...VERSION_LIST,
-      publishedVersionId: 'v3id',
-    });
-    api.post.mockResolvedValueOnce({ version: { version: 3, definition: ROLLBACK_DEF } });
+  it('rolls back a prior version and reloads the canvas from fresh server state', async () => {
+    // get calls in order: history list (open), fresh map (after rollback), history reload.
+    api.get
+      .mockResolvedValueOnce(VERSION_LIST)
+      .mockResolvedValueOnce(
+        graph({
+          publishedVersion: { version: 3, definition: ROLLBACK_DEF },
+          draftDefinition: null,
+        })
+      )
+      .mockResolvedValueOnce({ ...VERSION_LIST, publishedVersionId: 'v3id' });
+    api.post.mockResolvedValueOnce({});
     const user = userEvent.setup();
     render(<MapBuilder graph={graph()} />);
     expect(screen.getByTestId('rf')).toHaveAttribute('data-node-count', '1');
@@ -658,7 +664,8 @@ describe('MapBuilder version controls', () => {
         body: { targetVersion: 1 },
       })
     );
-    // The rollback snapshot (2 nodes) replaces the canvas (was 1 node).
+    // The fresh map (published v3 = the rolled-back 2-node snapshot, no draft) drives the
+    // canvas — so it shows 2 nodes and the pill reflects v3.
     await waitFor(() => expect(screen.getByTestId('rf')).toHaveAttribute('data-node-count', '2'));
   });
 });

@@ -7,11 +7,12 @@
  * tree: a **Publish** button opening a confirm dialog with an optional `changeSummary`
  * (max 500 chars, persisted on the new version row), plus a **History** button.
  *
- * Presentational + self-contained dialog state: it owns the dialog open state and the
- * summary input, but delegates the actual publish to `onPublish` (the parent owns the
- * canvas + API orchestration) and surfaces the parent's `publishing` / `errorMessage`.
- * Publish promotes the **saved draft**, mirroring the workflow builder — so it is only
- * enabled when a draft exists (`hasDraft`); an author saves, then publishes.
+ * Presentational: the **parent** owns the dialog open state (`open` / `onOpenChange`)
+ * so it can close it directly on a successful publish and clear stale errors on
+ * open/close (mirroring the workflow builder). This component owns only the summary
+ * input, delegates the publish to `onPublish`, and surfaces the parent's `publishing` /
+ * `errorMessage`. Publish promotes the **saved draft** — so it is only enabled when a
+ * draft exists (`hasDraft`); an author saves, then publishes.
  */
 
 import { useEffect, useState } from 'react';
@@ -36,6 +37,9 @@ export interface PublishControlsProps {
   hasDraft: boolean;
   /** The version int that will be assigned on publish (display-only). */
   nextVersion: number;
+  /** Dialog open state (parent-owned, so the parent can close it on success). */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
   /** True while the publish request is in flight. */
   publishing: boolean;
   /** Publish error (e.g. the validation 400), rendered in the dialog. */
@@ -51,13 +55,14 @@ export interface PublishControlsProps {
 export function PublishControls({
   hasDraft,
   nextVersion,
+  open,
+  onOpenChange,
   publishing,
   errorMessage,
   published,
   onPublish,
   onOpenHistory,
 }: PublishControlsProps) {
-  const [open, setOpen] = useState(false);
   const [summary, setSummary] = useState('');
 
   // Reset the input each time the dialog re-opens so a previous summary doesn't bleed
@@ -65,12 +70,6 @@ export function PublishControls({
   useEffect(() => {
     if (open) setSummary('');
   }, [open]);
-
-  // Close the dialog once a publish succeeds (the parent flips `publishing` false and
-  // flashes `published`); a publish that 400s keeps the dialog open to show the error.
-  useEffect(() => {
-    if (published) setOpen(false);
-  }, [published]);
 
   const trimmed = summary.trim();
   const tooLong = trimmed.length > MAX_CHANGE_SUMMARY_CHARS;
@@ -97,13 +96,13 @@ export function PublishControls({
       <Button
         size="sm"
         data-testid="map-publish-open"
-        onClick={() => setOpen(true)}
+        onClick={() => onOpenChange(true)}
         disabled={!hasDraft}
       >
         Publish
       </Button>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Publish draft</DialogTitle>
@@ -145,7 +144,7 @@ export function PublishControls({
             <Button
               type="button"
               variant="outline"
-              onClick={() => setOpen(false)}
+              onClick={() => onOpenChange(false)}
               disabled={publishing}
             >
               Cancel

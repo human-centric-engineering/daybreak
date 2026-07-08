@@ -16,10 +16,13 @@ import { PublishControls } from '@/components/admin/framework/map-builder/publis
 function renderControls(overrides: Partial<React.ComponentProps<typeof PublishControls>> = {}) {
   const onPublish = vi.fn();
   const onOpenHistory = vi.fn();
+  const onOpenChange = vi.fn();
   render(
     <PublishControls
       hasDraft
       nextVersion={3}
+      open={false}
+      onOpenChange={onOpenChange}
       publishing={false}
       errorMessage={null}
       published={false}
@@ -28,13 +31,20 @@ function renderControls(overrides: Partial<React.ComponentProps<typeof PublishCo
       {...overrides}
     />
   );
-  return { onPublish, onOpenHistory };
+  return { onPublish, onOpenHistory, onOpenChange };
 }
 
 describe('PublishControls', () => {
   it('disables Publish when there is no draft', () => {
     renderControls({ hasDraft: false });
     expect(screen.getByTestId('map-publish-open')).toBeDisabled();
+  });
+
+  it('requests the dialog open via onOpenChange', async () => {
+    const user = userEvent.setup();
+    const { onOpenChange } = renderControls();
+    await user.click(screen.getByTestId('map-publish-open'));
+    expect(onOpenChange).toHaveBeenCalledWith(true);
   });
 
   it('opens History via the callback', async () => {
@@ -46,8 +56,7 @@ describe('PublishControls', () => {
 
   it('shows the next version in the dialog and publishes with no summary', async () => {
     const user = userEvent.setup();
-    const { onPublish } = renderControls({ nextVersion: 7 });
-    await user.click(screen.getByTestId('map-publish-open'));
+    const { onPublish } = renderControls({ open: true, nextVersion: 7 });
     expect(screen.getByText(/version 7/i)).toBeInTheDocument();
     await user.click(screen.getByTestId('map-publish-confirm'));
     expect(onPublish).toHaveBeenCalledWith(undefined);
@@ -55,17 +64,14 @@ describe('PublishControls', () => {
 
   it('publishes with the trimmed change summary', async () => {
     const user = userEvent.setup();
-    const { onPublish } = renderControls();
-    await user.click(screen.getByTestId('map-publish-open'));
+    const { onPublish } = renderControls({ open: true });
     await user.type(screen.getByTestId('map-publish-summary'), '  reworked gating  ');
     await user.click(screen.getByTestId('map-publish-confirm'));
     expect(onPublish).toHaveBeenCalledWith('reworked gating');
   });
 
   it('blocks publish when the summary is over the 500-char limit', async () => {
-    const user = userEvent.setup();
-    const { onPublish } = renderControls();
-    await user.click(screen.getByTestId('map-publish-open'));
+    const { onPublish } = renderControls({ open: true });
     fireEvent.change(screen.getByTestId('map-publish-summary'), {
       target: { value: 'a'.repeat(501) },
     });
@@ -74,10 +80,15 @@ describe('PublishControls', () => {
     expect(onPublish).not.toHaveBeenCalled();
   });
 
-  it('surfaces a publish error in the dialog', async () => {
+  it('cancels via onOpenChange(false)', async () => {
     const user = userEvent.setup();
-    renderControls({ errorMessage: 'Map is not publishable' });
-    await user.click(screen.getByTestId('map-publish-open'));
+    const { onOpenChange } = renderControls({ open: true });
+    await user.click(screen.getByRole('button', { name: /cancel/i }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it('surfaces a publish error in the dialog', () => {
+    renderControls({ open: true, errorMessage: 'Map is not publishable' });
     expect(screen.getByRole('alert')).toHaveTextContent('Map is not publishable');
   });
 
