@@ -8,8 +8,8 @@
  * a sub-threshold zoom nudge) doesn't recompute the graph.
  */
 
-import { useMemo } from 'react';
-import { useViewport, type Edge } from '@xyflow/react';
+import { useMemo, useState } from 'react';
+import { useOnViewportChange, type Edge, type Viewport } from '@xyflow/react';
 
 import { AtlasCanvas } from '@/components/admin/framework/atlas/atlas-canvas';
 import { applyDetail, DETAIL_ZOOM } from '@/components/admin/framework/atlas/atlas-detail';
@@ -24,7 +24,13 @@ export interface AtlasGraphProps {
 }
 
 export function AtlasGraph({ nodes, edges, forceExpand, onNodeClick }: AtlasGraphProps) {
-  const { zoom } = useViewport();
+  // Track zoom from viewport *changes* rather than `useViewport()`. On first paint React Flow's zoom
+  // is its pre-`fitView` default of 1 (≥ DETAIL_ZOOM) — reading it there would flash a large atlas
+  // fully-expanded before fitView settles and collapses it. Starting BELOW the threshold means the
+  // pre-fit frame is the overview; the initial fitView fires `onChange` with the real zoom, which
+  // then reveals detail only if it genuinely lands zoomed-in (a small atlas).
+  const [zoom, setZoom] = useState(0);
+  useOnViewportChange({ onChange: (vp: Viewport) => setZoom(vp.zoom) });
   const showDetail = forceExpand || zoom >= DETAIL_ZOOM;
 
   const display = useMemo(() => applyDetail(nodes, edges, showDetail), [nodes, edges, showDetail]);

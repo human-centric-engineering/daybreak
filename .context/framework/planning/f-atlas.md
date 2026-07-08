@@ -219,6 +219,10 @@ affordance.
 - **Engagement overlay toggles** — `f-engagement` (08)'s heat/replay overlays on the atlas canvas (a
   future cross-feature integration; 08 owns the overlay data).
 - **Lazy-load on unfold** — if a deployment outgrows the single full-projection call (open question 4).
+- **Re-fit the viewport on "Show all detail"** (t-2b `/code-review`, deferred) — toggling force-expand
+  unfolds satellites in place without re-fitting, so on a zoomed-in view they can extend off-canvas. A
+  `fitView()` on the toggle would help, but auto-jumping the viewport is debatable UX — left for the
+  owner to decide (pairs naturally with the region-container work).
 - **Region-container nodes** (t-2b scoping) — `@xyflow` v12 native parent/child container nodes for
   map regions + per-module satellite clusters (visual grouping + collapse/expand). Deferred from t-2b
   (which shipped zoom-driven semantic zoom); parent-node layout is its own fiddly piece, additive on

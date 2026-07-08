@@ -18,15 +18,11 @@ import type { Edge } from '@xyflow/react';
 import type { AtlasFlowNode } from '@/components/admin/framework/atlas/atlas-mapper';
 import type { AtlasEntityType } from '@/lib/framework/atlas/view';
 
-/** The kinds that stay visible at every zoom — the composition's hubs. */
-export const PRIMARY_KINDS: ReadonlySet<AtlasEntityType> = new Set([
-  'module',
-  'facilitation',
-  'map',
-]);
-
-/** The kinds that unfold only when zoomed in (or forced) — a primary's parts. */
-export const SATELLITE_KINDS: ReadonlySet<AtlasEntityType> = new Set([
+/**
+ * The kinds that unfold only when zoomed in (or forced) — a primary's parts. The complement (the
+ * always-visible hubs) is modules / facilitation / maps; classification keys off this set alone.
+ */
+const SATELLITE_KINDS: ReadonlySet<AtlasEntityType> = new Set([
   'agent',
   'workflow',
   'slot',

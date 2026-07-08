@@ -1,17 +1,22 @@
 /**
- * AtlasGraph (f-atlas t-2b) — the semantic-zoom layer. Reads the live zoom (`useViewport`, mocked),
- * combines it with the `forceExpand` override, and hands hidden-flagged nodes/edges to the canvas
- * (stubbed to expose what it received). Proves: below the threshold satellites hide, above it they
- * show, and `forceExpand` overrides a low zoom.
+ * AtlasGraph (f-atlas t-2b) — the semantic-zoom layer. Tracks zoom via `useOnViewportChange` (mocked
+ * to capture the handler so the test can drive it) and hands hidden-flagged nodes/edges to the canvas
+ * (stubbed to expose what it received). Proves: collapsed on mount (before fitView settles), satellites
+ * reveal only once a viewport change reports a zoom past the threshold, and `forceExpand` overrides.
  *
  * @see components/admin/framework/atlas/atlas-graph.tsx
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 
-const viewport = vi.hoisted(() => ({ zoom: 1 }));
-vi.mock('@xyflow/react', () => ({ useViewport: () => viewport }));
+// Capture the onChange handler the component registers, so the test can simulate a viewport change.
+const vp = vi.hoisted(() => ({ onChange: null as null | ((v: { zoom: number }) => void) }));
+vi.mock('@xyflow/react', () => ({
+  useOnViewportChange: ({ onChange }: { onChange: (v: { zoom: number }) => void }) => {
+    vp.onChange = onChange;
+  },
+}));
 
 // Stub the canvas: expose which nodes are hidden as data attributes.
 vi.mock('@/components/admin/framework/atlas/atlas-canvas', () => ({
@@ -43,28 +48,31 @@ const NODES: AtlasFlowNode[] = [
 ];
 const hiddenOf = (id: string) =>
   screen.getByText('', { selector: `[data-node="${id}"]` }).getAttribute('data-hidden');
+const setZoom = (zoom: number) => act(() => vp.onChange?.({ zoom }));
 
 beforeEach(() => {
-  viewport.zoom = 1;
+  vp.onChange = null;
 });
 
 describe('AtlasGraph', () => {
-  it('hides satellites when zoomed out below the detail threshold', () => {
-    viewport.zoom = 0.4; // < DETAIL_ZOOM
+  it('starts collapsed on mount (before fitView reports a zoom) — no full-detail flash', () => {
     render(<AtlasGraph nodes={NODES} edges={[]} forceExpand={false} onNodeClick={vi.fn()} />);
+    expect(hiddenOf('agent:a1')).toBe('true'); // satellite hidden until a real zoom arrives
+    expect(hiddenOf('module:reading')).toBe('false'); // primary always visible
+  });
+
+  it('reveals satellites once a viewport change reports a zoom past the threshold', () => {
+    render(<AtlasGraph nodes={NODES} edges={[]} forceExpand={false} onNodeClick={vi.fn()} />);
+
+    setZoom(0.4); // below DETAIL_ZOOM (e.g. a large atlas fit) → stays collapsed
     expect(hiddenOf('agent:a1')).toBe('true');
-    expect(hiddenOf('module:reading')).toBe('false');
-  });
 
-  it('shows satellites when zoomed in past the threshold', () => {
-    viewport.zoom = 1.2; // >= DETAIL_ZOOM
-    render(<AtlasGraph nodes={NODES} edges={[]} forceExpand={false} onNodeClick={vi.fn()} />);
+    setZoom(1.2); // zoomed in past the threshold → unfold
     expect(hiddenOf('agent:a1')).toBe('false');
   });
 
-  it('forceExpand overrides a low zoom', () => {
-    viewport.zoom = 0.2;
+  it('forceExpand overrides a collapsed/low zoom', () => {
     render(<AtlasGraph nodes={NODES} edges={[]} forceExpand={true} onNodeClick={vi.fn()} />);
-    expect(hiddenOf('agent:a1')).toBe('false');
+    expect(hiddenOf('agent:a1')).toBe('false'); // shown despite zoom never being reported
   });
 });
