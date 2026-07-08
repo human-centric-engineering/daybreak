@@ -62,14 +62,15 @@ export function applyFocus(
   };
 }
 
-/** One lensable entity for the selector: its canvas node id + display label. */
-export interface LensOption {
+/** One lensable entity for the selector: its canvas node id + display label. Module-local — the view
+ *  consumes the shape via `ReturnType<typeof lensGroups>`, so neither interface needs to be exported. */
+interface LensOption {
   id: string;
   label: string;
 }
 
 /** A group of lensable entities of one kind, for the grouped selector. */
-export interface LensGroup {
+interface LensGroup {
   kind: AtlasEntityType;
   items: LensOption[];
 }

@@ -132,4 +132,16 @@ describe('AtlasView', () => {
     await userEvent.click(screen.getByRole('button', { name: /clear lens/i }));
     expect(lastFocusedId.value).toBeNull();
   });
+
+  it('ignores a stale lens whose subject no longer exists (avoids dimming the whole canvas)', async () => {
+    const { rerender } = render(<AtlasView projection={PROJECTION} />);
+    await userEvent.click(screen.getByRole('combobox', { name: /lens/i }));
+    await userEvent.click(await screen.findByRole('option', { name: 'Reading' }));
+    expect(lastFocusedId.value).toBe('module:reading');
+
+    // The projection revalidates and `reading` is gone → the stale focus is ignored (effective null),
+    // so the graph is NOT dimmed against a subject that no longer exists.
+    rerender(<AtlasView projection={{ ...PROJECTION, modules: [], slots: [], edges: [] }} />);
+    expect(lastFocusedId.value).toBeNull();
+  });
 });

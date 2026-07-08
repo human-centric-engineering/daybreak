@@ -49,9 +49,13 @@ export function AtlasView({ projection }: { projection: CompositionProjection })
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const { nodes, edges } = useMemo(() => compositionToFlow(projection), [projection]);
   const groups = useMemo(() => lensGroups(nodes), [nodes]);
-  const focusedLabel = focusedId
-    ? (nodes.find((n) => n.id === focusedId)?.data.label ?? null)
-    : null;
+  // A lens is only "effective" while its subject still exists. If the projection revalidates (a
+  // router.refresh() re-renders this same instance) and the focused entity has since been deleted, a
+  // stale `focusedId` would dim the WHOLE canvas with no subject to highlight — so ignore it until the
+  // node reappears (or the user clears/re-picks). Everything downstream reads the effective value.
+  const focusedNode = focusedId ? nodes.find((n) => n.id === focusedId) : undefined;
+  const effectiveFocusedId = focusedNode ? focusedId : null;
+  const focusedLabel = focusedNode?.data.label ?? null;
 
   const handleNodeClick = useCallback(
     (node: AtlasFlowNode) => {
@@ -67,7 +71,7 @@ export function AtlasView({ projection }: { projection: CompositionProjection })
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Legend />
         <div className="flex items-center gap-2">
-          <LensControl groups={groups} focusedId={focusedId} onFocus={setFocusedId} />
+          <LensControl groups={groups} focusedId={effectiveFocusedId} onFocus={setFocusedId} />
           <Button
             type="button"
             variant="outline"
@@ -100,7 +104,7 @@ export function AtlasView({ projection }: { projection: CompositionProjection })
           nodes={nodes}
           edges={edges}
           forceExpand={forceExpand}
-          focusedId={focusedId}
+          focusedId={effectiveFocusedId}
           onNodeClick={handleNodeClick}
         />
       </ReactFlowProvider>
