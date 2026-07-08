@@ -18,7 +18,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertCircle, Check, Trash2 } from 'lucide-react';
+import { AlertCircle, Check } from 'lucide-react';
 import {
   ReactFlowProvider,
   useEdgesState,
@@ -32,14 +32,23 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { logger } from '@/lib/logging';
-import { mapDefinitionSchema, type EdgeType } from '@/lib/framework/facilitation/map/schema';
+import {
+  mapDefinitionSchema,
+  type EdgeType,
+  type MapCondition,
+} from '@/lib/framework/facilitation/map/schema';
 
 import { MapCanvas } from '@/components/admin/framework/map-builder/map-canvas';
 import { MapPalette } from '@/components/admin/framework/map-builder/map-palette';
-import { mapNodeKind } from '@/components/admin/framework/map-builder/map-node-kinds';
+import { NodeInspector } from '@/components/admin/framework/map-builder/node-inspector';
 import { EdgeInspector } from '@/components/admin/framework/map-builder/edge-inspector';
+import { ValidationPanel } from '@/components/admin/framework/map-builder/validation-panel';
 import { makeMapEdge } from '@/components/admin/framework/map-builder/add-map-edge';
 import { MapEditorProvider } from '@/components/admin/framework/map-builder/map-editor-context';
+import {
+  collectMapIssues,
+  issueNodeIds,
+} from '@/components/admin/framework/map-builder/map-validation';
 import {
   isDescendant,
   regionDepth,
@@ -49,8 +58,10 @@ import {
 import {
   flowToMapDefinition,
   mapDefinitionToFlow,
+  type MapEdgeData,
   type MapFlowEdge,
   type MapFlowNode,
+  type MapNodeData,
 } from '@/components/admin/framework/map-builder/map-mappers';
 
 /** The subset of the map-detail API row the editor needs. Fields serialise as JSON
@@ -94,7 +105,15 @@ function mapPath(slug: string): string {
   return `/api/v1/admin/framework/maps/${encodeURIComponent(slug)}`;
 }
 
-function MapBuilderInner({ graph }: { graph: MapEditorGraph }) {
+function MapBuilderInner({
+  graph,
+  moduleOptions,
+  slotOptions,
+}: {
+  graph: MapEditorGraph;
+  moduleOptions: readonly string[];
+  slotOptions: readonly string[];
+}) {
   const router = useRouter();
   const seed = useMemo(() => seedFlow(graph), [graph]);
 
@@ -236,6 +255,32 @@ function MapBuilderInner({ graph }: { graph: MapEditorGraph }) {
     [setEdges]
   );
 
+  // A single merge-patch updater drives every node-inspector field edit (type, module
+  // binding, stage, completion mode, first-arrival). The mappers round-trip the data.
+  const handleNodeDataChange = useCallback(
+    (nodeId: string, patch: Partial<MapNodeData>) => {
+      setNodes((prev) =>
+        prev.map((n) => (n.id === nodeId ? { ...n, data: { ...n.data, ...patch } } : n))
+      );
+      setSaved(false);
+    },
+    [setNodes]
+  );
+
+  // The condition builder emits a valid `MapCondition` or `undefined` (no gate); write
+  // it onto the edge's data so the mappers persist / drop it on save.
+  const handleEdgeConditionChange = useCallback(
+    (edgeId: string, condition: MapCondition | undefined) => {
+      setEdges((prev) =>
+        prev.map((e) =>
+          e.id === edgeId ? { ...e, data: { ...(e.data as MapEdgeData), condition } } : e
+        )
+      );
+      setSaved(false);
+    },
+    [setEdges]
+  );
+
   const handleSave = useCallback(async () => {
     setSaving(true);
     setSaveError(null);
@@ -299,6 +344,25 @@ function MapBuilderInner({ graph }: { graph: MapEditorGraph }) {
     [onNodesChange]
   );
 
+  // Live preflight: run the pure validators over the current canvas so offending nodes
+  // ring and the panel lists every problem before the author publishes (decision 3).
+  const issues = useMemo(() => collectMapIssues(flowToMapDefinition(nodes, edges)), [nodes, edges]);
+  const errorNodeIds = useMemo(() => issueNodeIds(issues), [issues]);
+
+  // Paint the error ring by deriving `data.hasError` for the canvas rather than mutating
+  // canvas state (which would loop): the flag is transient and never persisted.
+  const displayNodes = useMemo(
+    () =>
+      nodes.map((n) => {
+        const hasError = errorNodeIds.has(n.id);
+        return n.data.hasError === hasError ? n : { ...n, data: { ...n.data, hasError } };
+      }),
+    [nodes, errorNodeIds]
+  );
+
+  // Every node key on the canvas — the condition builder's milestone suggestions.
+  const nodeKeys = useMemo(() => nodes.map((n) => n.id), [nodes]);
+
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
   const selectedEdge = edges.find((e) => e.id === selectedEdgeId) ?? null;
 
@@ -358,7 +422,7 @@ function MapBuilderInner({ graph }: { graph: MapEditorGraph }) {
         <div className="flex flex-1 overflow-hidden">
           <MapPalette typeCounts={typeCounts} />
           <MapCanvas
-            nodes={nodes}
+            nodes={displayNodes}
             edges={edges}
             onNodesChange={handleNodesChange}
             onEdgesChange={onEdgesChange}
@@ -369,72 +433,45 @@ function MapBuilderInner({ graph }: { graph: MapEditorGraph }) {
             onNodeAdd={handleNodeAdd}
           />
           {selectedNode ? (
-            <SelectedNodePanel node={selectedNode} onDelete={handleNodeDelete} />
+            <NodeInspector
+              node={selectedNode}
+              moduleOptions={moduleOptions}
+              onDataChange={handleNodeDataChange}
+              onDelete={handleNodeDelete}
+            />
           ) : selectedEdge ? (
             <EdgeInspector
               edge={selectedEdge}
+              nodeKeys={nodeKeys}
+              slotOptions={slotOptions}
               onTypeChange={handleEdgeTypeChange}
+              onConditionChange={handleEdgeConditionChange}
               onDelete={handleEdgeDelete}
             />
           ) : null}
         </div>
+
+        <ValidationPanel issues={issues} onSelectNode={handleNodeSelect} />
       </div>
     </MapEditorProvider>
   );
 }
 
-/**
- * The minimal selected-node aside t-1 ships: the node's identity + a Delete action.
- * t-3 grows this into the full config inspector (module binding, first-arrival,
- * completion mode, condition builder); keeping it read-only here means the delete
- * path is discoverable without pre-building that surface.
- */
-function SelectedNodePanel({
-  node,
-  onDelete,
+export function MapBuilder({
+  graph,
+  moduleOptions = [],
+  slotOptions = [],
 }: {
-  node: MapFlowNode;
-  onDelete: (nodeId: string) => void;
+  graph: MapEditorGraph;
+  /** Registered module slugs — the node inspector's module-binding suggestions. */
+  moduleOptions?: readonly string[];
+  /** Registered slot-definition slugs — the condition builder's slot suggestions. */
+  slotOptions?: readonly string[];
 }) {
-  const kind = mapNodeKind(node.data.nodeType);
-  return (
-    <aside
-      data-testid="map-node-panel"
-      className="bg-background flex h-full w-[280px] shrink-0 flex-col gap-4 overflow-y-auto border-l p-4"
-    >
-      <div>
-        <p className="text-muted-foreground text-[11px] font-semibold tracking-wide uppercase">
-          {kind.label}
-        </p>
-        <p className="mt-0.5 text-sm font-medium break-all">{node.data.label}</p>
-      </div>
-      {node.data.moduleSlug && (
-        <div>
-          <p className="text-muted-foreground text-xs">Module binding</p>
-          <p className="font-mono text-sm break-all">{node.data.moduleSlug}</p>
-        </div>
-      )}
-      <p className="text-muted-foreground text-xs leading-relaxed">
-        Full node configuration (module binding, gating, completion) arrives in a later task. For
-        now you can reposition and delete nodes and save the draft.
-      </p>
-      <Button
-        variant="outline"
-        size="sm"
-        className="mt-auto text-red-600 hover:text-red-700 dark:text-red-400"
-        onClick={() => onDelete(node.id)}
-      >
-        <Trash2 className="mr-1.5 h-4 w-4" /> Delete node
-      </Button>
-    </aside>
-  );
-}
-
-export function MapBuilder({ graph }: { graph: MapEditorGraph }) {
   // React Flow requires a provider wrapper for `useReactFlow` (canvas drop positioning).
   return (
     <ReactFlowProvider>
-      <MapBuilderInner graph={graph} />
+      <MapBuilderInner graph={graph} moduleOptions={moduleOptions} slotOptions={slotOptions} />
     </ReactFlowProvider>
   );
 }

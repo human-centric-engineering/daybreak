@@ -32,13 +32,35 @@ async function getMap(slug: string): Promise<MapEditorGraph | 'not-found' | null
   }
 }
 
+/**
+ * The registered slugs the inspector's pickers suggest — module bindings for a
+ * `module` node, slot slugs for a `slot`-family gating condition. Both fail soft to an
+ * empty list (the fields stay usable as free-text), so a picker outage never blocks
+ * authoring.
+ */
+async function getPickerSlugs(path: string, label: string): Promise<string[]> {
+  try {
+    const res = await serverFetch(path);
+    if (!res.ok) return [];
+    const body = await parseApiResponse<{ slug: string }[]>(res);
+    return body.success ? body.data.map((row) => row.slug) : [];
+  } catch (err) {
+    logger.error(`framework map editor: ${label} fetch failed`, err);
+    return [];
+  }
+}
+
 export default async function FrameworkMapEditorPage({
   params,
 }: {
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const graph = await getMap(slug);
+  const [graph, moduleOptions, slotOptions] = await Promise.all([
+    getMap(slug),
+    getPickerSlugs('/api/v1/admin/framework/modules', 'modules'),
+    getPickerSlugs('/api/v1/admin/framework/slot-definitions', 'slot definitions'),
+  ]);
 
   if (graph === 'not-found') notFound();
 
@@ -50,5 +72,5 @@ export default async function FrameworkMapEditorPage({
     );
   }
 
-  return <MapBuilder graph={graph} />;
+  return <MapBuilder graph={graph} moduleOptions={moduleOptions} slotOptions={slotOptions} />;
 }

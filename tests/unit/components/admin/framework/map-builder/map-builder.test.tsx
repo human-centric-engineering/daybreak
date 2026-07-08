@@ -499,7 +499,7 @@ describe('MapBuilder regions', () => {
     expect(screen.getByTestId('rf-node-m')).toHaveAttribute('data-hidden', 'true');
 
     await user.click(screen.getByTestId('rf-node-zone'));
-    await user.click(screen.getByRole('button', { name: /Delete node/ }));
+    await user.click(screen.getByRole('button', { name: /Delete region/ }));
 
     // `m` survives and is visible again (no collapsed ancestor).
     expect(screen.getByTestId('rf-node-m')).toHaveAttribute('data-hidden', 'false');
@@ -512,9 +512,58 @@ describe('MapBuilder regions', () => {
     expect(screen.getByTestId('rf-node-m')).toHaveAttribute('data-parent', 'zone');
 
     await user.click(screen.getByTestId('rf-node-zone'));
-    await user.click(screen.getByRole('button', { name: /Delete node/ }));
+    await user.click(screen.getByRole('button', { name: /Delete region/ }));
 
     expect(screen.getByTestId('rf')).toHaveAttribute('data-node-count', '1');
     expect(screen.getByTestId('rf-node-m')).toHaveAttribute('data-parent', '');
+  });
+});
+
+describe('MapBuilder node config', () => {
+  it('edits a node field in the inspector and round-trips it through Save', async () => {
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph()} />);
+
+    await user.click(screen.getByTestId('rf-node-m'));
+    await user.selectOptions(screen.getByTestId('node-completion'), 'repeatable');
+    await user.click(screen.getByRole('button', { name: 'Save draft' }));
+
+    await waitFor(() => expect(api.patch).toHaveBeenCalledTimes(1));
+    const [, opts] = api.patch.mock.calls[0];
+    const def = (opts as { body: { definition: { nodes: { completionMode: string }[] } } }).body
+      .definition;
+    expect(def.nodes[0].completionMode).toBe('repeatable');
+  });
+});
+
+// A prerequisite cycle a→b→a: unsatisfiable (and both nodes unreachable) — the pure
+// validators flag it, so the live-preflight panel must surface it on load.
+const CYCLE_DEF = {
+  nodes: [
+    { key: 'a', type: 'milestone', completionMode: 'once', meta: { _layout: { x: 0, y: 0 } } },
+    { key: 'b', type: 'milestone', completionMode: 'once', meta: { _layout: { x: 100, y: 0 } } },
+  ],
+  edges: [
+    { from: 'a', to: 'b', type: 'prerequisite' },
+    { from: 'b', to: 'a', type: 'prerequisite' },
+  ],
+};
+
+describe('MapBuilder live validation', () => {
+  it('shows no validation panel for a clean map', () => {
+    render(<MapBuilder graph={graph()} />);
+    expect(screen.queryByTestId('map-validation-panel')).not.toBeInTheDocument();
+  });
+
+  it('surfaces a prerequisite cycle and selects the node when an issue is clicked', async () => {
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph({ draftDefinition: CYCLE_DEF })} />);
+
+    const panel = screen.getByTestId('map-validation-panel');
+    expect(panel).toHaveTextContent('PREREQUISITE_CYCLE');
+
+    await user.click(screen.getByTestId('map-issue-0'));
+    // The issue points at a cycle node → its inspector opens.
+    expect(screen.getByTestId('map-node-panel')).toBeInTheDocument();
   });
 });
