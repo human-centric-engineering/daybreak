@@ -232,7 +232,14 @@ export function ConditionBuilder({
         <div className="flex flex-col gap-2">
           <div>
             <Label htmlFor="cond-milestone" className="text-xs">
-              Milestone node key
+              Milestone node key{' '}
+              <FieldHelp title="Milestone node key">
+                <p>
+                  The key of the node this gate depends on — usually a milestone or place elsewhere
+                  on this map. The engine checks whether the user has (or hasn&rsquo;t) reached it.
+                  Type to search the map&rsquo;s node keys.
+                </p>
+              </FieldHelp>
             </Label>
             <Input
               id="cond-milestone"
@@ -274,7 +281,14 @@ export function ConditionBuilder({
         <div className="flex flex-col gap-2">
           <div>
             <Label htmlFor="cond-slot-slug" className="text-xs">
-              Slot slug
+              Slot slug{' '}
+              <FieldHelp title="Slot slug">
+                <p>
+                  The registered data-slot whose learned value this gate reads (e.g.{' '}
+                  <code>confidence</code>, <code>streak</code>). The comparison below runs against
+                  the slot&rsquo;s typed value. Type to search the registered slot definitions.
+                </p>
+              </FieldHelp>
             </Label>
             <Input
               id="cond-slot-slug"
