@@ -12,7 +12,7 @@
  * here). `getDefinition` reads the live canvas at run time so unsaved edits are testable.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -77,6 +77,12 @@ function coerceValue(raw: string): number | string | boolean {
   return raw;
 }
 
+/** A confidence the dry-run schema accepts (int 1–10), or `undefined` to omit it. */
+function validConfidence(raw: string): number | undefined {
+  const n = Number(raw);
+  return raw.trim() !== '' && Number.isInteger(n) && n >= 1 && n <= 10 ? n : undefined;
+}
+
 function dryRunPath(slug: string): string {
   return `/api/v1/admin/framework/maps/${encodeURIComponent(slug)}/dry-run`;
 }
@@ -96,6 +102,15 @@ export function SimulatorPanel({
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<DryRunResult | null>(null);
 
+  // Clear a prior run's result + error when the dialog is closed, so reopening never
+  // shows a stale verdict against a since-edited canvas.
+  useEffect(() => {
+    if (!open) {
+      setResult(null);
+      setError(null);
+    }
+  }, [open]);
+
   const toggleCompletion = (key: string) => {
     setCompletions((prev) => {
       const next = new Set(prev);
@@ -112,17 +127,26 @@ export function SimulatorPanel({
   async function run() {
     setRunning(true);
     setError(null);
+    // Drop any prior result up front so a failed re-run can't leave a stale verdict
+    // rendered beside the error.
+    setResult(null);
     try {
       const body = {
         definition: getDefinition(),
         completions: [...completions],
         slots: slotRows
           .filter((r) => r.slug.trim() !== '')
-          .map((r) => ({
-            slug: r.slug.trim(),
-            value: coerceValue(r.value),
-            ...(r.confidence.trim() !== '' ? { confidence: Number(r.confidence) } : {}),
-          })),
+          .map((r) => {
+            // Only forward a confidence the server will accept (int 1–10); anything else
+            // (blank, decimal, non-numeric) is dropped so it can't 400 the whole run —
+            // the server then defaults it to fully-confident.
+            const confidence = validConfidence(r.confidence);
+            return {
+              slug: r.slug.trim(),
+              value: coerceValue(r.value),
+              ...(confidence !== undefined ? { confidence } : {}),
+            };
+          }),
         ...(now.trim() !== '' ? { now } : {}),
       };
       const data = await apiClient.post<DryRunResult>(dryRunPath(slug), { body });
@@ -157,6 +181,10 @@ export function SimulatorPanel({
                   <p>
                     Mark the places the synthetic user has already completed. Completed nodes
                     satisfy state gates that depend on them and are themselves locked as done.
+                  </p>
+                  <p className="mt-2">
+                    Completions are treated as occurring at the simulated clock, so a{' '}
+                    <code>cooldown_since_last_visit</code> gate reads zero elapsed time.
                   </p>
                 </FieldHelp>
               </Label>
@@ -318,6 +346,15 @@ export function SimulatorPanel({
                         </li>
                       ))}
                     </ol>
+                  )}
+                  {result.firsts.length > 0 && (
+                    <p
+                      data-testid="sim-firsts"
+                      className="text-muted-foreground mt-1.5 text-[11px]"
+                    >
+                      First-arrival triggers:{' '}
+                      <span className="font-mono">{result.firsts.join(', ')}</span>
+                    </p>
                   )}
                 </div>
 

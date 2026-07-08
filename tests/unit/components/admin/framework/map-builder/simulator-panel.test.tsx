@@ -156,6 +156,48 @@ describe('SimulatorPanel', () => {
     expect(screen.getByTestId('sim-node-u')).toHaveTextContent('Needs one of: x, y');
   });
 
+  it('drops an out-of-range confidence rather than letting it 400 the run', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(screen.getByTestId('sim-add-slot'));
+    await user.type(screen.getByTestId('sim-slot-slug-0'), 'x');
+    await user.type(screen.getByTestId('sim-slot-value-0'), '3');
+    await user.type(screen.getByTestId('sim-slot-conf-0'), '5.5'); // not an int 1–10 → dropped
+    await user.click(screen.getByTestId('sim-run'));
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    const body = (api.post.mock.calls[0][1] as { body: { slots: Record<string, unknown>[] } }).body;
+    expect(body.slots[0]).not.toHaveProperty('confidence');
+  });
+
+  it('renders first-arrival triggers when the result has them', async () => {
+    api.post.mockResolvedValueOnce({ ...RESULT, firsts: ['b'] });
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(screen.getByTestId('sim-run'));
+    expect(await screen.findByTestId('sim-firsts')).toHaveTextContent('b');
+  });
+
+  it('clears a prior result when the dialog is closed and reopened', async () => {
+    const user = userEvent.setup();
+    const props = {
+      slug: 'demo',
+      onOpenChange: vi.fn(),
+      nodeKeys: ['a', 'b'],
+      slotOptions: ['readiness'],
+      getDefinition: () => DEFINITION,
+    };
+    const { rerender } = render(<SimulatorPanel {...props} open />);
+    await user.click(screen.getByTestId('sim-run'));
+    await screen.findByTestId('sim-node-a');
+
+    rerender(<SimulatorPanel {...props} open={false} />);
+    rerender(<SimulatorPanel {...props} open />);
+
+    expect(screen.getByText(/set inputs and run/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('sim-node-a')).not.toBeInTheDocument();
+  });
+
   it('surfaces a dry-run failure inline', async () => {
     api.post.mockRejectedValueOnce(new Error('boom'));
     const user = userEvent.setup();
