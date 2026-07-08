@@ -1,0 +1,115 @@
+/**
+ * SimulatorPanel (f-map-editor t-5, F18) — the dry-run dialog. Proves it collects
+ * synthetic inputs (completions, slot rows, clock), POSTs the current definition + those
+ * inputs to the dry-run endpoint with coerced values, and renders the ranked moves +
+ * per-node availability (with narrated lock reasons). A failure surfaces inline.
+ *
+ * @see components/admin/framework/map-builder/simulator-panel.tsx
+ */
+
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+
+const api = vi.hoisted(() => ({ post: vi.fn() }));
+vi.mock('@/lib/api/client', () => ({
+  apiClient: api,
+  APIClientError: class APIClientError extends Error {},
+}));
+
+import { SimulatorPanel } from '@/components/admin/framework/map-builder/simulator-panel';
+import type { MapDefinition } from '@/lib/framework/facilitation/map/schema';
+
+const DEFINITION: MapDefinition = {
+  nodes: [
+    { key: 'a', type: 'milestone', completionMode: 'once' },
+    { key: 'b', type: 'milestone', completionMode: 'once' },
+  ],
+  edges: [{ from: 'a', to: 'b', type: 'prerequisite' }],
+};
+
+const RESULT = {
+  nodes: [
+    { nodeKey: 'a', available: true, lockReasons: [] },
+    { nodeKey: 'b', available: false, lockReasons: [{ kind: 'prerequisite', from: 'a' }] },
+  ],
+  validMoves: ['a'],
+  firsts: [],
+  ranked: [
+    {
+      nodeKey: 'a',
+      score: 3,
+      reasons: [{ code: 'first_arrival', detail: 'New ground' }],
+      related: [],
+    },
+  ],
+};
+
+function renderPanel(overrides: Partial<React.ComponentProps<typeof SimulatorPanel>> = {}) {
+  const onOpenChange = vi.fn();
+  render(
+    <SimulatorPanel
+      slug="demo"
+      open
+      onOpenChange={onOpenChange}
+      nodeKeys={['a', 'b']}
+      slotOptions={['readiness']}
+      getDefinition={() => DEFINITION}
+      {...overrides}
+    />
+  );
+  return { onOpenChange };
+}
+
+beforeEach(() => {
+  api.post.mockReset().mockResolvedValue(RESULT);
+});
+
+describe('SimulatorPanel', () => {
+  it('POSTs the definition + synthetic inputs with coerced slot values', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+
+    await user.click(screen.getByTestId('sim-complete-a'));
+    await user.click(screen.getByTestId('sim-add-slot'));
+    await user.type(screen.getByTestId('sim-slot-slug-0'), 'readiness');
+    await user.type(screen.getByTestId('sim-slot-value-0'), '8');
+    await user.click(screen.getByTestId('sim-run'));
+
+    await waitFor(() => expect(api.post).toHaveBeenCalledTimes(1));
+    const [path, opts] = api.post.mock.calls[0];
+    expect(path).toBe('/api/v1/admin/framework/maps/demo/dry-run');
+    const body = (
+      opts as { body: { definition: unknown; completions: string[]; slots: unknown[] } }
+    ).body;
+    expect(body.definition).toEqual(DEFINITION);
+    expect(body.completions).toEqual(['a']);
+    // '8' is coerced to the number 8 (the slot-condition value type).
+    expect(body.slots).toEqual([{ slug: 'readiness', value: 8 }]);
+  });
+
+  it('renders the ranked moves and per-node availability with narrated lock reasons', async () => {
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(screen.getByTestId('sim-run'));
+
+    expect(await screen.findByTestId('sim-rank-a')).toHaveTextContent('New ground');
+    expect(screen.getByTestId('sim-node-a')).toHaveTextContent('available');
+    const bRow = screen.getByTestId('sim-node-b');
+    expect(bRow).toHaveTextContent('locked');
+    expect(bRow).toHaveTextContent('Prerequisite "a" not met');
+  });
+
+  it('surfaces a dry-run failure inline', async () => {
+    api.post.mockRejectedValueOnce(new Error('boom'));
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(screen.getByTestId('sim-run'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('boom');
+  });
+
+  it('shows a hint when the canvas has no nodes', () => {
+    renderPanel({ nodeKeys: [] });
+    expect(screen.getByText(/add nodes to the canvas first/i)).toBeInTheDocument();
+  });
+});

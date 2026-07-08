@@ -42,6 +42,25 @@ export const listMapVersionsQuerySchema = z.object({
   cursor: cuidSchema.optional(),
 });
 
+/** One synthetic slot reading in a dry-run body (F18). `value` matches the slot-condition
+ *  value union; `confidence` (1–10) and `capturedAt` are optional. */
+export const dryRunSlotSchema = z.object({
+  slug: z.string().min(1),
+  value: z.union([z.number(), z.string(), z.boolean()]),
+  confidence: z.number().int().min(1).max(10).optional(),
+  capturedAt: z.string().datetime({ offset: true }).optional(),
+});
+
+/** POST /maps/[slug]/dry-run — simulate the in-editor `definition` against a synthetic
+ *  user (`completions`, `slots`, `now`). A malformed definition fails `mapDefinitionSchema`
+ *  here (400 with field errors), so the pure engine never runs on a bad map (F18). */
+export const dryRunMapBodySchema = z.object({
+  definition: mapDefinitionSchema,
+  completions: z.array(z.string().min(1)).default([]),
+  slots: z.array(dryRunSlotSchema).default([]),
+  now: z.string().datetime({ offset: true }).optional(),
+});
+
 /**
  * Validate a `[slug]` path param. A malformed slug can never name a real map, so
  * this is a 400 (bad input), not a 404. Thin wrapper over the shared parser (the

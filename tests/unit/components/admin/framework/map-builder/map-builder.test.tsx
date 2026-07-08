@@ -669,3 +669,12 @@ describe('MapBuilder version controls', () => {
     await waitFor(() => expect(screen.getByTestId('rf')).toHaveAttribute('data-node-count', '2'));
   });
 });
+
+describe('MapBuilder dry run', () => {
+  it('opens the dry-run simulator from the header', async () => {
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph()} />);
+    await user.click(screen.getByTestId('map-dryrun-open'));
+    expect(screen.getByTestId('sim-run')).toBeInTheDocument();
+  });
+});

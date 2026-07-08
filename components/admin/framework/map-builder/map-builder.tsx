@@ -18,7 +18,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { AlertCircle, Check } from 'lucide-react';
+import { AlertCircle, Check, FlaskConical } from 'lucide-react';
 import {
   ReactFlowProvider,
   useEdgesState,
@@ -45,6 +45,7 @@ import { EdgeInspector } from '@/components/admin/framework/map-builder/edge-ins
 import { ValidationPanel } from '@/components/admin/framework/map-builder/validation-panel';
 import { PublishControls } from '@/components/admin/framework/map-builder/publish-controls';
 import { VersionHistory } from '@/components/admin/framework/map-builder/version-history';
+import { SimulatorPanel } from '@/components/admin/framework/map-builder/simulator-panel';
 import { makeMapEdge } from '@/components/admin/framework/map-builder/add-map-edge';
 import { MapEditorProvider } from '@/components/admin/framework/map-builder/map-editor-context';
 import {
@@ -143,6 +144,7 @@ function MapBuilderInner({
   const [published, setPublished] = useState(false);
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [simulatorOpen, setSimulatorOpen] = useState(false);
 
   // Clear any stale publish error whenever the dialog is opened or dismissed, so a prior
   // failed publish's alert never bleeds into a fresh dialog.
@@ -438,6 +440,9 @@ function MapBuilderInner({
   // Every node key on the canvas — the condition builder's milestone suggestions.
   const nodeKeys = useMemo(() => nodes.map((n) => n.id), [nodes]);
 
+  // Read the live canvas as a definition — the dry-run simulates unsaved edits (F18).
+  const getDefinition = useCallback(() => flowToMapDefinition(nodes, edges), [nodes, edges]);
+
   const selectedNode = nodes.find((n) => n.id === selectedNodeId) ?? null;
   const selectedEdge = edges.find((e) => e.id === selectedEdgeId) ?? null;
 
@@ -470,6 +475,14 @@ function MapBuilderInner({
                 <Check className="h-4 w-4" /> Saved
               </span>
             )}
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="map-dryrun-open"
+              onClick={() => setSimulatorOpen(true)}
+            >
+              <FlaskConical className="mr-1.5 h-4 w-4" /> Dry run
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -544,6 +557,15 @@ function MapBuilderInner({
           open={historyOpen}
           onOpenChange={setHistoryOpen}
           onRollback={handleRollback}
+        />
+
+        <SimulatorPanel
+          slug={graph.slug}
+          open={simulatorOpen}
+          onOpenChange={setSimulatorOpen}
+          nodeKeys={nodeKeys}
+          slotOptions={slotOptions}
+          getDefinition={getDefinition}
         />
       </div>
     </MapEditorProvider>
