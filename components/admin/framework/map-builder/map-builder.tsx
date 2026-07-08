@@ -43,6 +43,8 @@ import { MapPalette } from '@/components/admin/framework/map-builder/map-palette
 import { NodeInspector } from '@/components/admin/framework/map-builder/node-inspector';
 import { EdgeInspector } from '@/components/admin/framework/map-builder/edge-inspector';
 import { ValidationPanel } from '@/components/admin/framework/map-builder/validation-panel';
+import { PublishControls } from '@/components/admin/framework/map-builder/publish-controls';
+import { VersionHistory } from '@/components/admin/framework/map-builder/version-history';
 import { makeMapEdge } from '@/components/admin/framework/map-builder/add-map-edge';
 import { MapEditorProvider } from '@/components/admin/framework/map-builder/map-editor-context';
 import {
@@ -128,6 +130,18 @@ function MapBuilderInner({
   const [hasDraft, setHasDraft] = useState<boolean>(
     graph.draftDefinition !== null && graph.draftDefinition !== undefined
   );
+
+  // The live published version + publish/history UI state. `publishedVersion` is local
+  // state (not read straight off the prop) so a publish/rollback updates the status pill
+  // and the "next version" immediately, without waiting for the server component to
+  // re-render — mirroring the workflow builder.
+  const [publishedVersion, setPublishedVersion] = useState<number | null>(
+    graph.publishedVersion?.version ?? null
+  );
+  const [publishing, setPublishing] = useState(false);
+  const [publishError, setPublishError] = useState<string | null>(null);
+  const [published, setPublished] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const typeCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -330,6 +344,61 @@ function MapBuilderInner({
     }
   }, [graph, router, setEdges, setNodes]);
 
+  // Publish promotes the SAVED draft to a new immutable version (workflow-builder
+  // model). The publish gate (`validatePublishableMap`) 400s on an invalid draft — its
+  // message surfaces in the dialog; the live-validation panel already shows which nodes.
+  const handlePublish = useCallback(
+    async (changeSummary: string | undefined) => {
+      setPublishing(true);
+      setPublishError(null);
+      try {
+        const result = await apiClient.post<{ version: { version: number } }>(
+          `${mapPath(graph.slug)}/publish`,
+          { body: changeSummary ? { changeSummary } : {} }
+        );
+        setPublishedVersion(result.version.version);
+        setHasDraft(false);
+        setPublished(true);
+        setTimeout(() => setPublished(false), 2500);
+        router.refresh();
+      } catch (err) {
+        const message =
+          err instanceof APIClientError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : 'Failed to publish';
+        setPublishError(message);
+        logger.error('Map publish failed', { slug: graph.slug, error: message });
+      } finally {
+        setPublishing(false);
+      }
+    },
+    [graph.slug, router]
+  );
+
+  // Roll back to a prior version: the service mints a NEW version copying the target and
+  // pins it (history is never rewound), returning that new snapshot — so reload the
+  // canvas from it and sync the pill. Rethrows so the history dialog surfaces the error.
+  const handleRollback = useCallback(
+    async (targetVersion: number) => {
+      const result = await apiClient.post<{ version: { version: number; definition: unknown } }>(
+        `${mapPath(graph.slug)}/rollback`,
+        { body: { targetVersion } }
+      );
+      const reverted = toFlow(result.version.definition);
+      setNodes(reverted.nodes);
+      setEdges(reverted.edges);
+      setSelectedNodeId(null);
+      setSelectedEdgeId(null);
+      setPublishedVersion(result.version.version);
+      setHasDraft(false);
+      setSaved(false);
+      router.refresh();
+    },
+    [graph.slug, router, setEdges, setNodes]
+  );
+
   // Clear the transient "Saved" indicator as soon as the canvas is actually edited
   // (a node moved, resized, or removed) — not on a mere selection — so it never claims
   // an unsaved change is persisted.
@@ -367,14 +436,14 @@ function MapBuilderInner({
   const selectedEdge = edges.find((e) => e.id === selectedEdgeId) ?? null;
 
   const statusPill =
-    graph.publishedVersion === null
+    publishedVersion === null
       ? { label: 'Unpublished', variant: 'outline' as const }
       : hasDraft
         ? {
-            label: `Published v${graph.publishedVersion.version} · editing draft`,
+            label: `Published v${publishedVersion} · editing draft`,
             variant: 'secondary' as const,
           }
-        : { label: `Published v${graph.publishedVersion.version}`, variant: 'outline' as const };
+        : { label: `Published v${publishedVersion}`, variant: 'outline' as const };
 
   return (
     <MapEditorProvider value={editorContext}>
@@ -406,6 +475,15 @@ function MapBuilderInner({
             <Button size="sm" onClick={() => void handleSave()} disabled={saving}>
               {saving ? 'Saving…' : 'Save draft'}
             </Button>
+            <PublishControls
+              hasDraft={hasDraft}
+              nextVersion={(publishedVersion ?? 0) + 1}
+              publishing={publishing}
+              errorMessage={publishError}
+              published={published}
+              onPublish={handlePublish}
+              onOpenHistory={() => setHistoryOpen(true)}
+            />
           </div>
         </header>
 
@@ -452,6 +530,13 @@ function MapBuilderInner({
         </div>
 
         <ValidationPanel issues={issues} onSelectNode={handleNodeSelect} />
+
+        <VersionHistory
+          slug={graph.slug}
+          open={historyOpen}
+          onOpenChange={setHistoryOpen}
+          onRollback={handleRollback}
+        />
       </div>
     </MapEditorProvider>
   );

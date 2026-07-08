@@ -20,7 +20,7 @@ import userEvent from '@testing-library/user-event';
 const router = vi.hoisted(() => ({ refresh: vi.fn(), push: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => router }));
 
-const api = vi.hoisted(() => ({ patch: vi.fn(), get: vi.fn() }));
+const api = vi.hoisted(() => ({ patch: vi.fn(), get: vi.fn(), post: vi.fn() }));
 vi.mock('@/lib/api/client', () => ({
   apiClient: api,
   APIClientError: class APIClientError extends Error {},
@@ -190,6 +190,7 @@ const REGION_MEMBER_DEF = {
 beforeEach(() => {
   api.patch.mockReset().mockResolvedValue({});
   api.get.mockReset().mockResolvedValue(graph());
+  api.post.mockReset().mockResolvedValue({ version: { version: 3 } });
   router.refresh.mockReset();
   intersect.nodes = [];
 });
@@ -565,5 +566,99 @@ describe('MapBuilder live validation', () => {
     await user.click(screen.getByTestId('map-issue-0'));
     // The issue points at a cycle node → its inspector opens.
     expect(screen.getByTestId('map-node-panel')).toBeInTheDocument();
+  });
+});
+
+// Two-node snapshot a rollback returns — proves the canvas reloads from the new version.
+const ROLLBACK_DEF = {
+  nodes: [
+    { key: 'a', type: 'milestone', completionMode: 'once', meta: { _layout: { x: 0, y: 0 } } },
+    { key: 'b', type: 'milestone', completionMode: 'once', meta: { _layout: { x: 100, y: 0 } } },
+  ],
+  edges: [],
+};
+
+const VERSION_LIST = {
+  versions: [
+    {
+      id: 'v2id',
+      version: 2,
+      changeSummary: null,
+      createdAt: '2026-07-01T00:00:00.000Z',
+      createdBy: 'u',
+    },
+    {
+      id: 'v1id',
+      version: 1,
+      changeSummary: null,
+      createdAt: '2026-06-01T00:00:00.000Z',
+      createdBy: 'u',
+    },
+  ],
+  publishedVersionId: 'v2id',
+  nextCursor: null,
+};
+
+describe('MapBuilder version controls', () => {
+  it('gates Publish on a saved draft', () => {
+    render(<MapBuilder graph={graph()} />);
+    expect(screen.getByTestId('map-publish-open')).toBeDisabled();
+  });
+
+  it('enables Publish when a draft is present', () => {
+    render(<MapBuilder graph={graph({ draftDefinition: PUBLISHED_DEF })} />);
+    expect(screen.getByTestId('map-publish-open')).toBeEnabled();
+  });
+
+  it('publishes the draft and updates the version pill', async () => {
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph({ draftDefinition: PUBLISHED_DEF })} />);
+
+    await user.click(screen.getByTestId('map-publish-open'));
+    await user.click(screen.getByTestId('map-publish-confirm'));
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/api/v1/admin/framework/maps/demo/publish', {
+        body: {},
+      })
+    );
+    // Mock publish returns v3 → the pill reflects it, draft cleared.
+    expect(await screen.findByText('Published v3')).toBeInTheDocument();
+  });
+
+  it('opens version history and loads the versions', async () => {
+    api.get.mockResolvedValueOnce(VERSION_LIST);
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph()} />);
+
+    await user.click(screen.getByTestId('map-history-open'));
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith('/api/v1/admin/framework/maps/demo/versions')
+    );
+    expect(await screen.findByTestId('map-version-2')).toHaveTextContent('live');
+  });
+
+  it('rolls back a prior version and reloads the canvas from the new snapshot', async () => {
+    api.get.mockResolvedValueOnce(VERSION_LIST).mockResolvedValueOnce({
+      ...VERSION_LIST,
+      publishedVersionId: 'v3id',
+    });
+    api.post.mockResolvedValueOnce({ version: { version: 3, definition: ROLLBACK_DEF } });
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph()} />);
+    expect(screen.getByTestId('rf')).toHaveAttribute('data-node-count', '1');
+
+    await user.click(screen.getByTestId('map-history-open'));
+    await screen.findByTestId('map-version-1');
+    await user.click(screen.getByTestId('map-rollback-1'));
+    await user.click(screen.getByRole('button', { name: /^confirm$/i }));
+
+    await waitFor(() =>
+      expect(api.post).toHaveBeenCalledWith('/api/v1/admin/framework/maps/demo/rollback', {
+        body: { targetVersion: 1 },
+      })
+    );
+    // The rollback snapshot (2 nodes) replaces the canvas (was 1 node).
+    await waitFor(() => expect(screen.getByTestId('rf')).toHaveAttribute('data-node-count', '2'));
   });
 });
