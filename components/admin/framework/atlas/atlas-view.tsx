@@ -1,20 +1,25 @@
 'use client';
 
 /**
- * AtlasView (f-atlas t-2a) — the client shell around the composition canvas. Runs the pure mapper
- * over the projection the server page fetched, renders the canvas + a legend, and wires a node click
- * to its deep-link (`router.push` to the real editor; a node with no editor yet is inert). The atlas
- * navigates, it never edits (X8) — there is no mutation path here at all.
+ * AtlasView (f-atlas t-2a; semantic zoom t-2b) — the client shell around the composition canvas. Runs
+ * the pure mapper over the projection the server page fetched, renders the canvas + a legend + the
+ * detail toggle, and wires a node click to its deep-link (`router.push` to the real editor; a node
+ * with no editor yet is inert). The atlas navigates, it never edits (X8) — there is no mutation path.
+ *
+ * Semantic zoom (t-2b): zoomed out shows only the primaries (modules / facilitation / maps) and their
+ * map→module links; zoom in — or flip the "Show all detail" toggle — to unfold each primary's
+ * satellites. `<AtlasGraph>` (inside the provider) reads the live zoom and applies it.
  *
  * Wrapped in `ReactFlowProvider` because the canvas uses React Flow hooks. Memoises the mapper so a
- * re-render (e.g. theme toggle) doesn't relay out the graph.
+ * re-render (theme/toggle) doesn't relay out the graph.
  */
 
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ReactFlowProvider } from '@xyflow/react';
+import { Maximize2, Minimize2 } from 'lucide-react';
 
-import { AtlasCanvas } from '@/components/admin/framework/atlas/atlas-canvas';
+import { AtlasGraph } from '@/components/admin/framework/atlas/atlas-graph';
 import {
   compositionToFlow,
   type AtlasFlowNode,
@@ -23,11 +28,13 @@ import {
   ATLAS_LEGEND_KINDS,
   atlasNodeKind,
 } from '@/components/admin/framework/atlas/atlas-node-kinds';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import type { CompositionProjection } from '@/lib/framework/atlas/view';
 
 export function AtlasView({ projection }: { projection: CompositionProjection }) {
   const router = useRouter();
+  const [forceExpand, setForceExpand] = useState(false);
   const { nodes, edges } = useMemo(() => compositionToFlow(projection), [projection]);
 
   const handleNodeClick = useCallback(
@@ -41,12 +48,37 @@ export function AtlasView({ projection }: { projection: CompositionProjection })
   // mean the projection is never empty, so the canvas always has at least those nodes to draw.
   return (
     <div className="space-y-3">
-      <Legend />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Legend />
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setForceExpand((v) => !v)}
+          aria-pressed={forceExpand}
+        >
+          {forceExpand ? (
+            <>
+              <Minimize2 className="h-3.5 w-3.5" aria-hidden /> Auto (zoom to explore)
+            </>
+          ) : (
+            <>
+              <Maximize2 className="h-3.5 w-3.5" aria-hidden /> Show all detail
+            </>
+          )}
+        </Button>
+      </div>
       <ReactFlowProvider>
-        <AtlasCanvas nodes={nodes} edges={edges} onNodeClick={handleNodeClick} />
+        <AtlasGraph
+          nodes={nodes}
+          edges={edges}
+          forceExpand={forceExpand}
+          onNodeClick={handleNodeClick}
+        />
       </ReactFlowProvider>
       <p className="text-muted-foreground text-xs">
-        Read-only — click a node to open its editor. The atlas navigates; it never edits.
+        Read-only — click a node to open its editor; zoom in (or “Show all detail”) to unfold each
+        node’s composition. The atlas navigates; it never edits.
       </p>
     </div>
   );

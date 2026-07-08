@@ -13,28 +13,35 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 const push = vi.hoisted(() => vi.fn());
+const lastForceExpand = vi.hoisted(() => ({ value: null as boolean | null }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 vi.mock('@xyflow/react', () => ({
   ReactFlowProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
-// Stub the canvas: render a button per node that forwards it to onNodeClick.
-vi.mock('@/components/admin/framework/atlas/atlas-canvas', () => ({
-  AtlasCanvas: ({
+// Stub the graph layer: record the forceExpand it received, and render a button per node forwarding
+// it to onNodeClick (so the deep-link wiring is exercised without React Flow).
+vi.mock('@/components/admin/framework/atlas/atlas-graph', () => ({
+  AtlasGraph: ({
     nodes,
+    forceExpand,
     onNodeClick,
   }: {
     nodes: { id: string }[];
+    forceExpand: boolean;
     onNodeClick: (n: unknown) => void;
-  }) => (
-    <div>
-      {nodes.map((n) => (
-        <button key={n.id} onClick={() => onNodeClick(n)}>
-          {n.id}
-        </button>
-      ))}
-    </div>
-  ),
+  }) => {
+    lastForceExpand.value = forceExpand;
+    return (
+      <div>
+        {nodes.map((n) => (
+          <button key={n.id} onClick={() => onNodeClick(n)}>
+            {n.id}
+          </button>
+        ))}
+      </div>
+    );
+  },
 }));
 
 import { AtlasView } from '@/components/admin/framework/atlas/atlas-view';
@@ -97,5 +104,16 @@ describe('AtlasView', () => {
     push.mockClear();
     await userEvent.click(screen.getByRole('button', { name: 'slot:goal' })); // slot → href null
     expect(push).not.toHaveBeenCalled();
+  });
+
+  it('toggles "Show all detail" → forceExpand for the graph', async () => {
+    render(<AtlasView projection={PROJECTION} />);
+    expect(lastForceExpand.value).toBe(false); // default: auto (zoom-driven)
+
+    await userEvent.click(screen.getByRole('button', { name: /show all detail/i }));
+    expect(lastForceExpand.value).toBe(true);
+
+    await userEvent.click(screen.getByRole('button', { name: /auto/i }));
+    expect(lastForceExpand.value).toBe(false);
   });
 });
