@@ -1,13 +1,14 @@
 'use client';
 
 /**
- * EdgeInspector (f-map-editor t-2) — the right-panel inspector for a selected edge.
- * Shows the connection (source → target), lets the author pick one of the four edge
- * types, and delete the edge. Mirrors the node-selection panel's shape.
+ * EdgeInspector (f-map-editor t-2 / t-3) — the right-panel inspector for a selected
+ * edge. Shows the connection (source → target), lets the author pick one of the four
+ * edge types, compose a gating condition (the t-3 descriptor-driven
+ * `<ConditionBuilder>`), and delete the edge. Mirrors the node-inspector's shape.
  *
- * Gating conditions ride on an edge (`data.condition`) and round-trip untouched, but
- * *composing* one is the descriptor-driven condition builder in t-3 — so a present
- * condition is surfaced read-only here, not edited.
+ * Gating conditions ride on an edge (`data.condition`). The condition builder is keyed
+ * on the edge id so its working state re-seeds cleanly each time a different edge is
+ * selected.
  */
 
 import { ArrowRight, Trash2 } from 'lucide-react';
@@ -18,18 +19,30 @@ import {
   DEFAULT_EDGE_TYPE,
   MAP_EDGE_KINDS,
 } from '@/components/admin/framework/map-builder/map-edge-kinds';
+import { ConditionBuilder } from '@/components/admin/framework/map-builder/condition-builder';
 import type { MapFlowEdge } from '@/components/admin/framework/map-builder/map-mappers';
-import type { EdgeType } from '@/lib/framework/facilitation/map/schema';
+import type { EdgeType, MapCondition } from '@/lib/framework/facilitation/map/schema';
 
 export interface EdgeInspectorProps {
   edge: MapFlowEdge;
+  /** Node keys on the canvas — suggestions for a `state`-family condition's milestone. */
+  nodeKeys: readonly string[];
+  /** Registered slot-definition slugs — suggestions for a `slot`-family condition. */
+  slotOptions: readonly string[];
   onTypeChange: (edgeId: string, type: EdgeType) => void;
+  onConditionChange: (edgeId: string, condition: MapCondition | undefined) => void;
   onDelete: (edgeId: string) => void;
 }
 
-export function EdgeInspector({ edge, onTypeChange, onDelete }: EdgeInspectorProps) {
+export function EdgeInspector({
+  edge,
+  nodeKeys,
+  slotOptions,
+  onTypeChange,
+  onConditionChange,
+  onDelete,
+}: EdgeInspectorProps) {
   const currentType = edge.data?.edgeType ?? DEFAULT_EDGE_TYPE;
-  const hasCondition = Boolean(edge.data?.condition);
 
   return (
     <aside
@@ -85,12 +98,15 @@ export function EdgeInspector({ edge, onTypeChange, onDelete }: EdgeInspectorPro
         </div>
       </div>
 
-      {hasCondition && (
-        <p className="text-muted-foreground rounded-md border border-dashed p-2 text-xs leading-relaxed">
-          This edge carries a gating condition. Editing conditions arrives with the condition
-          builder in a later task; it is preserved as-is for now.
-        </p>
-      )}
+      <div className="border-t pt-3">
+        <ConditionBuilder
+          key={edge.id}
+          condition={edge.data?.condition}
+          nodeKeys={nodeKeys}
+          slotOptions={slotOptions}
+          onChange={(condition) => onConditionChange(edge.id, condition)}
+        />
+      </div>
 
       <Button
         variant="outline"
