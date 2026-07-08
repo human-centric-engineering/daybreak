@@ -71,49 +71,60 @@ export function stripReserved(
 
 // ─── Flow-graph helpers (operate on the React Flow node array) ────────────────
 
-function indexById(nodes: readonly MapFlowNode[]): Map<string, MapFlowNode> {
+export function indexById(nodes: readonly MapFlowNode[]): Map<string, MapFlowNode> {
   return new Map(nodes.map((n) => [n.id, n]));
+}
+
+/**
+ * Walk a node's ancestor chain (parent, grandparent, …) via `parentId`. The single
+ * cycle-safe primitive every region walk shares — a `seen` set breaks a malformed
+ * containment cycle (e.g. an API-authored map with two regions referencing each
+ * other) instead of looping forever. Does not yield the start node itself.
+ */
+export function* walkAncestors(
+  startId: string,
+  byId: Map<string, MapFlowNode>
+): Generator<MapFlowNode> {
+  const seen = new Set<string>([startId]);
+  let cur = byId.get(startId)?.parentId;
+  while (cur && !seen.has(cur)) {
+    seen.add(cur);
+    const node = byId.get(cur);
+    if (!node) return;
+    yield node;
+    cur = node.parentId;
+  }
+}
+
+/** How many regions deep a node sits (0 = top level). */
+export function regionDepth(id: string, byId: Map<string, MapFlowNode>): number {
+  let d = 0;
+  for (const _ of walkAncestors(id, byId)) d += 1;
+  return d;
 }
 
 /**
  * A flow node's absolute canvas position: its own position plus every ancestor
  * parent's, walked up the `parentId` chain (React Flow stores a child's position
- * relative to its parent). Memoised; cycle-safe.
+ * relative to its parent). Cycle-safe via {@link walkAncestors}.
  */
 export function absoluteFlowPosition(
   node: MapFlowNode,
-  byId: Map<string, MapFlowNode>,
-  memo: Map<string, XYPosition> = new Map()
+  byId: Map<string, MapFlowNode>
 ): XYPosition {
-  const cached = memo.get(node.id);
-  if (cached) return cached;
-  const parent = node.parentId ? byId.get(node.parentId) : undefined;
-  const abs =
-    parent && parent.id !== node.id
-      ? (() => {
-          const p = absoluteFlowPosition(parent, byId, memo);
-          return { x: node.position.x + p.x, y: node.position.y + p.y };
-        })()
-      : { x: node.position.x, y: node.position.y };
-  memo.set(node.id, abs);
-  return abs;
+  let x = node.position.x;
+  let y = node.position.y;
+  for (const ancestor of walkAncestors(node.id, byId)) {
+    x += ancestor.position.x;
+    y += ancestor.position.y;
+  }
+  return { x, y };
 }
 
 /** Order nodes so every parent precedes its children (React Flow requires this). */
 export function sortParentsFirst(nodes: readonly MapFlowNode[]): MapFlowNode[] {
   const byId = indexById(nodes);
-  const depth = (n: MapFlowNode): number => {
-    let d = 0;
-    let cur: MapFlowNode | undefined = n;
-    const seen = new Set<string>();
-    while (cur?.parentId && byId.has(cur.parentId) && !seen.has(cur.id)) {
-      seen.add(cur.id);
-      cur = byId.get(cur.parentId);
-      d += 1;
-    }
-    return d;
-  };
-  return [...nodes].sort((a, b) => depth(a) - depth(b));
+  return [...nodes].sort((a, b) => regionDepth(a.id, byId) - regionDepth(b.id, byId));
 }
 
 /** Is `candidateId` somewhere beneath `ancestorId` in the region tree? */
@@ -122,12 +133,8 @@ export function isDescendant(
   ancestorId: string,
   byId: Map<string, MapFlowNode>
 ): boolean {
-  let cur = byId.get(candidateId);
-  const seen = new Set<string>();
-  while (cur?.parentId && !seen.has(cur.id)) {
-    seen.add(cur.id);
-    if (cur.parentId === ancestorId) return true;
-    cur = byId.get(cur.parentId);
+  for (const ancestor of walkAncestors(candidateId, byId)) {
+    if (ancestor.id === ancestorId) return true;
   }
   return false;
 }
@@ -137,15 +144,11 @@ export function descendantIds(regionId: string, nodes: readonly MapFlowNode[]): 
   const byId = indexById(nodes);
   const out = new Set<string>();
   for (const n of nodes) {
-    let cur = n.parentId ? byId.get(n.parentId) : undefined;
-    const seen = new Set<string>();
-    while (cur && !seen.has(cur.id)) {
-      seen.add(cur.id);
-      if (cur.id === regionId) {
+    for (const ancestor of walkAncestors(n.id, byId)) {
+      if (ancestor.id === regionId) {
         out.add(n.id);
         break;
       }
-      cur = cur.parentId ? byId.get(cur.parentId) : undefined;
     }
   }
   return out;
@@ -156,12 +159,8 @@ export function descendantIds(regionId: string, nodes: readonly MapFlowNode[]): 
 export function recomputeHidden(nodes: readonly MapFlowNode[]): MapFlowNode[] {
   const byId = indexById(nodes);
   const ancestorCollapsed = (n: MapFlowNode): boolean => {
-    let cur = n.parentId ? byId.get(n.parentId) : undefined;
-    const seen = new Set<string>();
-    while (cur && !seen.has(cur.id)) {
-      seen.add(cur.id);
-      if (cur.data.collapsed) return true;
-      cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+    for (const ancestor of walkAncestors(n.id, byId)) {
+      if (ancestor.data.collapsed) return true;
     }
     return false;
   };
@@ -203,7 +202,9 @@ export function reparentNode(
         }
       : n
   );
-  return sortParentsFirst(updated);
+  // Re-propagate `hidden`: a node moved out of a collapsed region must reappear, and
+  // one moved into a collapsed region must hide with its new siblings.
+  return recomputeHidden(sortParentsFirst(updated));
 }
 
 /**

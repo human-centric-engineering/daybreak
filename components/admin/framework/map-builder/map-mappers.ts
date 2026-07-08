@@ -225,11 +225,10 @@ export function flowToMapDefinition(
 ): MapDefinition {
   const nodeIds = new Set(nodes.map((n) => n.id));
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  const absMemo = new Map<string, { x: number; y: number }>();
 
   const mapNodes: MapNode[] = nodes.map((node) => {
     const d = node.data;
-    const abs = absoluteFlowPosition(node, byId, absMemo);
+    const abs = absoluteFlowPosition(node, byId);
     const baseMeta = stripReserved(d.meta) ?? {};
     const meta: Record<string, unknown> = {
       ...baseMeta,

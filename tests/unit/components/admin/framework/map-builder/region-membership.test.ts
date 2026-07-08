@@ -56,6 +56,16 @@ describe('absoluteFlowPosition', () => {
     const n = fnode('a', { position: { x: 7, y: 8 } });
     expect(absoluteFlowPosition(n, byId([n]))).toEqual({ x: 7, y: 8 });
   });
+
+  it('is cycle-safe against a malformed parent cycle (no infinite recursion)', () => {
+    // Two nodes each claiming the other as parent (an API-authored bad map).
+    const nodes = [
+      fnode('x', { position: { x: 1, y: 1 }, parentId: 'y' }),
+      fnode('y', { position: { x: 2, y: 2 }, parentId: 'x' }),
+    ];
+    // Should terminate, not stack-overflow.
+    expect(() => absoluteFlowPosition(nodes[0], byId(nodes))).not.toThrow();
+  });
 });
 
 describe('sortParentsFirst', () => {
@@ -129,6 +139,21 @@ describe('reparentNode', () => {
   it('is a no-op when the parent is unchanged', () => {
     const nodes = [fnode('n')];
     expect(reparentNode(nodes, 'n', null)).toBe(nodes);
+  });
+
+  it('clears hidden when a node leaves a collapsed region', () => {
+    const nodes = [
+      fnode('r', { type: 'region', data: { collapsed: true } }),
+      fnode('n', { parentId: 'r', hidden: true }),
+    ];
+    const out = reparentNode(nodes, 'n', null);
+    expect(out.find((x) => x.id === 'n')?.hidden).toBeFalsy();
+  });
+
+  it('hides a node moved into a collapsed region', () => {
+    const nodes = [fnode('r', { type: 'region', data: { collapsed: true } }), fnode('n')];
+    const out = reparentNode(nodes, 'n', 'r');
+    expect(out.find((x) => x.id === 'n')?.hidden).toBe(true);
   });
 });
 

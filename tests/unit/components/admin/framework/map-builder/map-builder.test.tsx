@@ -481,6 +481,30 @@ describe('MapBuilder regions', () => {
     expect(screen.getByTestId('rf-node-m')).toHaveAttribute('data-hidden', 'false');
   });
 
+  it('does not group a node into a collapsed (closed) region', async () => {
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph({ draftDefinition: REGION_DEF })} />);
+    await user.click(screen.getByTestId('rf-collapse-zone'));
+
+    // `zone` is collapsed; dropping `m` onto it must be rejected.
+    intersect.nodes = [{ id: 'zone', type: 'region', data: { collapsed: true } } as never];
+    await user.click(screen.getByTestId('rf-dragstop-m'));
+    expect(screen.getByTestId('rf-node-m')).toHaveAttribute('data-parent', '');
+  });
+
+  it('reveals a collapsed region’s members when the region is deleted', async () => {
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph({ draftDefinition: REGION_MEMBER_DEF })} />);
+    await user.click(screen.getByTestId('rf-collapse-zone'));
+    expect(screen.getByTestId('rf-node-m')).toHaveAttribute('data-hidden', 'true');
+
+    await user.click(screen.getByTestId('rf-node-zone'));
+    await user.click(screen.getByRole('button', { name: /Delete node/ }));
+
+    // `m` survives and is visible again (no collapsed ancestor).
+    expect(screen.getByTestId('rf-node-m')).toHaveAttribute('data-hidden', 'false');
+  });
+
   it('detaches a region’s members when the region is deleted (they survive, unparented)', async () => {
     const user = userEvent.setup();
     render(<MapBuilder graph={graph({ draftDefinition: REGION_MEMBER_DEF })} />);

@@ -42,6 +42,7 @@ import { makeMapEdge } from '@/components/admin/framework/map-builder/add-map-ed
 import { MapEditorProvider } from '@/components/admin/framework/map-builder/map-editor-context';
 import {
   isDescendant,
+  regionDepth,
   reparentNode,
   toggleRegionCollapse,
 } from '@/components/admin/framework/map-builder/region-membership';
@@ -147,23 +148,19 @@ function MapBuilderInner({ graph }: { graph: MapEditorGraph }) {
   const handleNodeDragStop = useCallback<OnNodeDrag<MapFlowNode>>(
     (_event, dragged) => {
       const byId = new Map(nodes.map((n) => [n.id, n]));
-      const depthOf = (id: string): number => {
-        let d = 0;
-        let cur = byId.get(id);
-        const seen = new Set<string>();
-        while (cur?.parentId && byId.has(cur.parentId) && !seen.has(cur.id)) {
-          seen.add(cur.id);
-          cur = byId.get(cur.parentId);
-          d += 1;
-        }
-        return d;
-      };
       const candidates = getIntersectingNodes(dragged).filter(
-        (n) => n.type === 'region' && n.id !== dragged.id && !isDescendant(n.id, dragged.id, byId)
+        (n) =>
+          n.type === 'region' &&
+          n.id !== dragged.id &&
+          // A collapsed region is "closed" — don't drop into it (it would hide the
+          // node); and never into the dragged node's own subtree (a cycle).
+          !n.data?.collapsed &&
+          !isDescendant(n.id, dragged.id, byId)
       );
       // Deepest (most-nested) region wins as the drop target.
       const target = candidates.reduce<string | null>(
-        (best, n) => (best === null || depthOf(n.id) > depthOf(best) ? n.id : best),
+        (best, n) =>
+          best === null || regionDepth(n.id, byId) > regionDepth(best, byId) ? n.id : best,
         null
       );
       setNodes((prev) => reparentNode(prev, dragged.id, target));
