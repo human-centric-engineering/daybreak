@@ -36,6 +36,9 @@ const LAYOUT_KEY = '_layout';
 /** React Flow node type discriminator for every map node (styling keys off `data.nodeType`). */
 const NODE_TYPE = 'map' as const;
 
+/** React Flow edge type discriminator for every map edge (styling keys off `data.edgeType`). */
+export const EDGE_FLOW_TYPE = 'map' as const;
+
 interface StoredLayout {
   x: number;
   y: number;
@@ -69,6 +72,8 @@ export interface MapEdgeData extends Record<string, unknown> {
   /** Authored edge metadata, opaque to the engine — preserved across the round-trip. */
   meta?: Record<string, unknown>;
 }
+
+export type MapFlowEdge = Edge<MapEdgeData>;
 
 /** Read the persisted `{ x, y }` from a node's `meta._layout`, or null if absent/malformed. */
 function readLayout(meta: Record<string, unknown> | undefined): StoredLayout | null {
@@ -137,7 +142,9 @@ export function mapDefinitionToFlow(definition: MapDefinition): {
       id: `${e.from}__${e.to}__${e.type}__${i}`,
       source: e.from,
       target: e.to,
-      label: e.type,
+      // The custom `MapEdge` component (registered under this type) styles + labels
+      // the edge from `data.edgeType`, so no top-level `label` here.
+      type: EDGE_FLOW_TYPE,
       data: {
         edgeType: e.type,
         ...(e.condition ? { condition: e.condition } : {}),
