@@ -16,7 +16,7 @@
  * `initLeafAdminNav()`. Registration is idempotent by section `title`.
  */
 
-import { Boxes, Map, Route } from 'lucide-react';
+import { Boxes, Map, Network, Route } from 'lucide-react';
 import { registerNavSection } from '@/lib/admin-nav/registry';
 
 export function initFrameworkNav(): void {
@@ -40,6 +40,12 @@ export function initFrameworkNav(): void {
         label: 'Journeys',
         icon: Route,
         description: 'Explore and replay individual user journeys',
+      },
+      {
+        href: '/admin/framework/atlas',
+        label: 'Atlas',
+        icon: Network,
+        description: 'The whole configuration as one composition graph',
       },
     ],
   });

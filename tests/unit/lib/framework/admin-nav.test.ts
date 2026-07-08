@@ -43,6 +43,17 @@ describe('initFrameworkNav', () => {
     expect(journeys?.icon).toBeDefined();
   });
 
+  it('registers an Atlas item (f-atlas t-2a)', () => {
+    initFrameworkNav();
+
+    const framework = getRegisteredNavSections().find((s) => s.title === 'Framework');
+    const atlas = framework?.items?.find((i) => i.href === '/admin/framework/atlas');
+    expect(atlas).toBeDefined();
+    expect(atlas?.label).toBe('Atlas');
+    expect(atlas?.description).toBeTruthy();
+    expect(atlas?.icon).toBeDefined();
+  });
+
   it('is idempotent by title (repeated calls do not duplicate the section)', () => {
     initFrameworkNav();
     initFrameworkNav();
