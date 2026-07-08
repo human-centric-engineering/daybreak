@@ -14,24 +14,28 @@ import userEvent from '@testing-library/user-event';
 
 const push = vi.hoisted(() => vi.fn());
 const lastForceExpand = vi.hoisted(() => ({ value: null as boolean | null }));
+const lastFocusedId = vi.hoisted(() => ({ value: undefined as string | null | undefined }));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push }) }));
 vi.mock('@xyflow/react', () => ({
   ReactFlowProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
 }));
 
-// Stub the graph layer: record the forceExpand it received, and render a button per node forwarding
-// it to onNodeClick (so the deep-link wiring is exercised without React Flow).
+// Stub the graph layer: record the forceExpand + focusedId it received, and render a button per node
+// forwarding it to onNodeClick (so the deep-link wiring is exercised without React Flow).
 vi.mock('@/components/admin/framework/atlas/atlas-graph', () => ({
   AtlasGraph: ({
     nodes,
     forceExpand,
+    focusedId,
     onNodeClick,
   }: {
     nodes: { id: string }[];
     forceExpand: boolean;
+    focusedId: string | null;
     onNodeClick: (n: unknown) => void;
   }) => {
     lastForceExpand.value = forceExpand;
+    lastFocusedId.value = focusedId;
     return (
       <div>
         {nodes.map((n) => (
@@ -115,5 +119,29 @@ describe('AtlasView', () => {
 
     await userEvent.click(screen.getByRole('button', { name: /auto/i }));
     expect(lastForceExpand.value).toBe(false);
+  });
+
+  it('focuses an entity via the lens selector and clears it', async () => {
+    render(<AtlasView projection={PROJECTION} />);
+    expect(lastFocusedId.value).toBeNull(); // no lens by default
+
+    await userEvent.click(screen.getByRole('combobox', { name: /lens/i }));
+    await userEvent.click(await screen.findByRole('option', { name: 'Reading' }));
+    expect(lastFocusedId.value).toBe('module:reading'); // lens now on the module
+
+    await userEvent.click(screen.getByRole('button', { name: /clear lens/i }));
+    expect(lastFocusedId.value).toBeNull();
+  });
+
+  it('ignores a stale lens whose subject no longer exists (avoids dimming the whole canvas)', async () => {
+    const { rerender } = render(<AtlasView projection={PROJECTION} />);
+    await userEvent.click(screen.getByRole('combobox', { name: /lens/i }));
+    await userEvent.click(await screen.findByRole('option', { name: 'Reading' }));
+    expect(lastFocusedId.value).toBe('module:reading');
+
+    // The projection revalidates and `reading` is gone → the stale focus is ignored (effective null),
+    // so the graph is NOT dimmed against a subject that no longer exists.
+    rerender(<AtlasView projection={{ ...PROJECTION, modules: [], slots: [], edges: [] }} />);
+    expect(lastFocusedId.value).toBeNull();
   });
 });

@@ -23,11 +23,16 @@ export function AtlasNode({ data, selected }: NodeProps<AtlasFlowNode>) {
   return (
     <div
       data-testid={`atlas-node-${data.kind}`}
+      data-dimmed={data.dimmed ? 'true' : undefined}
       className={cn(
-        'max-w-56 min-w-36 rounded-md border-2 px-3 py-2 shadow-sm transition-shadow',
+        'max-w-56 min-w-36 rounded-md border-2 px-3 py-2 shadow-sm transition-all',
         kind.surface,
         linkable && 'cursor-pointer hover:shadow-md',
-        selected && 'ring-primary shadow-md ring-2'
+        selected && 'ring-primary shadow-md ring-2',
+        // Lens (t-3): the focused subject gets a strong ring; everything outside the focused
+        // subgraph fades so the connections stand out.
+        data.focused && 'ring-primary shadow-md ring-2 ring-offset-1',
+        data.dimmed && 'opacity-25'
       )}
     >
       {/* Handles are hidden (no user edges) but present so React Flow anchors edges to the node. */}

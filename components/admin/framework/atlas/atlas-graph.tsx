@@ -13,6 +13,7 @@ import { useOnViewportChange, type Edge, type Viewport } from '@xyflow/react';
 
 import { AtlasCanvas } from '@/components/admin/framework/atlas/atlas-canvas';
 import { applyDetail, DETAIL_ZOOM } from '@/components/admin/framework/atlas/atlas-detail';
+import { applyFocus } from '@/components/admin/framework/atlas/atlas-lens';
 import type { AtlasFlowNode } from '@/components/admin/framework/atlas/atlas-mapper';
 
 export interface AtlasGraphProps {
@@ -20,10 +21,12 @@ export interface AtlasGraphProps {
   edges: Edge[];
   /** When true, satellites are shown regardless of zoom (the "Show all detail" override). */
   forceExpand: boolean;
+  /** The lens subject's node id, or null for no lens (t-3). A lens forces full detail. */
+  focusedId: string | null;
   onNodeClick: (node: AtlasFlowNode) => void;
 }
 
-export function AtlasGraph({ nodes, edges, forceExpand, onNodeClick }: AtlasGraphProps) {
+export function AtlasGraph({ nodes, edges, forceExpand, focusedId, onNodeClick }: AtlasGraphProps) {
   // Track zoom from viewport *changes* rather than `useViewport()`. On first paint React Flow's zoom
   // is its pre-`fitView` default of 1 (≥ DETAIL_ZOOM) — reading it there would flash a large atlas
   // fully-expanded before fitView settles and collapses it. Starting BELOW the threshold means the
@@ -31,9 +34,13 @@ export function AtlasGraph({ nodes, edges, forceExpand, onNodeClick }: AtlasGrap
   // then reveals detail only if it genuinely lands zoomed-in (a small atlas).
   const [zoom, setZoom] = useState(0);
   useOnViewportChange({ onChange: (vp: Viewport) => setZoom(vp.zoom) });
-  const showDetail = forceExpand || zoom >= DETAIL_ZOOM;
+  // A lens forces full detail — focusing on an agent is useless if the agent is hidden by zoom.
+  const showDetail = forceExpand || focusedId !== null || zoom >= DETAIL_ZOOM;
 
-  const display = useMemo(() => applyDetail(nodes, edges, showDetail), [nodes, edges, showDetail]);
+  const display = useMemo(() => {
+    const detailed = applyDetail(nodes, edges, showDetail);
+    return applyFocus(detailed.nodes, detailed.edges, focusedId);
+  }, [nodes, edges, showDetail, focusedId]);
 
   return <AtlasCanvas nodes={display.nodes} edges={display.edges} onNodeClick={onNodeClick} />;
 }

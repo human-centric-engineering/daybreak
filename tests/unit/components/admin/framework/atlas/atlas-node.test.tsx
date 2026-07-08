@@ -52,4 +52,21 @@ describe('AtlasNode', () => {
     expect(screen.getByTestId('atlas-node-slot').className).not.toContain('cursor-pointer');
     expect(container.querySelector('svg.lucide-external-link')).toBeFalsy();
   });
+
+  it('renders lens focus/dim states (t-3)', () => {
+    const { rerender } = renderNode({ kind: 'agent', focused: true });
+    const el = () => screen.getByTestId('atlas-node-agent');
+    expect(el().className).toContain('ring-offset-1'); // the focused subject gets a strong ring
+    expect(el().className).not.toContain('opacity-25');
+
+    rerender(
+      <AtlasNode
+        {...({
+          data: { kind: 'agent', label: 'A', href: null, dimmed: true },
+        } as unknown as NodeProps<AtlasFlowNode>)}
+      />
+    );
+    expect(el()).toHaveAttribute('data-dimmed', 'true');
+    expect(el().className).toContain('opacity-25');
+  });
 });

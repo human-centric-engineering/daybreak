@@ -34,6 +34,10 @@ export interface AtlasNodeData extends Record<string, unknown> {
   href: string | null;
   /** A small status pill (e.g. "unpublished", "sensitive", "removed"). */
   badge?: string;
+  /** Lens state (t-3), set by `applyFocus`: `dimmed` = outside the focused subgraph; `focused` = the
+   *  lens subject itself. Both default to unset (no lens active). */
+  dimmed?: boolean;
+  focused?: boolean;
 }
 
 export type AtlasFlowNode = Node<AtlasNodeData, 'atlas'>;
