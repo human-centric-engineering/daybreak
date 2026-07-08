@@ -645,3 +645,31 @@ startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registra
   feature's Follow-ups. The test for a deferral's home: _"will the person who actions this see it here after this
   feature ships, or is this a graveyard?"_ Sharpens the "deferrals need an actionable home" principle from "record it where the actioner
   looks" to "and re-home it when the original location stops being looked at." _Status: open._
+
+### B29 · In a UI-over-shipped-backend feature, the bugs cluster in client↔server state coordination — budget a review-fix commit per dialog/local-mirror task, and reset cached view-state on open/close
+
+- **Discovery.** [[f-map-editor]] was, as the recon predicted, almost entirely UI over an already-shipped
+  backend — so it wrote very little logic that _could_ be wrong in the classic sense. Yet `/code-review`
+  found a real defect on **three consecutive tasks** (t-3/t-4/t-5), and every one was **client-state
+  coordination**, not backend logic: (t-4) `handleRollback` optimistically set `hasDraft = false`, but the
+  rollback service — unlike publish — never clears the server draft, so a reload resurrected the stale draft
+  and the rollback looked silently undone; (t-4) a publish dialog whose _open_ state was owned by the child
+  closed via a `published`-flash `useEffect` that a rapid second publish left stuck; (t-4 + t-5) a
+  dialog/panel that **cached a result/error and never reset it on close→reopen**, so it showed a verdict for
+  a since-edited canvas. The t-5 stale-result bug is the _same class_ as a t-4 finding — the pattern
+  recurred within one feature.
+- **The shape.** Two anti-patterns kept surfacing: **(1) a local state field mirroring server state**
+  (`hasDraft`, `publishedVersion`) updated _optimistically_ from what the client _thinks_ the mutation did,
+  rather than from what the server _actually_ returned — the fix is the workflow-builder's revert pattern:
+  after a mutation whose server-side effect you don't fully model, **re-read fresh server state and drive the
+  UI off it**. **(2) a dialog/panel caching a derived view** (`result`, `error`) that outlives the inputs it
+  was computed from — the fix is to **clear it on open/close** (and at the start of a re-run), and to keep
+  dialog-open state in the parent that owns the mutation so it can close on success directly.
+- **Feedback.** For a UI feature that mirrors server state or caches computed views, **`/code-review` is
+  where it pays for itself** — the same way [[planning-retro#B15|B15]] found for the deterministic engine, but
+  the failure domain is different (state coordination, not algorithm correctness). Budget a review-fix commit
+  per task that adds a dialog, a local mirror of a server field, or a cached result. And carry two standing
+  checklist items into any such task: _does every local mirror of server state get reconciled from the
+  server after a mutation?_ and _does every cached view-state reset when its dialog/panel closes or its
+  inputs change?_ Catching these at build (not review) is cheaper; the recurrence within one feature shows
+  they're systematic, not incidental. _Status: open._
