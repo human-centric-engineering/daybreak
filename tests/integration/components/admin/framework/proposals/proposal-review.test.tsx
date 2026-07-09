@@ -109,6 +109,60 @@ describe('ProposalReview', () => {
     expect(nav.refresh).toHaveBeenCalled();
   });
 
+  it('cancels the approve dialog without calling the API', async () => {
+    const user = userEvent.setup();
+    render(<ProposalReview proposal={makeProposal()} />);
+
+    await user.click(screen.getByRole('button', { name: /approve & publish/i }));
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: /^cancel$/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    });
+    expect(apiClient.post).not.toHaveBeenCalled();
+  });
+
+  it('cancels the reject dialog without calling the API', async () => {
+    const user = userEvent.setup();
+    render(<ProposalReview proposal={makeProposal()} />);
+
+    await user.click(screen.getByRole('button', { name: /^reject$/i }));
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: /^cancel$/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
+    });
+    expect(apiClient.post).not.toHaveBeenCalled();
+  });
+
+  it('falls back to a default message when a non-Error is thrown', async () => {
+    const user = userEvent.setup();
+    // A non-Error rejection exercises the `err instanceof Error ? … : default` fallback.
+    vi.mocked(apiClient.post).mockRejectedValue('kaboom');
+    render(<ProposalReview proposal={makeProposal()} />);
+
+    await user.click(screen.getByRole('button', { name: /approve & publish/i }));
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: /approve & publish/i }));
+
+    expect(await screen.findByText('Failed to approve the proposal')).toBeInTheDocument();
+  });
+
+  it('falls back to a default message when reject throws a non-Error', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiClient.post).mockRejectedValue('kaboom');
+    render(<ProposalReview proposal={makeProposal()} />);
+
+    await user.click(screen.getByRole('button', { name: /^reject$/i }));
+    const dialog = await screen.findByRole('alertdialog');
+    await user.type(within(dialog).getByRole('textbox'), 'nope');
+    await user.click(within(dialog).getByRole('button', { name: /^reject$/i }));
+
+    expect(await screen.findByText('Failed to reject the proposal')).toBeInTheDocument();
+  });
+
   it('surfaces the server error when approve fails (stale decision)', async () => {
     const user = userEvent.setup();
     const { APIClientError } = await import('@/lib/api/client');
