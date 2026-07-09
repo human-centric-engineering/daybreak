@@ -33,6 +33,7 @@ import {
 import { FieldHelp } from '@/components/ui/field-help';
 import type { FacilitationPolicyKind } from '@/lib/framework/facilitation/policies/kinds';
 import { FACILITATION_ROLE_VALUES } from '@/lib/framework/facilitation/agents/roles';
+import { asRecord, str } from '@/components/admin/framework/policies/payload-utils';
 
 /** The flat form state a kind's controls read/write. Nested payloads are assembled on submit. */
 export type PolicyFieldState = Record<string, string | string[]>;
@@ -163,30 +164,23 @@ const FIELDS_BY_KIND: Record<FacilitationPolicyKind, PolicyField[]> = {
   ],
 };
 
-/** The blank state for a kind's create form — every field empty. */
+/**
+ * The blank state for a kind's create form — every field empty. Total: an unknown kind
+ * (a forward-compat DB row whose kind the UI doesn't yet model) yields `{}` rather than
+ * throwing on `FIELDS_BY_KIND[kind]` being `undefined`.
+ */
 export function emptyPolicyState(kind: FacilitationPolicyKind): PolicyFieldState {
   const state: PolicyFieldState = {};
-  for (const f of FIELDS_BY_KIND[kind]) {
+  for (const f of FIELDS_BY_KIND[kind] ?? []) {
     state[f.key] = f.control === 'roleMulti' ? [] : UNSET;
   }
   return state;
 }
 
-/** Read a string field from an opaque payload node, or `''`. */
-function str(obj: Record<string, unknown> | undefined, key: string): string {
-  const v = obj?.[key];
-  return typeof v === 'string' ? v : UNSET;
-}
-
-/** Narrow an unknown payload to a readable record (never throws on a non-object). */
-function asRecord(v: unknown): Record<string, unknown> | undefined {
-  return typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : undefined;
-}
-
 /**
  * Hydrate the flat form state from an existing policy `payload` (edit mode). Reads
- * defensively — a malformed stored payload yields blanks rather than throwing, and the
- * server re-validates on save regardless.
+ * defensively — a malformed stored payload (or an unknown/forward-compat kind) yields
+ * blanks rather than throwing, and the server re-validates on save regardless.
  */
 export function hydratePolicyState(
   kind: FacilitationPolicyKind,
@@ -227,6 +221,9 @@ export function hydratePolicyState(
       state.priority = str(p, 'priority');
       return state;
     }
+    default:
+      // Unknown/forward-compat kind: the blank state (no fields to hydrate).
+      return state;
   }
 }
 
@@ -234,6 +231,18 @@ export function hydratePolicyState(
 function s(state: PolicyFieldState, key: string): string {
   const v = state[key];
   return typeof v === 'string' ? v : '';
+}
+
+/**
+ * The role checkboxes to render: the current vocabulary PLUS any already-selected role
+ * that has since left the vocabulary — so a stored role removed in a later framework
+ * version stays visible (and therefore un-checkable), rather than silently sticking in the
+ * payload and failing the server's role validation on save with no UI path to remove it.
+ */
+function rolesFor(selected: string | string[]): string[] {
+  const chosen = Array.isArray(selected) ? selected : [];
+  const extra = chosen.filter((r) => !FACILITATION_ROLE_VALUES.includes(r));
+  return [...FACILITATION_ROLE_VALUES, ...extra];
 }
 
 /**
@@ -275,6 +284,9 @@ export function payloadFromState(
         signal: { guard: s(state, 'guard'), outcome: s(state, 'outcome') },
         priority: s(state, 'priority'),
       };
+    default:
+      // Unknown/forward-compat kind: no shape to assemble; the server rejects an empty payload.
+      return {};
   }
 }
 
@@ -297,7 +309,7 @@ export function PolicyKindFields({ kind, state, onChange }: PolicyKindFieldsProp
 
   return (
     <div className="space-y-4">
-      {FIELDS_BY_KIND[kind].map((field) => {
+      {(FIELDS_BY_KIND[kind] ?? []).map((field) => {
         const id = `policy-${field.key}`;
         return (
           <div key={field.key} className="space-y-1.5">
@@ -366,7 +378,7 @@ export function PolicyKindFields({ kind, state, onChange }: PolicyKindFieldsProp
 
             {field.control === 'roleMulti' && (
               <div id={id} className="flex flex-wrap gap-x-4 gap-y-2">
-                {FACILITATION_ROLE_VALUES.map((r) => {
+                {rolesFor(state.allowedRoles).map((r) => {
                   const checked = Array.isArray(state.allowedRoles)
                     ? state.allowedRoles.includes(r)
                     : false;

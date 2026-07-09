@@ -19,6 +19,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
+import { FieldHelp } from '@/components/ui/field-help';
 import {
   Dialog,
   DialogContent,
@@ -116,7 +117,13 @@ export function PolicyFormDialog({ open, onOpenChange, policy, onSaved }: Policy
 
           <div className="space-y-5 py-4">
             <div className="space-y-1.5">
-              <Label htmlFor="policy-kind">Kind</Label>
+              <div className="flex items-center gap-1.5">
+                <Label htmlFor="policy-kind">Kind</Label>
+                <FieldHelp title="Policy kind">
+                  The policy&rsquo;s type — it determines which parameters below apply. Fixed once
+                  created: to change a policy&rsquo;s kind, delete it and create a new one.
+                </FieldHelp>
+              </div>
               {editing ? (
                 <p id="policy-kind" className="font-mono text-sm">
                   {kind}

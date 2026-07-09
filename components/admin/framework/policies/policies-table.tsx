@@ -41,6 +41,7 @@ import type { FacilitationPolicyView } from '@/lib/framework/facilitation/polici
 import { useRowActions } from '@/components/admin/framework/module-detail/use-row-actions';
 import { RowConfirm } from '@/components/admin/framework/module-detail/row-confirm';
 import { PolicyFormDialog } from '@/components/admin/framework/policies/policy-form';
+import { asRecord, disp } from '@/components/admin/framework/policies/payload-utils';
 
 const POLICIES_URL = '/api/v1/admin/framework/facilitation/policies';
 /** The "no kind filter" sentinel — Radix Select forbids an empty item value. */
@@ -49,18 +50,6 @@ const ALL_KINDS = '__all__';
 /** Deterministic `YYYY-MM-DD` (UTC) — hydration-safe in this SSR'd component. */
 function formatDate(iso: string): string {
   return new Date(iso).toISOString().slice(0, 10);
-}
-
-/** Coerce an opaque payload leaf to a display string without risking `[object Object]`. */
-function disp(v: unknown): string {
-  if (typeof v === 'string') return v;
-  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
-  return '—';
-}
-
-/** Narrow an unknown payload node to a readable record (never throws on a non-object). */
-function asRecord(v: unknown): Record<string, unknown> | undefined {
-  return typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : undefined;
 }
 
 /** A compact one-line summary of a policy's payload for the list, read defensively. */

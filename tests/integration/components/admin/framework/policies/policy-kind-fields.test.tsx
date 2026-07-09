@@ -21,6 +21,10 @@ import {
   payloadFromState,
   type PolicyFieldState,
 } from '@/components/admin/framework/policies/policy-kind-fields';
+import type { FacilitationPolicyKind } from '@/lib/framework/facilitation/policies/kinds';
+
+// An unknown/forward-compat kind — a DB row whose kind the UI does not yet model.
+const UNKNOWN_KIND = 'future_kind' as FacilitationPolicyKind;
 
 describe('emptyPolicyState', () => {
   it('blanks every field, arrays for the multi-role field', () => {
@@ -101,6 +105,13 @@ describe('hydratePolicyState', () => {
     expect(hydratePolicyState('guard_minimum', { scope: 7, minimums: 'x' })).toEqual(
       emptyPolicyState('guard_minimum')
     );
+  });
+
+  it('is total for an unknown/forward-compat kind (no throw)', () => {
+    // The wire type admits an unknown kind at runtime; the helpers must not crash on Edit.
+    expect(emptyPolicyState(UNKNOWN_KIND)).toEqual({});
+    expect(hydratePolicyState(UNKNOWN_KIND, { anything: 1 })).toEqual({});
+    expect(payloadFromState(UNKNOWN_KIND, {})).toEqual({});
   });
 });
 
@@ -189,6 +200,37 @@ describe('PolicyKindFields controls', () => {
     rerender(<PolicyKindFields kind="relevance_gating" state={state} onChange={onChange} />);
     await user.type(screen.getByLabelText(/match stage/i), 'x');
     expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ matchStage: 'x' }));
+  });
+
+  it('still renders a stored role that has left the vocabulary so it can be unchecked', async () => {
+    const user = userEvent.setup();
+    let state: PolicyFieldState = {
+      graphSlug: 'g',
+      matchStage: '',
+      matchRegion: '',
+      // 'legacy_role' is not in FACILITATION_ROLE_VALUES.
+      allowedRoles: ['onboarding', 'legacy_role'],
+    };
+    const onChange = vi.fn((next: PolicyFieldState) => {
+      state = next;
+    });
+
+    render(<PolicyKindFields kind="relevance_gating" state={state} onChange={onChange} />);
+
+    const legacy = screen.getByRole('checkbox', { name: 'legacy_role' });
+    expect(legacy).toBeChecked();
+    await user.click(legacy);
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ allowedRoles: ['onboarding'] })
+    );
+  });
+
+  it('renders nothing (no throw) for an unknown/forward-compat kind', () => {
+    const { container } = render(
+      <PolicyKindFields kind={UNKNOWN_KIND} state={{}} onChange={vi.fn()} />
+    );
+    // No field controls — just the empty wrapper.
+    expect(container.querySelectorAll('input, [role="combobox"]')).toHaveLength(0);
   });
 
   it('maps the optional-enum "Unset" option back to an empty value', async () => {
