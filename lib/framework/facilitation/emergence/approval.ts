@@ -9,18 +9,20 @@
  * cannot be stored there — the proposal is the authorship record):
  *  - `map` — `publishDefinition` writes a new map version (author flows into the version, F17).
  *  - `module_config` — `saveModuleConfig` snapshots a new module config version.
- *  - `policy` — `createFacilitationPolicy` creates the proposed policy.
+ *  - `policy` — `updateFacilitationPolicy` overwrites the target policy's payload in place (so the
+ *    change actually takes effect at enforcement — it does NOT create a duplicate policy row).
  *
  * Approval is race-safe against DECIDING THE SAME PROPOSAL twice via an optimistic claim:
  * `pending → approved` is an atomic `updateMany` gated on `status = 'pending'`, so two concurrent
  * approvers of one proposal can't both apply (`approved` is the claimed-but-not-yet-applied state).
  * If the apply then throws, the claim is rolled back to `pending` — never a stuck `approved` orphan.
  * Conflict detection compares the subject's current version against the proposal's `baseVersion` up
- * front (map + module_config; policy is last-writer-wins), and the map path ALSO re-checks it inside
- * the publish transaction (`expectedBaseVersion`), so a proposal made against a map/module that has
- * since moved is refused (re-propose). That closes the common case; a residual simultaneous-commit
- * race between two DISTINCT proposals on one subject would need a subject-level optimistic-version
- * column (a shared limitation with `publishDraft`/`rollback`, tracked for the version models).
+ * front (map + module_config; policy is last-writer-wins on its row), and both the map AND
+ * module_config paths ALSO re-check it inside their write transaction (`expectedBaseVersion`), so a
+ * proposal made against a map/module that has since moved is refused (re-propose). That closes the
+ * common case; a residual simultaneous-commit race between two DISTINCT proposals on one subject
+ * would need a subject-level optimistic-version column (a shared limitation with
+ * `publishDraft`/`rollback`, tracked for the version models).
  */
 
 import type { StructureChangeProposal } from '@prisma/client';
@@ -33,7 +35,7 @@ import {
   saveModuleConfig,
   getLatestModuleVersionNumber,
 } from '@/lib/framework/modules/config/version-service';
-import { createFacilitationPolicy } from '@/lib/framework/facilitation/policies/policy-service';
+import { updateFacilitationPolicy } from '@/lib/framework/facilitation/policies/policy-service';
 import { getStructureChangeProposal } from '@/lib/framework/facilitation/emergence/proposal-service';
 
 const ENTITY_TYPE = 'structure_change_proposal';
@@ -133,20 +135,25 @@ async function applyProposal(
 
   if (proposal.subjectType === 'module_config') {
     const userId = requireApprover(reviewedBy, proposal.subjectType);
+    // `expectedBaseVersion` makes the save conflict-aware in its own transaction (re-checked there),
+    // matching the map path — a stale-base approve is refused rather than clobbering a concurrent save.
     const { version } = await saveModuleConfig({
       slug: proposal.subjectId,
       config: proposal.proposedDefinition,
       userId,
       changeSummary,
       clientIp,
+      expectedBaseVersion: proposal.baseVersion,
     });
     return { publishedVersionId: version.id, auditMeta: { moduleVersion: version.version } };
   }
 
   if (proposal.subjectType === 'policy') {
     const userId = requireApprover(reviewedBy, proposal.subjectType);
-    const policy = await createFacilitationPolicy({
-      kind: proposal.subjectId,
+    // Overwrite the target policy's payload in place (subjectId is the policy id) so the change takes
+    // effect at enforcement; `updateFacilitationPolicy` re-validates the payload against its kind.
+    const policy = await updateFacilitationPolicy({
+      policyId: proposal.subjectId,
       payload: proposal.proposedDefinition,
       userId,
       clientIp,

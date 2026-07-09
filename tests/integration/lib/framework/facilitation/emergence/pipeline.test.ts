@@ -18,6 +18,9 @@ vi.mock('@/lib/framework/modules/config/version-service', () => ({
 vi.mock('@/lib/framework/facilitation/policies/kinds', () => ({
   assertValidFacilitationPolicy: vi.fn(),
 }));
+vi.mock('@/lib/framework/facilitation/policies/policy-queries', () => ({
+  getFacilitationPolicy: vi.fn(),
+}));
 
 import { validateProposal } from '@/lib/framework/facilitation/emergence/pipeline';
 import { validatePublishableMap } from '@/lib/framework/facilitation/map/version-service';
@@ -27,6 +30,7 @@ import {
   getLatestModuleVersionNumber,
 } from '@/lib/framework/modules/config/version-service';
 import { assertValidFacilitationPolicy } from '@/lib/framework/facilitation/policies/kinds';
+import { getFacilitationPolicy } from '@/lib/framework/facilitation/policies/policy-queries';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
 
 const DEFINITION = { nodes: [], edges: [], regions: [] };
@@ -40,6 +44,10 @@ beforeEach(() => {
   vi.mocked(assertValidFacilitationPolicy).mockReturnValue({
     kind: 'auto_approval',
     payload: { mode: 'none' },
+  } as never);
+  vi.mocked(getFacilitationPolicy).mockResolvedValue({
+    id: 'pol-1',
+    kind: 'auto_approval',
   } as never);
 });
 
@@ -99,8 +107,10 @@ describe('validateProposal — module_config', () => {
 });
 
 describe('validateProposal — policy', () => {
-  it('validates (kind=subjectId, payload=proposedDefinition) and is last-writer-wins (base null)', async () => {
-    const result = await validateProposal('policy', 'auto_approval', { mode: 'none' });
+  it('resolves the target policy by id, validates the payload against its kind (base null)', async () => {
+    const result = await validateProposal('policy', 'pol-1', { mode: 'none' });
+    expect(getFacilitationPolicy).toHaveBeenCalledWith('pol-1');
+    // The kind comes from the resolved policy, not from the caller.
     expect(assertValidFacilitationPolicy).toHaveBeenCalledWith('auto_approval', { mode: 'none' });
     expect(result).toEqual({
       definition: { mode: 'none' },
@@ -109,11 +119,19 @@ describe('validateProposal — policy', () => {
     });
   });
 
+  it('propagates NotFoundError for an unknown policy id (no validation)', async () => {
+    vi.mocked(getFacilitationPolicy).mockRejectedValue(
+      new NotFoundError('policy "nope" not found')
+    );
+    await expect(validateProposal('policy', 'nope', {})).rejects.toBeInstanceOf(NotFoundError);
+    expect(assertValidFacilitationPolicy).not.toHaveBeenCalled();
+  });
+
   it('propagates a ValidationError from the policy validator', async () => {
     vi.mocked(assertValidFacilitationPolicy).mockImplementation(() => {
       throw new ValidationError('bad policy');
     });
-    await expect(validateProposal('policy', 'nope', {})).rejects.toBeInstanceOf(ValidationError);
+    await expect(validateProposal('policy', 'pol-1', {})).rejects.toBeInstanceOf(ValidationError);
   });
 });
 

@@ -10,13 +10,14 @@
  *    resolve the base published version for later conflict detection.
  *  - `module_config` — reuse the module-config schema contract (`validateModuleConfig`, the walker
  *    behind `saveModuleConfig`) and capture the module's current version as the conflict base.
- *  - `policy` — reuse the typed-policy validator (`assertValidFacilitationPolicy`); last-writer-wins
- *    (`baseVersion: null` — a policy has no version spine to conflict against in v1).
+ *  - `policy` — resolve the target policy by id, validate the proposed payload against its (immutable)
+ *    kind (`assertValidFacilitationPolicy`); last-writer-wins (`baseVersion: null` — a policy has no
+ *    version spine, and approval overwrites the existing row in place).
  *
- * The convention across subjects: `subjectId` NAMES the target (a map/graph slug, a module slug, or a
- * policy kind) and `proposedDefinition` is the new content (a map definition, a config value, or a
- * policy payload). Throws `ValidationError` (bad definition / unsupported subject) or `NotFoundError`
- * (unknown map / module).
+ * The convention across subjects — always a change to an EXISTING target, never a create: `subjectId`
+ * NAMES the target (a map/graph slug, a module slug, or a policy id) and `proposedDefinition` is the
+ * new content (a map definition, a config value, or a policy payload). Throws `ValidationError` (bad
+ * definition / unsupported subject) or `NotFoundError` (unknown map / module / policy).
  *
  * Risk classification is a **stub** (`'unclassified'`): the auto-approve risk taxonomy is deferred
  * (§9.2, empirical), and the shipped `autoApprove: none` means every proposal needs human approval
@@ -31,6 +32,7 @@ import {
   getLatestModuleVersionNumber,
 } from '@/lib/framework/modules/config/version-service';
 import { assertValidFacilitationPolicy } from '@/lib/framework/facilitation/policies/kinds';
+import { getFacilitationPolicy } from '@/lib/framework/facilitation/policies/policy-queries';
 import { ValidationError } from '@/lib/api/errors';
 
 /** The proposal subjects. `map` (f-emergence) + `module_config` / `policy` (f-governance-plus t-1). */
@@ -93,12 +95,12 @@ async function validateModuleConfigProposal(
   return { definition, baseVersion, riskClass: 'unclassified' };
 }
 
-/** `policy` — validate `(kind = subjectId, payload = proposedDefinition)`; last-writer-wins base. */
-function validatePolicyProposal(subjectId: string, proposedDefinition: unknown): ValidatedProposal {
-  const valid = assertValidFacilitationPolicy(subjectId, proposedDefinition);
-  return {
-    definition: valid.payload,
-    baseVersion: null,
-    riskClass: 'unclassified',
-  };
+/** `policy` — resolve the target policy by id, validate the payload against its kind; no base. */
+async function validatePolicyProposal(
+  subjectId: string,
+  proposedDefinition: unknown
+): Promise<ValidatedProposal> {
+  const policy = await getFacilitationPolicy(subjectId); // throws NotFoundError if the policy is gone
+  const valid = assertValidFacilitationPolicy(policy.kind, proposedDefinition);
+  return { definition: valid.payload, baseVersion: null, riskClass: 'unclassified' };
 }

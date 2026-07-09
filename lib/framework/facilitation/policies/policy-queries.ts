@@ -9,6 +9,15 @@
 
 import type { FacilitationPolicy } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
+import { NotFoundError } from '@/lib/api/errors';
+
+/** Load a single policy by id, or 404. Used by the emergence proposal pipeline to resolve the
+ *  target policy's (immutable) kind before validating a proposed payload against it. */
+export async function getFacilitationPolicy(id: string): Promise<FacilitationPolicy> {
+  const policy = await prisma.facilitationPolicy.findUnique({ where: { id } });
+  if (!policy) throw new NotFoundError(`Facilitation policy "${id}" not found`);
+  return policy;
+}
 
 /**
  * List policies, optionally filtered to one `kind`. Returns every policy (enabled or not) so the
