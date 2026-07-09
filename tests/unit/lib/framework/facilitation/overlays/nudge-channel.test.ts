@@ -4,10 +4,16 @@
  * misconfigured-webhook → email fallback.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+vi.mock('@/lib/logging', () => ({ logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() } }));
+
 import { resolveNudgeChannelConfig } from '@/lib/framework/facilitation/overlays/nudge-channel';
+import { logger } from '@/lib/logging';
 
 const URL = 'https://hooks.example.com/nudge';
+
+beforeEach(() => vi.clearAllMocks());
 
 describe('resolveNudgeChannelConfig', () => {
   it('defaults to email when nothing is set', () => {
@@ -57,10 +63,37 @@ describe('resolveNudgeChannelConfig', () => {
     ).toEqual({ emailEnabled: true, webhookUrl: null });
   });
 
-  it('an unknown channel value falls back to email', () => {
+  it('an unknown channel value falls back to email AND warns', () => {
     expect(resolveNudgeChannelConfig({ FRAMEWORK_NUDGE_CHANNEL: 'sms' })).toEqual({
       emailEnabled: true,
       webhookUrl: null,
     });
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Invalid FRAMEWORK_NUDGE_CHANNEL — defaulting to email',
+      { value: 'sms' }
+    );
+  });
+
+  it('warns when a webhook/both channel has an invalid URL (but not for the email channel)', () => {
+    resolveNudgeChannelConfig({
+      FRAMEWORK_NUDGE_CHANNEL: 'both',
+      FRAMEWORK_NUDGE_WEBHOOK_URL: 'not-a-url',
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Invalid FRAMEWORK_NUDGE_WEBHOOK_URL — webhook channel disabled',
+      {}
+    );
+    vi.clearAllMocks();
+    // The email channel with a bad URL doesn't warn — the URL is irrelevant there.
+    resolveNudgeChannelConfig({
+      FRAMEWORK_NUDGE_CHANNEL: 'email',
+      FRAMEWORK_NUDGE_WEBHOOK_URL: 'x',
+    });
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('does not warn on the happy defaults (nothing set)', () => {
+    resolveNudgeChannelConfig({});
+    expect(logger.warn).not.toHaveBeenCalled();
   });
 });

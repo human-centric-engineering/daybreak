@@ -190,6 +190,10 @@ export async function deliverProactiveNudges(
       }
     }
 
+    // Throttle if AT LEAST ONE channel delivered (channel-independent, per the plan). Trade-off in
+    // `both` mode: if email delivers but the webhook POST fails, the owner is still throttled (they
+    // WERE nudged), so the webhook miss isn't independently retried until the window passes — a
+    // deliberate "don't double-nudge the human" choice over per-channel retry (`webhookFailed` surfaces it).
     if (!delivered) continue; // no channel delivered — don't throttle, retry next sweep
 
     // Record ALL of this user's fresh journeys so none re-fire this window. Best-effort: the nudge is

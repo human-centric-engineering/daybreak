@@ -15,6 +15,7 @@
  */
 
 import { z } from 'zod';
+import { logger } from '@/lib/logging';
 
 export const NUDGE_CHANNELS = ['email', 'webhook', 'both'] as const;
 export type NudgeChannel = (typeof NUDGE_CHANNELS)[number];
@@ -34,8 +35,21 @@ export interface NudgeChannelConfig {
 export function resolveNudgeChannelConfig(
   env: Record<string, string | undefined> = process.env
 ): NudgeChannelConfig {
-  const channel = z.enum(NUDGE_CHANNELS).catch('email').parse(env.FRAMEWORK_NUDGE_CHANNEL);
-  const parsedUrl = z.string().url().safeParse(env.FRAMEWORK_NUDGE_WEBHOOK_URL);
+  // A set-but-invalid channel silently defaults to email — warn so a typo (which quietly disables the
+  // webhook) leaves an operator signal rather than vanishing.
+  const rawChannel = env.FRAMEWORK_NUDGE_CHANNEL;
+  const channelParse = z.enum(NUDGE_CHANNELS).safeParse(rawChannel);
+  if (rawChannel !== undefined && !channelParse.success) {
+    logger.warn('Invalid FRAMEWORK_NUDGE_CHANNEL — defaulting to email', { value: rawChannel });
+  }
+  const channel = channelParse.success ? channelParse.data : 'email';
+
+  // A set-but-invalid webhook URL warns too (for the webhook/both channels it means falling back).
+  const rawUrl = env.FRAMEWORK_NUDGE_WEBHOOK_URL;
+  const parsedUrl = z.string().url().safeParse(rawUrl);
+  if (rawUrl !== undefined && rawUrl !== '' && !parsedUrl.success && channel !== 'email') {
+    logger.warn('Invalid FRAMEWORK_NUDGE_WEBHOOK_URL — webhook channel disabled', {});
+  }
   const webhookUrl = parsedUrl.success ? parsedUrl.data : null;
 
   const webhookEnabled = (channel === 'webhook' || channel === 'both') && webhookUrl !== null;

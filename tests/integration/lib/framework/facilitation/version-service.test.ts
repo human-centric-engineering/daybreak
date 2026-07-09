@@ -143,10 +143,10 @@ const { prismaFake, resetStore } = vi.hoisted(() => {
 
 vi.mock('@/lib/db/client', () => ({ prisma: prismaFake }));
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({ logAdminAction: vi.fn() }));
-// Auto-embed is fire-and-forget post-commit (f-governance-plus t-4) — mock it so the version tests
-// don't reach the real embedder, and so we can assert every publish path fires it.
-vi.mock('@/lib/framework/facilitation/overlays/embed-sync', () => ({
-  autoEmbedAfterPublish: vi.fn(),
+// Post-publish hook seam (f-governance-plus t-4) — mock it so the version tests don't fire real
+// listeners (auto-embed), and so we can assert every publish path notifies it.
+vi.mock('@/lib/framework/facilitation/map/publish-hooks', () => ({
+  notifyMapPublished: vi.fn(),
 }));
 
 import {
@@ -165,7 +165,7 @@ import {
 import { mapDefinitionSchema } from '@/lib/framework/facilitation/map/schema';
 import type { MapDefinition } from '@/lib/framework/facilitation/map/schema';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
-import { autoEmbedAfterPublish } from '@/lib/framework/facilitation/overlays/embed-sync';
+import { notifyMapPublished } from '@/lib/framework/facilitation/map/publish-hooks';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
 
 const USER = 'user-1';
@@ -496,37 +496,37 @@ describe('listVersions / getVersion', () => {
 });
 
 describe('auto-embed-on-publish (f-governance-plus t-4)', () => {
-  it('fires auto-embed after createGraph publishes a v1 (non-empty initial map)', async () => {
+  it('notifies the publish hook after createGraph publishes a v1 (non-empty initial map)', async () => {
     await createGraph({ slug: 'main', name: 'Main', definition: validMap(), userId: USER });
-    expect(autoEmbedAfterPublish).toHaveBeenCalledWith('main', USER);
+    expect(notifyMapPublished).toHaveBeenCalledWith('main', USER);
   });
 
-  it('does NOT fire auto-embed for an empty create (nothing published)', async () => {
+  it('does NOT notify the hook for an empty create (nothing published)', async () => {
     await createGraph({ slug: 'main', name: 'Main', userId: USER });
-    expect(autoEmbedAfterPublish).not.toHaveBeenCalled();
+    expect(notifyMapPublished).not.toHaveBeenCalled();
   });
 
-  it('fires auto-embed after publishDraft', async () => {
+  it('notifies the publish hook after publishDraft', async () => {
     await createGraph({ slug: 'main', name: 'Main', userId: USER });
     await saveDraft({ slug: 'main', definition: validMap(), userId: USER });
-    vi.mocked(autoEmbedAfterPublish).mockClear();
+    vi.mocked(notifyMapPublished).mockClear();
     await publishDraft({ slug: 'main', userId: USER });
-    expect(autoEmbedAfterPublish).toHaveBeenCalledWith('main', USER);
+    expect(notifyMapPublished).toHaveBeenCalledWith('main', USER);
   });
 
-  it('fires auto-embed after publishDefinition, threading a null actor unchanged', async () => {
+  it('notifies the publish hook after publishDefinition, threading a null actor unchanged', async () => {
     await createGraph({ slug: 'main', name: 'Main', definition: validMap(), userId: USER });
-    vi.mocked(autoEmbedAfterPublish).mockClear();
+    vi.mocked(notifyMapPublished).mockClear();
     await publishDefinition({
       slug: 'main',
       definition: validMap(),
       createdBy: 'agent:onboarding',
       actorUserId: null, // auto-approved publish → system actor flows to the embed
     });
-    expect(autoEmbedAfterPublish).toHaveBeenCalledWith('main', null);
+    expect(notifyMapPublished).toHaveBeenCalledWith('main', null);
   });
 
-  it('fires auto-embed after rollback', async () => {
+  it('notifies the publish hook after rollback', async () => {
     await createGraph({ slug: 'main', name: 'Main', definition: validMap(), userId: USER }); // v1
     await publishDefinition({
       slug: 'main',
@@ -534,8 +534,8 @@ describe('auto-embed-on-publish (f-governance-plus t-4)', () => {
       createdBy: USER,
       actorUserId: USER,
     }); // v2
-    vi.mocked(autoEmbedAfterPublish).mockClear();
+    vi.mocked(notifyMapPublished).mockClear();
     await rollback({ slug: 'main', targetVersion: 1, userId: USER });
-    expect(autoEmbedAfterPublish).toHaveBeenCalledWith('main', USER);
+    expect(notifyMapPublished).toHaveBeenCalledWith('main', USER);
   });
 });
