@@ -34,7 +34,7 @@ export interface StructureChangeProposalView {
   id: string;
   /** The proposal subject — `'map'` | `'module_config'` | `'policy'` (f-governance-plus t-1). */
   subjectType: string;
-  /** The target — a map/graph slug, a module slug, or a policy kind. */
+  /** The target — a map/graph slug, a module slug, or a policy id. */
   subjectId: string;
   /** The version the diff was made against (map/module_config conflict detection); null for policy. */
   baseVersion: number | null;

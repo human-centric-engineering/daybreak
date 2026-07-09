@@ -116,6 +116,8 @@ import {
   restoreModuleVersion,
   listModuleVersions,
   getModuleVersion,
+  validateModuleConfig,
+  getLatestModuleVersionNumber,
 } from '@/lib/framework/modules/config/version-service';
 import { getRegisteredModule } from '@/lib/framework/modules/registry';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
@@ -231,6 +233,83 @@ describe('saveModuleConfig', () => {
       saveModuleConfig({ slug: 'reading', config: { tone: 'gentle' }, userId: USER })
     ).rejects.toThrow(ValidationError);
     spy.mockRestore();
+  });
+
+  it('honours expectedBaseVersion: refuses a stale-base save, writes nothing', async () => {
+    seedModule('reading');
+    await saveModuleConfig({ slug: 'reading', config: { tone: 'gentle' }, userId: USER }); // v1
+    await saveModuleConfig({ slug: 'reading', config: { tone: 'direct' }, userId: USER }); // v2 (module now at 2)
+    // A caller that based its change on v1 must be refused now the module is at v2.
+    await expect(
+      saveModuleConfig({
+        slug: 'reading',
+        config: { tone: 'gentle' },
+        userId: USER,
+        expectedBaseVersion: 1,
+      })
+    ).rejects.toThrow(ValidationError);
+    // No v3 written — the live config is still v2's 'direct'.
+    const { versions } = await listModuleVersions('reading');
+    expect(versions).toHaveLength(2);
+  });
+
+  it('honours expectedBaseVersion: applies when the base still matches', async () => {
+    seedModule('reading');
+    await saveModuleConfig({ slug: 'reading', config: { tone: 'gentle' }, userId: USER }); // v1
+    const { version } = await saveModuleConfig({
+      slug: 'reading',
+      config: { tone: 'direct' },
+      userId: USER,
+      expectedBaseVersion: 1, // module is at 1 → matches → applies as v2
+    });
+    expect(version.version).toBe(2);
+  });
+
+  it('honours expectedBaseVersion null: applies only when the module has no versions yet', async () => {
+    seedModule('reading');
+    const { version } = await saveModuleConfig({
+      slug: 'reading',
+      config: { tone: 'gentle' },
+      userId: USER,
+      expectedBaseVersion: null, // no versions yet → matches → v1
+    });
+    expect(version.version).toBe(1);
+    // A second null-base save is now stale (module is at v1) → refused.
+    await expect(
+      saveModuleConfig({
+        slug: 'reading',
+        config: { tone: 'direct' },
+        userId: USER,
+        expectedBaseVersion: null,
+      })
+    ).rejects.toThrow(ValidationError);
+  });
+});
+
+describe('emergence-support exports', () => {
+  it('validateModuleConfig returns the Zod-parsed canonical config (defaults applied)', () => {
+    seedModule('reading');
+    expect(validateModuleConfig('reading', { tone: 'direct' })).toEqual({
+      tone: 'direct',
+      sessions: 3,
+    });
+  });
+
+  it('validateModuleConfig throws ValidationError on an invalid config', () => {
+    seedModule('reading');
+    expect(() => validateModuleConfig('reading', { tone: 'shouty' })).toThrow(ValidationError);
+  });
+
+  it('getLatestModuleVersionNumber returns null before any save, then the newest version', async () => {
+    seedModule('reading');
+    expect(await getLatestModuleVersionNumber('reading')).toBeNull();
+    await saveModuleConfig({ slug: 'reading', config: { tone: 'gentle' }, userId: USER });
+    await saveModuleConfig({ slug: 'reading', config: { tone: 'direct' }, userId: USER });
+    expect(await getLatestModuleVersionNumber('reading')).toBe(2);
+  });
+
+  it('getLatestModuleVersionNumber throws NotFoundError for an unknown slug', async () => {
+    await expect(getLatestModuleVersionNumber('ghost')).rejects.toThrow(NotFoundError);
   });
 });
 

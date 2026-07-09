@@ -42,7 +42,7 @@ describe('submitProposalBodySchema', () => {
     expect(
       submitProposalBodySchema.safeParse({
         subjectType: 'policy',
-        subjectId: 'auto_approval',
+        subjectId: 'cjld2cjxh0000qzrmn831i7rn', // a policy id
         proposedDefinition: { mode: 'none' },
       }).success
     ).toBe(true);

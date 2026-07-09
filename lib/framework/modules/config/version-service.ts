@@ -43,6 +43,23 @@ function throwConcurrentVersionConflict(): never {
   });
 }
 
+/**
+ * The caller's `expectedBaseVersion` no longer matches the module's live version (a save landed
+ * since). Refuses the write so a stale-base save (e.g. an approve of an out-of-date proposal) can't
+ * clobber the newer config. Distinct message from the unique-collision retry — this is a genuine
+ * conflict, re-propose rather than blindly retry.
+ */
+function throwStaleBaseConflict(expected: number | null, actual: number | null): never {
+  throw new ValidationError(
+    'Module config changed since this change was based — please re-propose',
+    {
+      expectedBaseVersion: [
+        `Based on version ${expected ?? 'none'}, but the module is now at ${actual ?? 'none'}`,
+      ],
+    }
+  );
+}
+
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
 interface ResolvedModule {
@@ -84,6 +101,21 @@ function validateAgainstSchema(slug: string, config: unknown): Prisma.InputJsonV
 }
 
 /**
+ * The module's highest existing version number, or `null` if it has none. The single source of the
+ * "latest version" query — reused by `nextVersionNumber` (the write path) and
+ * `getLatestModuleVersionNumber` (the emergence conflict base) so the two never drift. Accepts the
+ * live client or a transaction client.
+ */
+async function latestVersionNumber(client: Tx, moduleId: string): Promise<number | null> {
+  const row = await client.moduleVersion.findFirst({
+    where: { moduleId },
+    orderBy: { version: 'desc' },
+    select: { version: true },
+  });
+  return row?.version ?? null;
+}
+
+/**
  * Highest existing version for a module + 1 (or 1 if none). Computed inside the write tx,
  * but note that under READ COMMITTED that does NOT serialise concurrent writers — two
  * overlapping saves can both read N and both try to create N+1. That collision is caught
@@ -91,12 +123,7 @@ function validateAgainstSchema(slug: string, config: unknown): Prisma.InputJsonV
  * callers (`throwConcurrentVersionConflict`), not prevented here.
  */
 async function nextVersionNumber(client: Tx, moduleId: string): Promise<number> {
-  const row = await client.moduleVersion.findFirst({
-    where: { moduleId },
-    orderBy: { version: 'desc' },
-    select: { version: true },
-  });
-  return (row?.version ?? 0) + 1;
+  return ((await latestVersionNumber(client, moduleId)) ?? 0) + 1;
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
@@ -108,6 +135,14 @@ export interface SaveModuleConfigArgs {
   userId: string;
   changeSummary?: string;
   clientIp?: string | null;
+  /**
+   * Optional optimistic-concurrency guard: the version the caller believes is current (or `null`
+   * for "no versions yet"). When provided, the save is refused inside its transaction if the
+   * module has moved since — the emergence proposal path passes its captured base so an approve of
+   * a stale `module_config` proposal cannot silently clobber a concurrent save (mirrors the map
+   * `publishDefinition` `expectedBaseVersion` re-check). Omit for a plain last-writer-wins save.
+   */
+  expectedBaseVersion?: number | null;
 }
 
 export interface SaveModuleConfigResult {
@@ -126,7 +161,7 @@ export interface SaveModuleConfigResult {
 export async function saveModuleConfig(
   args: SaveModuleConfigArgs
 ): Promise<SaveModuleConfigResult> {
-  const { slug, config, userId, changeSummary, clientIp } = args;
+  const { slug, config, userId, changeSummary, clientIp, expectedBaseVersion } = args;
   const mod = await loadModule(slug);
 
   // Validate before opening the transaction — a bad config writes nothing.
@@ -135,7 +170,13 @@ export async function saveModuleConfig(
   let version: ModuleVersion;
   try {
     version = await prisma.$transaction(async (tx) => {
-      const next = await nextVersionNumber(tx, mod.id);
+      const latest = await latestVersionNumber(tx, mod.id);
+      // Optimistic-concurrency guard (when the caller passed a base): refuse a stale-base write
+      // atomically, so a concurrent save committed since the base can't be silently overwritten.
+      if (expectedBaseVersion !== undefined && latest !== expectedBaseVersion) {
+        throwStaleBaseConflict(expectedBaseVersion, latest);
+      }
+      const next = (latest ?? 0) + 1;
       const created = await tx.moduleVersion.create({
         data: {
           moduleId: mod.id,
@@ -304,12 +345,7 @@ export function validateModuleConfig(slug: string, config: unknown): Prisma.Inpu
  */
 export async function getLatestModuleVersionNumber(slug: string): Promise<number | null> {
   const mod = await loadModule(slug);
-  const row = await prisma.moduleVersion.findFirst({
-    where: { moduleId: mod.id },
-    orderBy: { version: 'desc' },
-    select: { version: true },
-  });
-  return row?.version ?? null;
+  return latestVersionNumber(prisma, mod.id);
 }
 
 /** A single immutable version by number, for diff / detail views. */

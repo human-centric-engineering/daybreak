@@ -12,8 +12,8 @@ import { z } from 'zod';
 import { parseCuidParam } from '@/lib/framework/shared/route-params';
 import { PROPOSAL_SUBJECT_TYPES } from '@/lib/framework/facilitation/emergence/pipeline';
 
-/** POST /proposals — submit a proposal. `subjectId` names the target (a map/graph slug, a module
- *  slug, or a policy kind); `proposedDefinition` is the new content. `authorAgentSlug` (if given)
+/** POST /proposals — submit a proposal. `subjectId` names the existing target (a map/graph slug, a
+ *  module slug, or a policy id); `proposedDefinition` is the new content. `authorAgentSlug` (if given)
  *  records agent authorship (`createdBy = "agent:<slug>"`); otherwise the session admin is the author. */
 export const submitProposalBodySchema = z.object({
   subjectType: z.enum(PROPOSAL_SUBJECT_TYPES),
