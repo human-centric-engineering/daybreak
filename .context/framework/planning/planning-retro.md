@@ -716,3 +716,30 @@ startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registra
   the PR can merge — don't trust that a push to a PR branch re-synced the PR. If a merge slips through at the wrong
   SHA, fix forward with a cherry-pick PR rather than rewriting merged history. _Status: open — worth a branch-protection/
   auto-merge review so a stale-head squash can't merge past an unpushed-to-PR-head commit._
+
+### B31 · In a pure-backend reuse feature the bugs cluster where the new code's assumption about a REUSED primitive's contract is subtly wrong — verify the watermark/wiring against what the primitive actually does, not what it's named
+
+- **Discovery ([[f-governance-plus]] t-3 + t-4).** This was the backend twin of [[planning-retro#B29|B29]] (which
+  found UI-over-shipped-backend bugs cluster in client↔server state). Here the feature was pure backend reusing
+  shipped primitives, and `/code-review` found a real defect in EACH task — every one an assumption about a reused
+  primitive's contract that was subtly wrong, invisible until you traced what the primitive actually _does_:
+  - **t-1** (see [[planning-retro#B30|B30]]): reused `createFacilitationPolicy` for "change a policy" — but the
+    table aggregates on read, so a create doesn't change the effective policy.
+  - **t-3 watermark**: the sweep's "un-scored" predicate counted _any_ assistant message lacking an eval row, but
+    the passes only ever persist a row for a subset (supervise writes ONE anchor row; unpaired turns get none) — so
+    the watermark never cleared and re-paid for scoring every tick. The watermark has to match what the passes
+    _actually write_, not the naive "one row per turn" mental model.
+  - **t-3 reasoning column**: the rubric merged into the metric scorer's shared `judgeReasoning` JSON — but the
+    metric scorer OVERWRITES that column, so a later metric run clobbered the rubric. A separate column was the fix.
+  - **t-4 cycle**: "just call `autoEmbedAfterPublish` after commit" inverted the map→overlays layering into an
+    import cycle (the spine importing the overlay). A framework-local post-publish hook seam
+    (`registerMapPublishListener` / `notifyMapPublished`) restored the direction and matched the register-at-init
+    idiom already used everywhere.
+- **Lesson.** For a feature whose value is _reuse_, the review budget pays off on **contract-tracing**, not
+  algorithm correctness: for each reused primitive, ask _what does it actually write / read / assume_, and does my
+  new wiring's watermark, storage, and call-direction match that — vs. the name or the mental model. Standing
+  checklist for a backend-reuse task: _(1) does my "already-done" watermark match exactly the rows the reused
+  passes persist? (2) does any column I write get overwritten by a sibling writer (use a separate column or
+  read-merge)? (3) does calling the reused thing directly invert a layer (prefer a local hook seam over a
+  cross-layer import)?_ Budget a review-fix commit per task — `/code-review` at high effort caught all four here,
+  none of which the passing unit tests surfaced. _Status: open._
