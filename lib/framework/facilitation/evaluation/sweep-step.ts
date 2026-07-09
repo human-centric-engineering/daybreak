@@ -6,13 +6,18 @@
  * `registerStepType` seam f-overlays' proactive sweep uses): an operator authors a one-step workflow
  * of type `framework_eval_sweep` and points an `AiWorkflowSchedule` cron at it.
  *
- * The step selects recent framework conversations with an un-scored turn (`recent-conversations.ts`)
- * and runs the enabled passes over each — supervisor + rubric by default, metric scoring (3 judge
+ * The step selects recent framework conversations never scored yet (`recent-conversations.ts`) and
+ * runs the enabled passes over each — supervisor + rubric by default, metric scoring (3 judge
  * calls/turn) opt-in. It threads the execution's user (or the service account) as the eval actor, and
  * self-enforces the execution's `budgetLimitUsd` inside the loop as a hard cost fence (the engine
- * only checks the budget BETWEEN steps, and this is one long step). A conversation that fails a pass
- * (e.g. no scorable turns) is skipped, not fatal. Daybreak ships the step type but seeds NO
- * workflow/schedule row — a fresh fork boots clean; the operator wires it when they want it.
+ * only checks the budget BETWEEN steps, and this is one long step). The fence is checked at
+ * CONVERSATION granularity — a single conversation runs all its passes to completion before the fence
+ * can trip, so a very long conversation can overshoot the cap by one conversation's worth of judge
+ * calls; keep `maxConversations` and per-conversation turn counts in mind when setting the budget. A
+ * conversation that fails a pass (e.g. no scorable turns) is skipped, not fatal. Daybreak ships the
+ * step type but seeds NO workflow/schedule row — a fresh fork boots clean; the operator wires it when
+ * they want it. (`tokensUsed` reports the supervisor + rubric judge tokens; the opt-in metric scorer
+ * surfaces cost only, so its tokens are logged via the underlying judge calls, not re-summed here.)
  *
  * Registered from `initFramework()` (server boot), not the core executor barrel, so it never affects
  * the core BE↔FE step-registry parity.
@@ -112,6 +117,7 @@ export async function executeEvalSweep(
       if (doRubric) {
         const r = await rubricScoreConversation({ conversationId: conversation.id, actorUserId });
         totalCostUsd += r.totalCostUsd;
+        totalTokensUsed += r.totalTokensUsed;
       }
       sweptConversations += 1;
     } catch (err) {

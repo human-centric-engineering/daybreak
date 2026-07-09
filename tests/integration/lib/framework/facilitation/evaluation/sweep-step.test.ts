@@ -48,7 +48,10 @@ beforeEach(() => {
   ] as never);
   vi.mocked(scoreConversation).mockResolvedValue({ totalCostUsd: 0.03 } as never);
   vi.mocked(superviseConversation).mockResolvedValue({ costUsd: 0.02, tokensUsed: 100 } as never);
-  vi.mocked(rubricScoreConversation).mockResolvedValue({ totalCostUsd: 0.01 } as never);
+  vi.mocked(rubricScoreConversation).mockResolvedValue({
+    totalCostUsd: 0.01,
+    totalTokensUsed: 20,
+  } as never);
 });
 
 describe('executeEvalSweep', () => {
@@ -63,9 +66,9 @@ describe('executeEvalSweep', () => {
       failedConversations: 0,
       passes: { score: false, supervise: true, rubric: true },
     });
-    // cost = 2 * (0.02 supervise + 0.01 rubric); tokens = 2 * 100 supervise.
+    // cost = 2 * (0.02 supervise + 0.01 rubric); tokens = 2 * (100 supervise + 20 rubric).
     expect(result.costUsd).toBeCloseTo(0.06, 6);
-    expect(result.tokensUsed).toBe(200);
+    expect(result.tokensUsed).toBe(240);
   });
 
   it('runs the metric scorer when score:true', async () => {

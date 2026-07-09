@@ -1,8 +1,8 @@
 /**
  * Framework-rubric scoring (f-governance-plus t-3). Mocks the DB client, the framework-conversation
  * loader (via aiConversation), the turn reader, the judge driver, and the audit logger. Proves the
- * per-turn rubric upsert into `rubricScore`, the reasoning merge (never clobbering the metric
- * scorer's), the skip-on-judge-failure path, and cost accumulation.
+ * per-turn upsert into the SEPARATE `rubricScore` / `rubricReasoning` columns (no read of / merge
+ * into the metric scorer's judgeReasoning), the skip-on-judge-failure path, and cost/token totals.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 vi.mock('@/lib/db/client', () => ({
   prisma: {
     aiConversation: { findUnique: vi.fn() },
-    frameworkConversationEval: { findUnique: vi.fn(), upsert: vi.fn() },
+    frameworkConversationEval: { upsert: vi.fn() },
   },
 }));
 vi.mock('@/lib/framework/facilitation/evaluation/turns', () => ({ listScorableTurns: vi.fn() }));
@@ -33,7 +33,6 @@ beforeEach(() => {
     contextId: 'onboarding',
   } as never);
   vi.mocked(listScorableTurns).mockResolvedValue([turn('a1'), turn('a2')] as never);
-  vi.mocked(prisma.frameworkConversationEval.findUnique).mockResolvedValue(null);
   vi.mocked(driveJudgeAgent).mockResolvedValue({
     score: 0.8,
     reasoning: 'served the purpose',
@@ -56,6 +55,7 @@ describe('rubricScoreConversation', () => {
     );
     expect(result).toMatchObject({ scoredTurns: 2, skippedTurns: 0 });
     expect(result.totalCostUsd).toBeCloseTo(0.004, 6);
+    expect(result.totalTokensUsed).toBe(30); // 2 turns * (10 in + 5 out)
     expect(logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'framework_conversation_eval.rubric' })
     );
@@ -81,40 +81,28 @@ describe('rubricScoreConversation', () => {
     );
   });
 
-  it('writes rubricScore on create and merges reasoning under a rubric key', async () => {
+  it('writes rubricScore + rubricReasoning in their own columns, never touching judgeReasoning', async () => {
     await rubricScoreConversation({ conversationId: 'c1', actorUserId: 'sys' });
-    expect(prisma.frameworkConversationEval.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { messageId: 'a1' },
-        create: expect.objectContaining({
-          messageId: 'a1',
-          rubricScore: 0.8,
-          judgeReasoning: { rubric: { reasoning: 'served the purpose', steps: ['s1'] } },
-          costUsd: 0.002,
-        }),
-        update: expect.objectContaining({
-          rubricScore: 0.8,
-          costUsd: { increment: 0.002 },
-        }),
-      })
-    );
-  });
-
-  it('merges the rubric reasoning into an existing metric-scorer blob (no clobber)', async () => {
-    vi.mocked(prisma.frameworkConversationEval.findUnique).mockResolvedValue({
-      judgeReasoning: { faithfulness: { reasoning: 'f' } },
-    } as never);
-    await rubricScoreConversation({ conversationId: 'c1', actorUserId: 'sys' });
-    expect(prisma.frameworkConversationEval.upsert).toHaveBeenCalledWith(
-      expect.objectContaining({
-        update: expect.objectContaining({
-          judgeReasoning: {
-            faithfulness: { reasoning: 'f' },
-            rubric: { reasoning: 'served the purpose', steps: ['s1'] },
-          },
-        }),
-      })
-    );
+    const arg = vi.mocked(prisma.frameworkConversationEval.upsert).mock.calls[0][0] as {
+      where: unknown;
+      create: Record<string, unknown>;
+      update: Record<string, unknown>;
+    };
+    expect(arg.where).toEqual({ messageId: 'a1' });
+    expect(arg.create).toMatchObject({
+      messageId: 'a1',
+      rubricScore: 0.8,
+      rubricReasoning: { reasoning: 'served the purpose', steps: ['s1'] },
+      costUsd: 0.002,
+    });
+    expect(arg.update).toMatchObject({
+      rubricScore: 0.8,
+      rubricReasoning: { reasoning: 'served the purpose', steps: ['s1'] },
+      costUsd: { increment: 0.002 },
+    });
+    // The metric scorer's column is never read or written by the rubric pass.
+    expect('judgeReasoning' in arg.create).toBe(false);
+    expect('judgeReasoning' in arg.update).toBe(false);
   });
 
   it('skips a turn whose judge failed (score null) — no write, counted as skipped, cost still summed', async () => {

@@ -6,9 +6,10 @@
  * facilitation/module purpose?), persisted to `FrameworkConversationEval.rubricScore`.
  *
  * Parallels `score-conversation.ts`: same framework-surface gate + turn reader, idempotent upsert per
- * `messageId`, a failed judge (`score: null`) skips the turn rather than aborting. The rubric
- * REASONING is merged into the existing `judgeReasoning` Json under a `rubric` key (read-merge-write,
- * so it never clobbers the metric scorer's reasoning), and the judge's cost is added to `costUsd`.
+ * `messageId`, a failed judge (`score: null`) skips the turn rather than aborting. The rubric score +
+ * reasoning live in their OWN columns (`rubricScore` / `rubricReasoning`) — NOT merged into the
+ * metric scorer's `judgeReasoning` — so the two writers never clobber each other and there's no
+ * read-modify-write race on a shared JSON blob. The judge's cost is added to `costUsd`.
  */
 
 import type { FrameworkConversationEval, Prisma } from '@prisma/client';
@@ -36,6 +37,7 @@ export interface RubricScoreConversationResult {
   scoredTurns: number;
   skippedTurns: number;
   totalCostUsd: number;
+  totalTokensUsed: number;
   results: FrameworkConversationEval[];
 }
 
@@ -66,6 +68,7 @@ export async function rubricScoreConversation(
   const results: FrameworkConversationEval[] = [];
   let skippedTurns = 0;
   let totalCostUsd = 0;
+  let totalTokensUsed = 0;
 
   for (const turn of turns) {
     const judged = await driveJudgeAgent({
@@ -76,6 +79,7 @@ export async function rubricScoreConversation(
       citations: judgeCitations(turn.citations),
     });
     totalCostUsd += judged.costUsd;
+    totalTokensUsed += judged.tokenUsage.input + judged.tokenUsage.output;
 
     if (judged.score === null) {
       // The judge failed (provider down / malformed response) — skip this turn, don't abort.
@@ -88,18 +92,11 @@ export async function rubricScoreConversation(
       continue;
     }
 
-    // Merge the rubric reasoning into any existing judgeReasoning (never clobber the metric scorer's).
-    const existing = await prisma.frameworkConversationEval.findUnique({
-      where: { messageId: turn.messageId },
-      select: { judgeReasoning: true },
-    });
-    const existingReasoning =
-      existing?.judgeReasoning && typeof existing.judgeReasoning === 'object'
-        ? (existing.judgeReasoning as Record<string, unknown>)
-        : {};
-    const judgeReasoning: Prisma.InputJsonValue = {
-      ...existingReasoning,
-      rubric: { reasoning: judged.reasoning, steps: judged.evaluationSteps ?? null },
+    // Rubric score + reasoning live in their OWN columns — no read of the shared judgeReasoning, so no
+    // clobber of / race with the metric scorer (see the module header).
+    const rubricReasoning: Prisma.InputJsonValue = {
+      reasoning: judged.reasoning,
+      steps: judged.evaluationSteps ?? null,
     };
 
     const row = await prisma.frameworkConversationEval.upsert({
@@ -110,13 +107,13 @@ export async function rubricScoreConversation(
         contextType: conversation.contextType,
         contextId: conversation.contextId,
         rubricScore: judged.score,
-        judgeReasoning,
+        rubricReasoning,
         costUsd: judged.costUsd,
         scoredAt: new Date(),
       },
       update: {
         rubricScore: judged.score,
-        judgeReasoning,
+        rubricReasoning,
         costUsd: { increment: judged.costUsd },
       },
     });
@@ -139,5 +136,12 @@ export async function rubricScoreConversation(
     clientIp: clientIp ?? null,
   });
 
-  return { conversationId, scoredTurns: results.length, skippedTurns, totalCostUsd, results };
+  return {
+    conversationId,
+    scoredTurns: results.length,
+    skippedTurns,
+    totalCostUsd,
+    totalTokensUsed,
+    results,
+  };
 }

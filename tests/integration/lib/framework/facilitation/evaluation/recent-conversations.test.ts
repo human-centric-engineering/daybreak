@@ -1,7 +1,8 @@
 /**
  * Recent un-scored framework conversations (f-governance-plus t-3). Mocks the three DB reads; proves
- * the watermark (a conversation is pending iff it has an assistant turn with no eval row), the
- * recency order, the maxConversations cap, and the empty short-circuits.
+ * the conversation-level watermark (a conversation is pending iff it has assistant turns but NO eval
+ * row at all — so a partially-scored conversation is EXCLUDED), the recency order, the
+ * maxConversations cap, the empty short-circuits, and the saturation warning.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -13,9 +14,11 @@ vi.mock('@/lib/db/client', () => ({
     frameworkConversationEval: { findMany: vi.fn() },
   },
 }));
+vi.mock('@/lib/logging', () => ({ logger: { warn: vi.fn(), info: vi.fn() } }));
 
 import { listRecentUnscoredFrameworkConversations } from '@/lib/framework/facilitation/evaluation/recent-conversations';
 import { prisma } from '@/lib/db/client';
+import { logger } from '@/lib/logging';
 
 const conv = (id: string) => ({ id, contextType: 'facilitation', contextId: 'onboarding' });
 
@@ -40,10 +43,24 @@ beforeEach(() => {
 });
 
 describe('listRecentUnscoredFrameworkConversations', () => {
-  it('returns only conversations with an un-scored turn, newest first', async () => {
+  it('returns only never-scored conversations, newest first', async () => {
     const result = await listRecentUnscoredFrameworkConversations(10);
-    expect(result.map((c) => c.id)).toEqual(['c1', 'c3']); // c2 fully scored → excluded
+    expect(result.map((c) => c.id)).toEqual(['c1', 'c3']); // c2 has a scored turn → excluded
     expect(result[0]).toMatchObject({ contextType: 'facilitation', contextId: 'onboarding' });
+  });
+
+  it('EXCLUDES a partially-scored conversation (has one scored + one un-scored turn)', async () => {
+    // c1 has m1 (unscored) AND m1b (scored) → it has a scored turn → excluded (never re-swept).
+    vi.mocked(prisma.aiMessage.findMany).mockResolvedValue([
+      { id: 'm1', conversationId: 'c1' },
+      { id: 'm1b', conversationId: 'c1' },
+      { id: 'm3', conversationId: 'c3' },
+    ] as never);
+    vi.mocked(prisma.frameworkConversationEval.findMany).mockResolvedValue([
+      { messageId: 'm1b' },
+    ] as never);
+    const result = await listRecentUnscoredFrameworkConversations(10);
+    expect(result.map((c) => c.id)).toEqual(['c3']); // c1 excluded despite its un-scored m1
   });
 
   it('caps the result at maxConversations, preserving recency order', async () => {
@@ -72,6 +89,29 @@ describe('listRecentUnscoredFrameworkConversations', () => {
         where: { contextType: { in: expect.arrayContaining(['facilitation', 'module']) } },
         orderBy: { updatedAt: 'desc' },
       })
+    );
+  });
+
+  it('warns when the scan window saturates but the selection is not filled (coverage may lag)', async () => {
+    // maxConversations 10 → scan window floor 100. A full window of 100, ALL already scored → no
+    // candidates but the window is saturated: warn so an operator sees coverage may be behind.
+    const full = Array.from({ length: 100 }, (_, i) => ({
+      id: `c${i}`,
+      contextType: 'facilitation',
+      contextId: 'x',
+    }));
+    vi.mocked(prisma.aiConversation.findMany).mockResolvedValue(full as never);
+    vi.mocked(prisma.aiMessage.findMany).mockResolvedValue(
+      full.map((c) => ({ id: `m-${c.id}`, conversationId: c.id })) as never
+    );
+    vi.mocked(prisma.frameworkConversationEval.findMany).mockResolvedValue(
+      full.map((c) => ({ messageId: `m-${c.id}` })) as never
+    );
+    const result = await listRecentUnscoredFrameworkConversations(10);
+    expect(result).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'framework eval sweep: conversation scan window saturated',
+      expect.objectContaining({ scanWindow: 100 })
     );
   });
 });
