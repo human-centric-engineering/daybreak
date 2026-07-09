@@ -685,3 +685,34 @@ startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registra
   dialog/panel closes or its inputs change?"_ would have caught both at build.** Adds a corollary: a **hook
   that caches a fetched list behind an open-once guard** is a cached-view-state in disguise — the guard must
   re-arm on reopen, or a transient failure bricks the surface.
+
+### B30 · Reusing a sibling write-service by name isn't reuse of its _semantics_ — check the effect at the read side, and beware the squash-merge that races a review-fix commit
+
+- **Discovery ([[f-governance-plus]] t-1).** The plan chose, for the new `policy` proposal subject, to apply
+  approvals via `createFacilitationPolicy` — the same write-service the direct policy-admin route uses — and
+  called the result "last-writer-wins." Three independent `/code-review` finders converged on the same defect:
+  `createFacilitationPolicy` only ever **inserts**, `FacilitationPolicy` has **no unique-on-kind**, and every
+  enforced kind **aggregates** its enabled rows (guard-floor keeps the max rank, gating denies on any, auto-approval
+  takes 'none'-wins). So approving a policy proposal added a _duplicate_ enabled row while the **old** policy still
+  won — the proposed change silently never took effect. The write-service was reused correctly; its **semantics at
+  the read/enforcement side** were not what "change this policy" needed. The fix made `policy` target an **existing
+  row by id** and apply via `updateFacilitationPolicy` (overwrite in place) — which also revealed the right
+  invariant: **all three subjects change an _existing_ target, never create one** (map publishes over a graph,
+  module_config snapshots over a module, policy overwrites a policy). The plan-time "reuse `createFacilitationPolicy`"
+  was a reconciliation miss the recon passes didn't catch because they verified the _function exists_, not the
+  _aggregation contract of its table's readers_.
+- **Lesson.** When a feature reuses a write primitive to "change X," trace X to its **reader/enforcer** and confirm
+  the write actually alters what the reader returns. A create into an accumulate-on-read table is not an edit. Add
+  a recon check: _for every reused write-fn, who reads its rows and how do they combine multiple?_ — a
+  create-vs-update decision hides there. Corollary to [[planning-retro#B26]] (a copied guard may not fit) and
+  [[planning-retro#B24]] (an adapter must re-check a primitive's silent assumptions): here the silent assumption
+  was on the _read_ side of the same table.
+- **Process hazard (same task).** The t-1 PR (#131) **squash-merged at its _first_ commit** while the review-fix
+  commit was still landing on the PR head — a GitHub PR head-sync/Actions delivery hiccup meant the branch ref had
+  the fix but the PR never re-synced, and the auto-merge captured only the first commit. Result: `main` briefly had
+  t-1 **without** its `/code-review` fixes (the live policy bug above). Recovered by cherry-picking the fix onto a
+  fresh branch off `main` and landing it as a follow-up PR (#132). **Lesson:** after pushing a review-fix commit,
+  **verify CI actually triggered on the new head SHA and that `gh pr view --json headRefOid` matches** _before_
+  the PR can merge — don't trust that a push to a PR branch re-synced the PR. If a merge slips through at the wrong
+  SHA, fix forward with a cherry-pick PR rather than rewriting merged history. _Status: open — worth a branch-protection/
+  auto-merge review so a stale-head squash can't merge past an unpushed-to-PR-head commit._
