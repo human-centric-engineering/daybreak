@@ -13,6 +13,7 @@
  */
 
 import type { GuardEvent, GuardEventContext } from '@/lib/orchestration/chat/guard-events';
+import type { GuardMode } from '@/lib/orchestration/chat/guard-floor';
 import { FACILITATION_SURFACE_CONTEXT_TYPE } from '@/lib/framework/facilitation/agents/surface';
 import { listEnabledFacilitationPolicies } from '@/lib/framework/facilitation/policies/policy-queries';
 import {
@@ -26,15 +27,33 @@ import { logger } from '@/lib/logging';
 /** The registration key for the core guard-event seam (idempotent per key). */
 export const FACILITATION_ESCALATION_KEY = 'facilitation-escalation';
 
-/** Outcome severity — a `blocked` guard is stricter than a mere `flagged` detection. */
-const OUTCOME_SEVERITY: Record<GuardEvent['outcome'], number> = { flagged: 1, blocked: 2 };
+/**
+ * Observed-outcome severity on the escalation scale. The core guard-event reports the effective
+ * `GuardMode` the guard acted in (`none` … `block`); an escalation policy signals on a coarser
+ * binary — `flagged` (any detection) vs `blocked` (a hard `block`). `none` is a guard the operator
+ * disabled — it emits an event but must never escalate (severity 0, below even `flagged`). An armed
+ * guard that flagged without blocking (`log_only` / `warn_and_continue`) is a `flagged` detection;
+ * only a hard `block` is `blocked`.
+ */
+const OUTCOME_SEVERITY: Record<GuardMode, number> = {
+  none: 0,
+  log_only: 1,
+  warn_and_continue: 1,
+  block: 2,
+};
+
+/** Severity of a policy's MINIMUM-to-fire `signal.outcome` (`flagged` = any detection). */
+const POLICY_MINIMUM_SEVERITY: Record<EscalationPayload['signal']['outcome'], number> = {
+  flagged: 1,
+  blocked: 2,
+};
 
 /** Whether an observed outcome meets a policy's MINIMUM-severity `signal.outcome`. */
 function outcomeMeetsMinimum(
   policyMinimum: EscalationPayload['signal']['outcome'],
   observed: GuardEvent['outcome']
 ): boolean {
-  return OUTCOME_SEVERITY[observed] >= OUTCOME_SEVERITY[policyMinimum];
+  return OUTCOME_SEVERITY[observed] >= POLICY_MINIMUM_SEVERITY[policyMinimum];
 }
 
 /**

@@ -166,6 +166,16 @@ seam, a post-detection guard-event observer, which f-emergence owns). The escala
 still lives in this feature's `kinds.ts` + `escalation.ts`; only the build effort moved. The
 deferral-then-pickup is recorded in the [[plan#Decisions log|decisions log]] (both entries).
 
+**Sunrise v0.7.0 sync (2026-07-09):** upstream adopted the guard-floor / guard-event seams this
+feature informed, refining `GuardEvent.outcome` to the core `GuardMode` (`none` … `block`) — it was
+`flagged` / `blocked` in the fork-first shape. The escalation **policy** keeps its own coarser
+admin-facing vocabulary (`signal.outcome: flagged | blocked` in `kinds.ts`) **by design** — it's a
+cleaner operator abstraction than four raw guard modes. `escalation.ts` therefore **translates**:
+`block` → `blocked` severity, an armed-but-non-blocking mode (`log_only` / `warn_and_continue`) →
+`flagged`, and `none` (a disabled guard, which the upstream handler now still emits) → below
+`flagged` so a turned-off guard never escalates. This translation is deliberate, not drift; see the
+`OUTCOME_SEVERITY` / `POLICY_MINIMUM_SEVERITY` maps in `escalation.ts`.
+
 ## Open questions — genuinely the owner's (flagged, not parked)
 
 Everything tractable is resolved above. These are the two product-scope forks where a default is
