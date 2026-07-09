@@ -43,6 +43,17 @@ describe('initFrameworkNav', () => {
     expect(journeys?.icon).toBeDefined();
   });
 
+  it('registers a Slots item (f-admin-surfaces t-1)', () => {
+    initFrameworkNav();
+
+    const framework = getRegisteredNavSections().find((s) => s.title === 'Framework');
+    const slots = framework?.items?.find((i) => i.href === '/admin/framework/slots');
+    expect(slots).toBeDefined();
+    expect(slots?.label).toBe('Slots');
+    expect(slots?.description).toBeTruthy();
+    expect(slots?.icon).toBeDefined();
+  });
+
   it('registers an Atlas item (f-atlas t-2a)', () => {
     initFrameworkNav();
 
