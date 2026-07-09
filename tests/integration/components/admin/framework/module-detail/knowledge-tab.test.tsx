@@ -105,6 +105,23 @@ describe('KnowledgeTab', () => {
     expect(nav.refresh).toHaveBeenCalled();
   });
 
+  it('threads a debounced ?q= search into the documents roster fetch', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiClient.get).mockResolvedValue([{ id: 'new-doc', name: 'New Doc' }]);
+
+    renderTab({ scope: { documents: [], tags: [] } });
+    await user.click(screen.getByRole('button', { name: /add document/i }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /documents/i })).toBeEnabled());
+
+    await user.type(screen.getByRole('searchbox', { name: /search documents/i }), 'onboard');
+
+    await waitFor(() =>
+      expect(apiClient.get).toHaveBeenCalledWith(
+        '/api/v1/admin/orchestration/knowledge/documents?limit=100&q=onboard'
+      )
+    );
+  });
+
   it('grants a tag (POST { tagId } from the tags roster)', async () => {
     const user = userEvent.setup();
     vi.mocked(apiClient.get).mockResolvedValue([{ id: 'new-tag', name: 'New Tag' }]);

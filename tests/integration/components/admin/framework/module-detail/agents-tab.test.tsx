@@ -10,7 +10,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import type { ModuleAgentBindingListItem } from '@/lib/framework/modules/view';
@@ -259,17 +259,162 @@ describe('AgentsTab', () => {
     expect(await screen.findByText(/showing the first 100 agents/i)).toBeInTheDocument();
   });
 
-  it('does not start a second roster fetch while one is in flight', async () => {
+  it('refetches a fresh roster when the bind form reopens, so a failed load recovers', async () => {
     const user = userEvent.setup();
-    // A never-resolving fetch keeps the first request in flight.
-    vi.mocked(apiClient.get).mockReturnValue(new Promise(() => {}));
+    // First open: the roster load fails.
+    vi.mocked(apiClient.get).mockRejectedValueOnce(new APIClientError('boom', 'ERR', 500));
 
     renderTab({ bindings: [] });
     await user.click(screen.getByRole('button', { name: /bind agent/i }));
+    expect(await screen.findByText(/boom/i)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /cancel/i }));
-    await user.click(screen.getByRole('button', { name: /bind agent/i }));
 
-    // Still exactly one fetch — the in-flight guard blocked the reopen refetch.
-    expect(apiClient.get).toHaveBeenCalledTimes(1);
+    // Reopen: a fresh fetch succeeds → the stale error is gone and the picker works.
+    vi.mocked(apiClient.get).mockResolvedValueOnce(ROSTER);
+    await user.click(screen.getByRole('button', { name: /bind agent/i }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /agent/i })).toBeEnabled());
+
+    expect(screen.queryByText(/boom/i)).not.toBeInTheDocument();
+    expect(apiClient.get).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears a stale selection when the search narrows (no hidden bind)', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiClient.get).mockResolvedValue(ROSTER);
+
+    renderTab({ bindings: [] });
+    await user.click(screen.getByRole('button', { name: /bind agent/i }));
+    const agentCombo = await screen.findByRole('combobox', { name: /agent/i });
+    await waitFor(() => expect(agentCombo).toBeEnabled());
+
+    // Pick a seat and an agent, then narrow the search — the agent selection must reset.
+    await user.click(screen.getByRole('combobox', { name: /seat/i }));
+    await user.click(await screen.findByRole('option', { name: /^companion$/i }));
+    await user.click(agentCombo);
+    await user.click(await screen.findByRole('option', { name: /companion agent/i }));
+    await user.type(screen.getByRole('searchbox', { name: /search agents/i }), 'zzz');
+
+    await user.click(screen.getByRole('button', { name: /^bind$/i }));
+
+    // Selection was cleared by the search → submit is blocked, nothing hidden is posted.
+    expect(screen.getByText(/choose an agent and a seat/i)).toBeInTheDocument();
+    expect(apiClient.post).not.toHaveBeenCalled();
+  });
+
+  it('threads a debounced ?q= search into the roster fetch', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiClient.get).mockResolvedValue(ROSTER);
+
+    renderTab({ bindings: [] });
+    await user.click(screen.getByRole('button', { name: /bind agent/i }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /agent/i })).toBeEnabled());
+
+    await user.type(screen.getByRole('searchbox', { name: /search agents/i }), 'comp');
+
+    await waitFor(() =>
+      expect(apiClient.get).toHaveBeenCalledWith(
+        '/api/v1/admin/orchestration/agents?isActive=true&kind=chat&limit=100&q=comp'
+      )
+    );
+  });
+
+  it('flags a binding that carries a config override', () => {
+    renderTab({ bindings: [binding({ config: { tone: 'warm' } })] });
+    // The seat cell shows a "Config" badge (distinct from the "Edit config" row action).
+    expect(screen.getByText('Config')).toBeInTheDocument();
+  });
+
+  it('edits a per-binding config override (prefilled → PATCH)', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiClient.patch).mockResolvedValue(undefined);
+
+    renderTab({ bindings: [binding({ id: 'b9', config: { tone: 'warm' } })] });
+    await user.click(screen.getByRole('button', { name: /edit config/i }));
+
+    const editor = screen.getByLabelText(/binding config/i);
+    expect(editor).toHaveValue(JSON.stringify({ tone: 'warm' }, null, 2));
+
+    fireEvent.change(editor, { target: { value: '{"tone":"cool"}' } });
+    await user.click(screen.getByRole('button', { name: /save config/i }));
+
+    expect(apiClient.patch).toHaveBeenCalledWith(`${AGENTS_URL}/b9`, {
+      body: { config: { tone: 'cool' } },
+    });
+    expect(nav.refresh).toHaveBeenCalled();
+  });
+
+  it('clears the override when the config editor is emptied (config: null)', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiClient.patch).mockResolvedValue(undefined);
+
+    renderTab({ bindings: [binding({ id: 'b9', config: { tone: 'warm' } })] });
+    await user.click(screen.getByRole('button', { name: /edit config/i }));
+    await user.clear(screen.getByLabelText(/binding config/i));
+    await user.click(screen.getByRole('button', { name: /save config/i }));
+
+    expect(apiClient.patch).toHaveBeenCalledWith(`${AGENTS_URL}/b9`, {
+      body: { config: null },
+    });
+  });
+
+  it('blocks an invalid-JSON config without calling the API', async () => {
+    const user = userEvent.setup();
+
+    renderTab({ bindings: [binding({ id: 'b9', config: null })] });
+    await user.click(screen.getByRole('button', { name: /edit config/i }));
+    fireEvent.change(screen.getByLabelText(/binding config/i), {
+      target: { value: 'not json' },
+    });
+    await user.click(screen.getByRole('button', { name: /save config/i }));
+
+    expect(screen.getByText(/config: invalid json/i)).toBeInTheDocument();
+    expect(apiClient.patch).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-object JSON config (array)', async () => {
+    const user = userEvent.setup();
+
+    renderTab({ bindings: [binding({ id: 'b9', config: null })] });
+    await user.click(screen.getByRole('button', { name: /edit config/i }));
+    fireEvent.change(screen.getByLabelText(/binding config/i), {
+      target: { value: '[1, 2]' },
+    });
+    await user.click(screen.getByRole('button', { name: /save config/i }));
+
+    expect(screen.getByText(/config must be a json object/i)).toBeInTheDocument();
+    expect(apiClient.patch).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a server field error on a failed config save', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiClient.patch).mockRejectedValue(
+      new APIClientError('bad', 'VALIDATION_ERROR', 422, { config: ['must be an object'] })
+    );
+
+    renderTab({ bindings: [binding({ id: 'b9', config: null })] });
+    await user.click(screen.getByRole('button', { name: /edit config/i }));
+    fireEvent.change(screen.getByLabelText(/binding config/i), {
+      target: { value: '{"a":1}' },
+    });
+    await user.click(screen.getByRole('button', { name: /save config/i }));
+
+    expect(await screen.findByText(/must be an object/i)).toBeInTheDocument();
+  });
+
+  it("locks other rows' actions while a config editor is open", async () => {
+    const user = userEvent.setup();
+    renderTab({
+      bindings: [
+        binding({ id: 'a', role: 'companion', isPrimary: true, config: null }),
+        binding({ id: 'b', role: 'coach', isPrimary: false, config: null }),
+      ],
+    });
+
+    // Open the config editor on the first row.
+    const editButtons = screen.getAllByRole('button', { name: /edit config/i });
+    await user.click(editButtons[0]);
+
+    // The other row's "Make primary" action is now locked (no concurrent mutation).
+    expect(screen.getByRole('button', { name: /make primary/i })).toBeDisabled();
   });
 });
