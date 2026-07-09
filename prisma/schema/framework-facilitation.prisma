@@ -239,6 +239,8 @@ model FrameworkConversationEval {
   faithfulness     Float? // 0..1, or null when the metric doesn't apply / the judge failed
   groundedness     Float?
   relevance        Float?
+  rubricScore      Float? // 0..1 framework-rubric judge score (f-governance-plus t-3); null until the rubric pass runs
+  rubricReasoning  Json? // { reasoning, steps? } from the rubric judge — a SEPARATE column, not merged into judgeReasoning, so the two writers never clobber each other (f-governance-plus t-3)
   judgeReasoning   Json? // { faithfulness: { reasoning, evaluationSteps? }, groundedness: …, relevance: … }
   costUsd          Float    @default(0) // sum of the three judge calls
   supervisorReport Json? // optional post-hoc supervisor verdict (f-eval t-2)
