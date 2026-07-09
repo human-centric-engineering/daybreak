@@ -239,7 +239,8 @@ model FrameworkConversationEval {
   faithfulness     Float? // 0..1, or null when the metric doesn't apply / the judge failed
   groundedness     Float?
   relevance        Float?
-  judgeReasoning   Json? // { faithfulness: { reasoning, evaluationSteps? }, groundedness: …, relevance: … }
+  rubricScore      Float? // 0..1 framework-rubric judge score (f-governance-plus t-3); null until the rubric pass runs
+  judgeReasoning   Json? // { faithfulness: { reasoning, evaluationSteps? }, groundedness: …, relevance: …, rubric?: { reasoning, evaluationSteps? } }
   costUsd          Float    @default(0) // sum of the three judge calls
   supervisorReport Json? // optional post-hoc supervisor verdict (f-eval t-2)
   scoredAt         DateTime @default(now())

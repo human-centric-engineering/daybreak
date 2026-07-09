@@ -57,6 +57,7 @@ import { guidanceCapabilities } from '@/lib/framework/guidance/capabilities';
 import { engagementCapabilities } from '@/lib/framework/engagement/capabilities';
 import { emergenceCapabilities } from '@/lib/framework/facilitation/emergence/capabilities';
 import { registerProactiveGuidanceStep } from '@/lib/framework/facilitation/overlays/proactive-step';
+import { registerEvalSweepStep } from '@/lib/framework/facilitation/evaluation/sweep-step';
 
 export function initFramework(): void {
   registerContextContributor(MODULE_CONTEXT_TYPE, loadModuleContext);
@@ -86,6 +87,10 @@ export function initFramework(): void {
   // so an operator can schedule the throttled nudge sweep via an `AiWorkflowSchedule` cron. Registering
   // the BE executor at init (the engine runs server-side); no workflow/schedule row is seeded.
   registerProactiveGuidanceStep();
+  // Scheduled eval sweep (f-governance-plus t-3, F14): the `framework_eval_sweep` workflow step type,
+  // so an operator can cron the f-eval scorers + framework-rubric judge over recent framework
+  // conversations via an `AiWorkflowSchedule`. BE executor registered at init; no schedule row seeded.
+  registerEvalSweepStep();
 }
 
 export async function syncFramework(): Promise<void> {
