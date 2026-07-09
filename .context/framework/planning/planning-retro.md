@@ -673,3 +673,15 @@ startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registra
   server after a mutation?_ and _does every cached view-state reset when its dialog/panel closes or its
   inputs change?_ Catching these at build (not review) is cheaper; the recurrence within one feature shows
   they're systematic, not incidental. _Status: open._
+- **Corroboration ([[f-admin-surfaces]] t-4, a second feature).** The pattern recurred outside f-map-editor,
+  confirming it's a property of UI-over-shipped-backend features generally, not one feature. t-4's polish task
+  (searchable roster pickers) wrote almost no backend logic, yet `/code-review` found two real defects, both
+  **cached view-state not reset on open/close** — the exact anti-pattern (2) above: the roster hook cached its
+  filtered list _and_ its load error and never reset them on form reopen, so a failed first load left the
+  picker permanently stuck (reopen no-op'd on an `opened` guard), and a narrowing search stranded a
+  now-hidden selection the submit still posted. The fix was B29's own prescription — a `reset()` that clears
+  the cached roster/query/error and re-arms on every open, plus clearing the dependent selection when its
+  source list changes. **The standing checklist item _"does every cached view-state reset when its
+  dialog/panel closes or its inputs change?"_ would have caught both at build.** Adds a corollary: a **hook
+  that caches a fetched list behind an open-once guard** is a cached-view-state in disguise — the guard must
+  re-arm on reopen, or a transient failure bricks the surface.
