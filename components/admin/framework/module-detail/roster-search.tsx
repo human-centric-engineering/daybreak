@@ -20,9 +20,15 @@ interface RosterSearchProps<T> {
   noun: string;
   /** A stable id for the input↔label association (unique per rendered form). */
   id: string;
+  /**
+   * Fired alongside each search change so the consumer can clear a now-stale picker selection —
+   * a narrowing search can drop the selected item from the roster, and the trigger would then
+   * show its placeholder while the old id is still submitted.
+   */
+  onSearchChange?: (value: string) => void;
 }
 
-export function RosterSearch<T>({ roster, noun, id }: RosterSearchProps<T>) {
+export function RosterSearch<T>({ roster, noun, id, onSearchChange }: RosterSearchProps<T>) {
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id}>Search {noun}s</Label>
@@ -30,7 +36,10 @@ export function RosterSearch<T>({ roster, noun, id }: RosterSearchProps<T>) {
         id={id}
         type="search"
         value={roster.query}
-        onChange={(e) => roster.search(e.target.value)}
+        onChange={(e) => {
+          roster.search(e.target.value);
+          onSearchChange?.(e.target.value);
+        }}
         placeholder={`Search ${noun}s by name…`}
         className="w-72"
         aria-busy={roster.loading}

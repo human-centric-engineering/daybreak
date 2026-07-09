@@ -105,6 +105,8 @@ export function AgentsTab({ slug, agentRoles, bindings }: AgentsTabProps) {
   function openForm() {
     setAdding(true);
     setErrors([]);
+    setAgentId('');
+    roster.reset();
     void roster.load();
   }
 
@@ -232,7 +234,12 @@ export function AgentsTab({ slug, agentRoles, bindings }: AgentsTabProps) {
           onSubmit={(e) => void bind(e)}
           className="bg-muted/40 space-y-4 rounded-md border p-4"
         >
-          <RosterSearch roster={roster} noun="agent" id="bind-agent-search" />
+          <RosterSearch
+            roster={roster}
+            noun="agent"
+            id="bind-agent-search"
+            onSearchChange={() => setAgentId('')}
+          />
 
           {roster.error ? (
             <p className="text-destructive text-sm" role="alert">
@@ -289,7 +296,7 @@ export function AgentsTab({ slug, agentRoles, bindings }: AgentsTabProps) {
             </div>
           )}
 
-          {roster.capped && !roster.error && (
+          {roster.capped && !roster.error && roster.query === '' && (
             <p className="text-muted-foreground text-xs">
               Showing the first {ROSTER_LIMIT} agents. If the one you want isn&rsquo;t listed, type
               above to search the full set.

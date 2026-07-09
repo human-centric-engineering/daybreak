@@ -259,18 +259,46 @@ describe('AgentsTab', () => {
     expect(await screen.findByText(/showing the first 100 agents/i)).toBeInTheDocument();
   });
 
-  it('does not start a second roster fetch while one is in flight', async () => {
+  it('refetches a fresh roster when the bind form reopens, so a failed load recovers', async () => {
     const user = userEvent.setup();
-    // A never-resolving fetch keeps the first request in flight.
-    vi.mocked(apiClient.get).mockReturnValue(new Promise(() => {}));
+    // First open: the roster load fails.
+    vi.mocked(apiClient.get).mockRejectedValueOnce(new APIClientError('boom', 'ERR', 500));
 
     renderTab({ bindings: [] });
     await user.click(screen.getByRole('button', { name: /bind agent/i }));
+    expect(await screen.findByText(/boom/i)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /cancel/i }));
-    await user.click(screen.getByRole('button', { name: /bind agent/i }));
 
-    // Still exactly one fetch — the open-once guard blocked the reopen refetch.
-    expect(apiClient.get).toHaveBeenCalledTimes(1);
+    // Reopen: a fresh fetch succeeds → the stale error is gone and the picker works.
+    vi.mocked(apiClient.get).mockResolvedValueOnce(ROSTER);
+    await user.click(screen.getByRole('button', { name: /bind agent/i }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /agent/i })).toBeEnabled());
+
+    expect(screen.queryByText(/boom/i)).not.toBeInTheDocument();
+    expect(apiClient.get).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears a stale selection when the search narrows (no hidden bind)', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiClient.get).mockResolvedValue(ROSTER);
+
+    renderTab({ bindings: [] });
+    await user.click(screen.getByRole('button', { name: /bind agent/i }));
+    const agentCombo = await screen.findByRole('combobox', { name: /agent/i });
+    await waitFor(() => expect(agentCombo).toBeEnabled());
+
+    // Pick a seat and an agent, then narrow the search — the agent selection must reset.
+    await user.click(screen.getByRole('combobox', { name: /seat/i }));
+    await user.click(await screen.findByRole('option', { name: /^companion$/i }));
+    await user.click(agentCombo);
+    await user.click(await screen.findByRole('option', { name: /companion agent/i }));
+    await user.type(screen.getByRole('searchbox', { name: /search agents/i }), 'zzz');
+
+    await user.click(screen.getByRole('button', { name: /^bind$/i }));
+
+    // Selection was cleared by the search → submit is blocked, nothing hidden is posted.
+    expect(screen.getByText(/choose an agent and a seat/i)).toBeInTheDocument();
+    expect(apiClient.post).not.toHaveBeenCalled();
   });
 
   it('threads a debounced ?q= search into the roster fetch', async () => {

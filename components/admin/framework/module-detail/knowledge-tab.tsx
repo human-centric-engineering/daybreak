@@ -165,6 +165,8 @@ function GrantSection<T>({
   function openForm() {
     setAdding(true);
     setErrors([]);
+    setSelectedId('');
+    roster.reset();
     void roster.load();
   }
 
@@ -215,7 +217,12 @@ function GrantSection<T>({
           onSubmit={(e) => void grant(e)}
           className="bg-muted/40 space-y-4 rounded-md border p-4"
         >
-          <RosterSearch roster={roster} noun={noun} id={`grant-${paramKey}-search`} />
+          <RosterSearch
+            roster={roster}
+            noun={noun}
+            id={`grant-${paramKey}-search`}
+            onSearchChange={() => setSelectedId('')}
+          />
 
           {roster.error ? (
             <p className="text-destructive text-sm" role="alert">
@@ -245,7 +252,7 @@ function GrantSection<T>({
             </div>
           )}
 
-          {roster.capped && !roster.error && (
+          {roster.capped && !roster.error && roster.query === '' && (
             <p className="text-muted-foreground text-xs">
               Showing the first {ROSTER_LIMIT} {title.toLowerCase()}. If the one you want
               isn&rsquo;t listed, type above to search the full set.

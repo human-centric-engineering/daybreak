@@ -23,6 +23,7 @@ function roster<T>(over: Partial<BindingRoster<T>> = {}): BindingRoster<T> {
     capped: false,
     query: '',
     search: vi.fn(),
+    reset: vi.fn(),
     load: vi.fn(),
     ...over,
   };
@@ -47,6 +48,25 @@ describe('RosterSearch', () => {
     expect(search).toHaveBeenCalledTimes(2);
     expect(search).toHaveBeenNthCalledWith(1, 'a');
     expect(search).toHaveBeenNthCalledWith(2, 'b');
+  });
+
+  it('fires onSearchChange alongside the roster search (for clearing a stale selection)', async () => {
+    const user = userEvent.setup();
+    const search = vi.fn();
+    const onSearchChange = vi.fn();
+    render(
+      <RosterSearch
+        roster={roster({ search })}
+        noun="agent"
+        id="agent-search"
+        onSearchChange={onSearchChange}
+      />
+    );
+
+    await user.type(screen.getByRole('searchbox', { name: /search agents/i }), 'x');
+
+    expect(search).toHaveBeenCalledWith('x');
+    expect(onSearchChange).toHaveBeenCalledWith('x');
   });
 
   it('marks the input busy while the roster is loading', () => {

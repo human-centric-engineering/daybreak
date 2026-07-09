@@ -95,6 +95,45 @@ describe('useBindingRoster', () => {
     });
   });
 
+  it('reset() re-arms the picker so the next load refetches fresh (unfiltered)', async () => {
+    vi.mocked(apiClient.get).mockResolvedValue([{ id: 'a' }]);
+    const { result } = renderHook(() => useBindingRoster<{ id: string }>('/url'));
+
+    await act(async () => {
+      await result.current.load();
+    });
+    expect(apiClient.get).toHaveBeenCalledTimes(1);
+
+    act(() => result.current.reset());
+    expect(result.current.roster).toBeNull();
+    expect(result.current.query).toBe('');
+
+    await act(async () => {
+      await result.current.load();
+    });
+    expect(apiClient.get).toHaveBeenCalledTimes(2);
+    expect(apiClient.get).toHaveBeenLastCalledWith('/url');
+  });
+
+  it('reset() clears a prior load error so a reopened picker can recover', async () => {
+    vi.mocked(apiClient.get).mockRejectedValueOnce(new APIClientError('boom', 'ERR', 500));
+    const { result } = renderHook(() => useBindingRoster<{ id: string }>('/url'));
+
+    await act(async () => {
+      await result.current.load();
+    });
+    expect(result.current.error).toBe('boom');
+
+    act(() => result.current.reset());
+    expect(result.current.error).toBeNull();
+
+    vi.mocked(apiClient.get).mockResolvedValueOnce([{ id: 'a' }]);
+    await act(async () => {
+      await result.current.load();
+    });
+    expect(result.current.roster).toEqual([{ id: 'a' }]);
+  });
+
   it('re-queries with a debounced ?q= once the picker is opened', async () => {
     vi.useFakeTimers();
     try {

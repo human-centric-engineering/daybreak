@@ -85,6 +85,8 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
   function openForm() {
     setAdding(true);
     setErrors([]);
+    setWorkflowId('');
+    roster.reset();
     void roster.load();
   }
 
@@ -174,7 +176,12 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
           onSubmit={(e) => void bind(e)}
           className="bg-muted/40 space-y-4 rounded-md border p-4"
         >
-          <RosterSearch roster={roster} noun="workflow" id="bind-workflow-search" />
+          <RosterSearch
+            roster={roster}
+            noun="workflow"
+            id="bind-workflow-search"
+            onSearchChange={() => setWorkflowId('')}
+          />
 
           {roster.error ? (
             <p className="text-destructive text-sm" role="alert">
@@ -254,7 +261,7 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
             </div>
           )}
 
-          {roster.capped && !roster.error && (
+          {roster.capped && !roster.error && roster.query === '' && (
             <p className="text-muted-foreground text-xs">
               Showing the first {ROSTER_LIMIT} workflows. If the one you want isn&rsquo;t listed,
               type above to search the full set.

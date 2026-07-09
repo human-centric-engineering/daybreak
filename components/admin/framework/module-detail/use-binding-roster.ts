@@ -48,7 +48,13 @@ export interface BindingRoster<T> {
   query: string;
   /** Update the search term; debounced `?q=` re-query once the picker has been opened. */
   search: (next: string) => void;
-  /** Open the roster and load it once; further narrowing goes through {@link search}. */
+  /**
+   * Re-arm the picker: cancel any pending fetch, clear the search term / error / roster, so the
+   * next {@link load} fetches fresh (unfiltered). Call this when the form (re)opens — without it,
+   * a failed first load would never retry and a prior search filter would linger on reopen.
+   */
+  reset: () => void;
+  /** Open the roster and load it (fresh after a {@link reset}); narrowing goes through {@link search}. */
   load: () => Promise<void>;
 }
 
@@ -93,6 +99,16 @@ export function useBindingRoster<T>(
     }
   }
 
+  function reset() {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    seqRef.current++; // invalidate any in-flight/pending response so it can't land after reset
+    openedRef.current = false; // re-arm: the next load() fetches fresh
+    setRoster(null);
+    setQuery('');
+    setError(null);
+    setLoading(false);
+  }
+
   async function load() {
     if (openedRef.current) return;
     openedRef.current = true;
@@ -107,5 +123,5 @@ export function useBindingRoster<T>(
     debounceRef.current = setTimeout(() => void fetchRoster(next), SEARCH_DEBOUNCE_MS);
   }
 
-  return { roster, loading, error, capped, query, search, load };
+  return { roster, loading, error, capped, query, search, reset, load };
 }
