@@ -32,13 +32,13 @@ export type ProposalStatus = (typeof PROPOSAL_STATUSES)[number];
  */
 export interface StructureChangeProposalView {
   id: string;
-  /** The proposal subject — `'map'` in v1 (module_config / policy are additive later). */
+  /** The proposal subject — `'map'` | `'module_config'` | `'policy'` (f-governance-plus t-1). */
   subjectType: string;
-  /** The target — the map's graphSlug in v1. */
+  /** The target — a map/graph slug, a module slug, or a policy kind. */
   subjectId: string;
-  /** The published version the diff was made against (conflict detection); null if none. */
+  /** The version the diff was made against (map/module_config conflict detection); null for policy. */
   baseVersion: number | null;
-  /** The full proposed map definition (whole-snapshot) — validated server-side, opaque here. */
+  /** The proposed content (map definition / config value / policy payload) — validated server-side. */
   proposedDefinition: unknown;
   /** pending | approved | rejected | published. */
   status: ProposalStatus;

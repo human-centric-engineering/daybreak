@@ -137,8 +137,8 @@ describe('POST /proposals', () => {
     );
   });
 
-  it('400s a non-map subjectType (body validation)', async () => {
-    const res = await listRoute.POST(req('POST', { subjectType: 'policy', subjectId: 'g' }));
+  it('400s an unknown subjectType (body validation)', async () => {
+    const res = await listRoute.POST(req('POST', { subjectType: 'workflow', subjectId: 'g' }));
     expect(res.status).toBe(400);
     expect(svc.submit).not.toHaveBeenCalled();
   });

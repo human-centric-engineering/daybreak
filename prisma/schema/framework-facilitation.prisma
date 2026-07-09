@@ -203,10 +203,10 @@ model FacilitationPolicy {
 // (the approving admin) is a hand-FK to core `User`, `ON DELETE SET NULL` (retained audit).
 model StructureChangeProposal {
   id                 String   @id @default(cuid())
-  subjectType        String // 'map' (v1); CHECK-constrained. module_config/policy are additive later
-  subjectId          String // the target map's graphSlug (v1)
-  baseVersion        Int? // the published version the diff was made against (conflict detection); null if none published yet
-  proposedDefinition Json // the full proposed map definition (whole-snapshot)
+  subjectType        String // 'map' | 'module_config' | 'policy' — CHECK-constrained (widened, f-governance-plus t-1)
+  subjectId          String // names the target: a map/graph slug, a module slug, or a policy kind
+  baseVersion        Int? // the version the diff was made against (map/module_config conflict detection); null for policy or when none published yet
+  proposedDefinition Json // the proposed content: a map definition, a module config value, or a policy payload
   status             String   @default("pending") // pending | approved | rejected | published — CHECK-constrained
   riskClass          String   @default("unclassified") // risk classification; the auto-approve taxonomy is deferred (§9.2)
   createdBy          String // "agent:<slug>" or a user id — no @relation (admits agent authorship, X6)
