@@ -70,6 +70,20 @@ describe('listSlotValueHeadsForAdmin', () => {
     expect(prismaMock.slotValue.count).toHaveBeenCalledWith({ where });
   });
 
+  it('orders by capturedAt desc with a unique id tiebreaker for deterministic paging', async () => {
+    prismaMock.slotValue.findMany.mockResolvedValue([]);
+
+    await listSlotValueHeadsForAdmin({ page: 1, limit: 10, reveal: false });
+
+    // The final `id` key breaks capturedAt/slotSlug ties so the SSR page and the reveal
+    // re-fetch return the same window (no dead "Reveal") and `?page=` is stable.
+    expect(prismaMock.slotValue.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        orderBy: [{ capturedAt: 'desc' }, { slotSlug: 'asc' }, { id: 'asc' }],
+      })
+    );
+  });
+
   it('omits absent filters from the where clause', async () => {
     prismaMock.slotValue.findMany.mockResolvedValue([]);
 

@@ -16,7 +16,7 @@
  */
 
 import type { SlotValueHeadView } from '@/lib/framework/data-slots/view';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -54,17 +54,31 @@ export function SlotValuesBrowser({ slotSlug, initialValues, total }: SlotValues
   const [revealedIds, setRevealedIds] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Shared in-flight reveal fetch, so concurrent first-reveals coalesce into ONE
+  // request (one audit entry) rather than racing the completed-cache guard.
+  const inFlight = useRef<Promise<Map<string, RevealedForm>> | null>(null);
 
   async function ensureRevealedCache(): Promise<Map<string, RevealedForm>> {
     if (revealedCache) return revealedCache;
-    const data = await apiClient.get<SlotValueHeadView[]>('/api/v1/admin/framework/slot-values', {
-      params: { slotSlug, reveal: true, limit: VALUES_PAGE_LIMIT },
-    });
-    const cache = new Map<string, RevealedForm>(
-      data.map((r) => [r.id, { value: r.value, valueJson: r.valueJson }])
-    );
-    setRevealedCache(cache);
-    return cache;
+    if (inFlight.current) return inFlight.current;
+
+    const fetchPromise = (async () => {
+      const data = await apiClient.get<SlotValueHeadView[]>('/api/v1/admin/framework/slot-values', {
+        params: { slotSlug, reveal: true, limit: VALUES_PAGE_LIMIT },
+      });
+      const cache = new Map<string, RevealedForm>(
+        data.map((r) => [r.id, { value: r.value, valueJson: r.valueJson }])
+      );
+      setRevealedCache(cache);
+      return cache;
+    })();
+
+    inFlight.current = fetchPromise;
+    try {
+      return await fetchPromise;
+    } finally {
+      inFlight.current = null;
+    }
   }
 
   async function handleReveal(id: string) {
@@ -88,8 +102,6 @@ export function SlotValuesBrowser({ slotSlug, initialValues, total }: SlotValues
     });
   }
 
-  const shownCount = initialValues.length;
-
   return (
     <div className="space-y-3">
       {error && (
@@ -112,7 +124,7 @@ export function SlotValuesBrowser({ slotSlug, initialValues, total }: SlotValues
             </TableRow>
           </TableHeader>
           <TableBody>
-            {shownCount === 0 ? (
+            {initialValues.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-muted-foreground py-8 text-center">
                   No values captured for this slot yet.
@@ -120,8 +132,11 @@ export function SlotValuesBrowser({ slotSlug, initialValues, total }: SlotValues
               </TableRow>
             ) : (
               initialValues.map((v) => {
-                const isRevealed = revealedIds.has(v.id) && revealedCache?.has(v.id);
-                const shown = isRevealed ? revealedCache!.get(v.id)! : { value: v.value };
+                // The revealed form for this row, if the operator revealed it AND the
+                // reveal fetch returned it; `undefined` otherwise (no `!` assertions).
+                const revealed = revealedIds.has(v.id) ? revealedCache?.get(v.id) : undefined;
+                const isRevealed = revealed !== undefined;
+                const shownValue = revealed?.value ?? v.value;
                 const canReveal = v.masked && v.sensitivity !== 'special_category';
 
                 return (
@@ -133,7 +148,7 @@ export function SlotValuesBrowser({ slotSlug, initialValues, total }: SlotValues
                       <span
                         className={v.masked && !isRevealed ? 'text-muted-foreground italic' : ''}
                       >
-                        {shown.value}
+                        {shownValue}
                       </span>
                       {canReveal &&
                         (isRevealed ? (
@@ -179,9 +194,9 @@ export function SlotValuesBrowser({ slotSlug, initialValues, total }: SlotValues
         </Table>
       </div>
 
-      {total > shownCount && (
+      {total > initialValues.length && (
         <p className="text-muted-foreground text-xs">
-          Showing the first {shownCount} of {total} values.
+          Showing the first {initialValues.length} of {total} values.
         </p>
       )}
     </div>

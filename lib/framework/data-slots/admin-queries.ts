@@ -49,8 +49,15 @@ function isMaskedSensitivity(sensitivity: string): boolean {
  * newest-captured first, optionally narrowed to one `slotSlug` and/or one `userId`.
  * Each row's `sensitivity` is stitched from its definition with one batched lookup
  * over the page's distinct slugs (no N+1), and `value`/`valueJson` are read-masked
- * per that grade unless `reveal` is set. The `capturedAt`/`slotSlug` sort matches the
- * engine's own head ordering so paging is stable.
+ * per that grade unless `reveal` is set.
+ *
+ * The sort ends in a unique `id` tiebreaker so paging is **deterministic**: unlike the
+ * per-user engine (`getSlotHeads`, where `slotSlug` is unique per user and breaks every
+ * `capturedAt` tie), this cross-user query can hold many rows sharing a `slotSlug`
+ * (and, when the `slotSlug` filter is set, that key is constant) — so without `id` two
+ * executions could order `capturedAt` ties differently, drifting rows across the page
+ * boundary. That would desync the masked SSR page from the `reveal` re-fetch (a row
+ * shown but absent from the reveal cache → a dead "Reveal") and make `?page=` unstable.
  */
 export async function listSlotValueHeadsForAdmin(
   params: ListSlotValuesParams
@@ -66,7 +73,7 @@ export async function listSlotValueHeadsForAdmin(
   const [rows, total] = await Promise.all([
     prisma.slotValue.findMany({
       where,
-      orderBy: [{ capturedAt: 'desc' }, { slotSlug: 'asc' }],
+      orderBy: [{ capturedAt: 'desc' }, { slotSlug: 'asc' }, { id: 'asc' }],
       skip: (page - 1) * limit,
       take: limit,
     }),

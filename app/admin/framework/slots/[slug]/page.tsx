@@ -22,27 +22,24 @@ interface SlotDetail {
   total: number;
 }
 
-/**
- * The definition (found in the full slot-definitions list — counts are small, so no
- * per-slug endpoint) plus the first, masked page of its captured values. Returns
- * `'not-found'` when no definition declares the slug. A values-fetch failure degrades
- * to an empty page (the browser stays usable), never throwing.
- */
-async function getSlotDetail(slug: string): Promise<SlotDetail | 'not-found'> {
-  let definition: SlotDefinitionView | undefined;
+/** The definition for `slug` (found in the full list — counts are small, so no per-slug
+ *  endpoint), or `undefined` if none declares it. Never throws. */
+async function loadDefinition(slug: string): Promise<SlotDefinitionView | undefined> {
   try {
     const res = await serverFetch('/api/v1/admin/framework/slot-definitions');
     if (res.ok) {
       const body = await parseApiResponse<SlotDefinitionView[]>(res);
-      if (body.success) definition = body.data.find((d) => d.slug === slug);
+      if (body.success) return body.data.find((d) => d.slug === slug);
     }
   } catch (err) {
     logger.error('framework slot detail page: definition fetch failed', err);
   }
-  if (!definition) return 'not-found';
+  return undefined;
+}
 
-  let values: SlotValueHeadView[] = [];
-  let total = 0;
+/** The first, masked page of `slug`'s captured values. A fetch failure degrades to an
+ *  empty page (the browser stays usable), never throwing. */
+async function loadValues(slug: string): Promise<{ values: SlotValueHeadView[]; total: number }> {
   try {
     const res = await serverFetch(
       `/api/v1/admin/framework/slot-values?slotSlug=${encodeURIComponent(slug)}&limit=${VALUES_PAGE_LIMIT}`
@@ -50,15 +47,27 @@ async function getSlotDetail(slug: string): Promise<SlotDetail | 'not-found'> {
     if (res.ok) {
       const body = await parseApiResponse<SlotValueHeadView[]>(res);
       if (body.success) {
-        values = body.data;
-        total = typeof body.meta?.total === 'number' ? body.meta.total : body.data.length;
+        const total = typeof body.meta?.total === 'number' ? body.meta.total : body.data.length;
+        return { values: body.data, total };
       }
     }
   } catch (err) {
     logger.error('framework slot detail page: values fetch failed', err);
   }
+  return { values: [], total: 0 };
+}
 
-  return { definition, values, total };
+/**
+ * The definition plus the first masked page of its values. Returns `'not-found'` when
+ * no definition declares the slug. The two reads are **independent** (values key on the
+ * slug, not the resolved definition), so they run in parallel — the values fetch is
+ * wasted only on the rare not-found path, in exchange for halving the common-path
+ * latency.
+ */
+async function getSlotDetail(slug: string): Promise<SlotDetail | 'not-found'> {
+  const [definition, valuesPage] = await Promise.all([loadDefinition(slug), loadValues(slug)]);
+  if (!definition) return 'not-found';
+  return { definition, values: valuesPage.values, total: valuesPage.total };
 }
 
 export default async function FrameworkSlotDetailPage({
