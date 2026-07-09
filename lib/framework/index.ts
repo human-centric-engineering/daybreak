@@ -57,6 +57,8 @@ import { guidanceCapabilities } from '@/lib/framework/guidance/capabilities';
 import { engagementCapabilities } from '@/lib/framework/engagement/capabilities';
 import { emergenceCapabilities } from '@/lib/framework/facilitation/emergence/capabilities';
 import { registerProactiveGuidanceStep } from '@/lib/framework/facilitation/overlays/proactive-step';
+import { registerMapPublishListener } from '@/lib/framework/facilitation/map/publish-hooks';
+import { autoEmbedAfterPublish } from '@/lib/framework/facilitation/overlays/embed-sync';
 
 export function initFramework(): void {
   registerContextContributor(MODULE_CONTEXT_TYPE, loadModuleContext);
@@ -86,6 +88,9 @@ export function initFramework(): void {
   // so an operator can schedule the throttled nudge sweep via an `AiWorkflowSchedule` cron. Registering
   // the BE executor at init (the engine runs server-side); no workflow/schedule row is seeded.
   registerProactiveGuidanceStep();
+  // Auto-embed on publish (f-governance-plus t-4, F9): re-embed a map's nodes after every publish, via
+  // the map's post-publish hook seam (keeps the map spine free of an overlays import). Fire-and-forget.
+  registerMapPublishListener(autoEmbedAfterPublish);
 }
 
 export async function syncFramework(): Promise<void> {

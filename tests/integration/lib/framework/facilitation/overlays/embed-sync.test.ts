@@ -12,14 +12,22 @@ vi.mock('@/lib/framework/facilitation/map/version-service', () => ({ getPublishe
 vi.mock('@/lib/framework/modules/registry', () => ({ getRegisteredModule: vi.fn() }));
 vi.mock('@/lib/orchestration/knowledge/embedder', () => ({ embedBatch: vi.fn() }));
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({ logAdminAction: vi.fn() }));
+vi.mock('@/lib/logging', () => ({ logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() } }));
 
-import { syncMapNodeEmbeddings } from '@/lib/framework/facilitation/overlays/embed-sync';
+import {
+  syncMapNodeEmbeddings,
+  autoEmbedAfterPublish,
+} from '@/lib/framework/facilitation/overlays/embed-sync';
 import { prisma } from '@/lib/db/client';
 import { getPublishedMap } from '@/lib/framework/facilitation/map/version-service';
 import { getRegisteredModule } from '@/lib/framework/modules/registry';
 import { embedBatch } from '@/lib/orchestration/knowledge/embedder';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
+import { logger } from '@/lib/logging';
 import { NotFoundError } from '@/lib/api/errors';
+
+/** Flush the fire-and-forget promise chain (all mocks resolve synchronously). */
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 const mapNode = (key: string, over: Record<string, unknown> = {}) => ({
   key,
@@ -133,5 +141,38 @@ describe('syncMapNodeEmbeddings', () => {
     expect(logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'framework_node_embedding.sync' })
     );
+  });
+});
+
+describe('autoEmbedAfterPublish (fire-and-forget, f-governance-plus t-4)', () => {
+  it('runs the embed for the published map (does not throw synchronously)', async () => {
+    expect(() => autoEmbedAfterPublish('primary', 'admin-1')).not.toThrow();
+    await flush();
+    expect(embedBatch).toHaveBeenCalled();
+    expect(prisma.$executeRawUnsafe).toHaveBeenCalledTimes(2);
+  });
+
+  it('threads a null actor through to the sync (system-driven auto-embed)', async () => {
+    autoEmbedAfterPublish('primary', null);
+    await flush();
+    expect(logAdminAction).toHaveBeenCalledWith(expect.objectContaining({ userId: null }));
+  });
+
+  it('swallows a real failure — logs a warning, never throws', async () => {
+    vi.mocked(embedBatch).mockRejectedValue(new Error('embedder down'));
+    autoEmbedAfterPublish('primary', 'admin-1');
+    await flush();
+    expect(logger.warn).toHaveBeenCalledWith(
+      'Auto-embed after publish failed (advisory, non-fatal)',
+      expect.objectContaining({ slug: 'primary' })
+    );
+  });
+
+  it('is silent on NotFoundError (nothing published to embed yet)', async () => {
+    vi.mocked(getPublishedMap).mockResolvedValue(null);
+    autoEmbedAfterPublish('primary', 'admin-1');
+    await flush();
+    expect(logger.warn).not.toHaveBeenCalled();
+    expect(embedBatch).not.toHaveBeenCalled();
   });
 });

@@ -143,6 +143,11 @@ const { prismaFake, resetStore } = vi.hoisted(() => {
 
 vi.mock('@/lib/db/client', () => ({ prisma: prismaFake }));
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({ logAdminAction: vi.fn() }));
+// Post-publish hook seam (f-governance-plus t-4) — mock it so the version tests don't fire real
+// listeners (auto-embed), and so we can assert every publish path notifies it.
+vi.mock('@/lib/framework/facilitation/map/publish-hooks', () => ({
+  notifyMapPublished: vi.fn(),
+}));
 
 import {
   createGraph,
@@ -160,6 +165,7 @@ import {
 import { mapDefinitionSchema } from '@/lib/framework/facilitation/map/schema';
 import type { MapDefinition } from '@/lib/framework/facilitation/map/schema';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
+import { notifyMapPublished } from '@/lib/framework/facilitation/map/publish-hooks';
 import { NotFoundError, ValidationError } from '@/lib/api/errors';
 
 const USER = 'user-1';
@@ -486,5 +492,50 @@ describe('listVersions / getVersion', () => {
     await seedThreeVersions();
     expect((await getVersion('main', 2)).version).toBe(2);
     await expect(getVersion('main', 99)).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe('auto-embed-on-publish (f-governance-plus t-4)', () => {
+  it('notifies the publish hook after createGraph publishes a v1 (non-empty initial map)', async () => {
+    await createGraph({ slug: 'main', name: 'Main', definition: validMap(), userId: USER });
+    expect(notifyMapPublished).toHaveBeenCalledWith('main', USER);
+  });
+
+  it('does NOT notify the hook for an empty create (nothing published)', async () => {
+    await createGraph({ slug: 'main', name: 'Main', userId: USER });
+    expect(notifyMapPublished).not.toHaveBeenCalled();
+  });
+
+  it('notifies the publish hook after publishDraft', async () => {
+    await createGraph({ slug: 'main', name: 'Main', userId: USER });
+    await saveDraft({ slug: 'main', definition: validMap(), userId: USER });
+    vi.mocked(notifyMapPublished).mockClear();
+    await publishDraft({ slug: 'main', userId: USER });
+    expect(notifyMapPublished).toHaveBeenCalledWith('main', USER);
+  });
+
+  it('notifies the publish hook after publishDefinition, threading a null actor unchanged', async () => {
+    await createGraph({ slug: 'main', name: 'Main', definition: validMap(), userId: USER });
+    vi.mocked(notifyMapPublished).mockClear();
+    await publishDefinition({
+      slug: 'main',
+      definition: validMap(),
+      createdBy: 'agent:onboarding',
+      actorUserId: null, // auto-approved publish → system actor flows to the embed
+    });
+    expect(notifyMapPublished).toHaveBeenCalledWith('main', null);
+  });
+
+  it('notifies the publish hook after rollback', async () => {
+    await createGraph({ slug: 'main', name: 'Main', definition: validMap(), userId: USER }); // v1
+    await publishDefinition({
+      slug: 'main',
+      definition: validMap(),
+      createdBy: USER,
+      actorUserId: USER,
+    }); // v2
+    vi.mocked(notifyMapPublished).mockClear();
+    await rollback({ slug: 'main', targetVersion: 1, userId: USER });
+    expect(notifyMapPublished).toHaveBeenCalledWith('main', USER);
   });
 });
