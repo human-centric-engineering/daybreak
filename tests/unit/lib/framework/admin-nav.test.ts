@@ -43,6 +43,39 @@ describe('initFrameworkNav', () => {
     expect(journeys?.icon).toBeDefined();
   });
 
+  it('registers a Slots item (f-admin-surfaces t-1)', () => {
+    initFrameworkNav();
+
+    const framework = getRegisteredNavSections().find((s) => s.title === 'Framework');
+    const slots = framework?.items?.find((i) => i.href === '/admin/framework/slots');
+    expect(slots).toBeDefined();
+    expect(slots?.label).toBe('Slots');
+    expect(slots?.description).toBeTruthy();
+    expect(slots?.icon).toBeDefined();
+  });
+
+  it('registers a Policies item (f-admin-surfaces t-2)', () => {
+    initFrameworkNav();
+
+    const framework = getRegisteredNavSections().find((s) => s.title === 'Framework');
+    const policies = framework?.items?.find((i) => i.href === '/admin/framework/policies');
+    expect(policies).toBeDefined();
+    expect(policies?.label).toBe('Policies');
+    expect(policies?.description).toBeTruthy();
+    expect(policies?.icon).toBeDefined();
+  });
+
+  it('registers a Proposals item (f-admin-surfaces t-3)', () => {
+    initFrameworkNav();
+
+    const framework = getRegisteredNavSections().find((s) => s.title === 'Framework');
+    const proposals = framework?.items?.find((i) => i.href === '/admin/framework/proposals');
+    expect(proposals).toBeDefined();
+    expect(proposals?.label).toBe('Proposals');
+    expect(proposals?.description).toBeTruthy();
+    expect(proposals?.icon).toBeDefined();
+  });
+
   it('registers an Atlas item (f-atlas t-2a)', () => {
     initFrameworkNav();
 

@@ -268,15 +268,37 @@ describe('WorkflowsTab', () => {
     expect(await screen.findByText(/showing the first 100 workflows/i)).toBeInTheDocument();
   });
 
-  it('does not start a second roster fetch while one is in flight', async () => {
+  it('refetches a fresh roster when the bind form reopens, so a failed load recovers', async () => {
     const user = userEvent.setup();
-    vi.mocked(apiClient.get).mockReturnValue(new Promise(() => {}));
+    vi.mocked(apiClient.get).mockRejectedValueOnce(new APIClientError('boom', 'ERR', 500));
 
     renderTab({ bindings: [] });
     await user.click(screen.getByRole('button', { name: /bind workflow/i }));
+    expect(await screen.findByText(/boom/i)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /cancel/i }));
-    await user.click(screen.getByRole('button', { name: /bind workflow/i }));
 
-    expect(apiClient.get).toHaveBeenCalledTimes(1);
+    vi.mocked(apiClient.get).mockResolvedValueOnce(ROSTER);
+    await user.click(screen.getByRole('button', { name: /bind workflow/i }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /workflow/i })).toBeEnabled());
+
+    expect(screen.queryByText(/boom/i)).not.toBeInTheDocument();
+    expect(apiClient.get).toHaveBeenCalledTimes(2);
+  });
+
+  it('threads a debounced ?q= search into the roster fetch', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiClient.get).mockResolvedValue(ROSTER);
+
+    renderTab({ bindings: [] });
+    await user.click(screen.getByRole('button', { name: /bind workflow/i }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /workflow/i })).toBeEnabled());
+
+    await user.type(screen.getByRole('searchbox', { name: /search workflows/i }), 'welc');
+
+    await waitFor(() =>
+      expect(apiClient.get).toHaveBeenCalledWith(
+        '/api/v1/admin/orchestration/workflows?isActive=true&isTemplate=false&limit=100&q=welc'
+      )
+    );
   });
 });

@@ -43,6 +43,7 @@ import {
   ROSTER_LIMIT,
   useBindingRoster,
 } from '@/components/admin/framework/module-detail/use-binding-roster';
+import { RosterSearch } from '@/components/admin/framework/module-detail/roster-search';
 import { useRowActions } from '@/components/admin/framework/module-detail/use-row-actions';
 import { RowConfirm } from '@/components/admin/framework/module-detail/row-confirm';
 import type { ModuleKnowledgeScopeView } from '@/lib/framework/modules/view';
@@ -164,6 +165,8 @@ function GrantSection<T>({
   function openForm() {
     setAdding(true);
     setErrors([]);
+    setSelectedId('');
+    roster.reset();
     void roster.load();
   }
 
@@ -214,6 +217,13 @@ function GrantSection<T>({
           onSubmit={(e) => void grant(e)}
           className="bg-muted/40 space-y-4 rounded-md border p-4"
         >
+          <RosterSearch
+            roster={roster}
+            noun={noun}
+            id={`grant-${paramKey}-search`}
+            onSearchChange={() => setSelectedId('')}
+          />
+
           {roster.error ? (
             <p className="text-destructive text-sm" role="alert">
               {roster.error}
@@ -242,10 +252,10 @@ function GrantSection<T>({
             </div>
           )}
 
-          {roster.capped && !roster.error && (
+          {roster.capped && !roster.error && roster.query === '' && (
             <p className="text-muted-foreground text-xs">
-              Showing the first {ROSTER_LIMIT} {title.toLowerCase()}. Search isn&rsquo;t available
-              yet; if the one you want isn&rsquo;t listed, it may be past the cap.
+              Showing the first {ROSTER_LIMIT} {title.toLowerCase()}. If the one you want
+              isn&rsquo;t listed, type above to search the full set.
             </p>
           )}
 
