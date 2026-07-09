@@ -32,7 +32,7 @@ const ctx = (over: Partial<GuardEventContext> = {}): GuardEventContext => ({
 });
 const event = (over: Partial<GuardEvent> = {}): GuardEvent => ({
   guard: 'output',
-  outcome: 'blocked',
+  outcome: 'block',
   ...over,
 });
 const policy = (payload: unknown) => ({ id: 'fp-1', kind: 'escalation', payload });
@@ -60,7 +60,7 @@ describe('handleFacilitationGuardEvent', () => {
 
   it('notifies + logs when a policy matches the role, guard and severity', async () => {
     vi.mocked(listEnabledFacilitationPolicies).mockResolvedValue([policy(escPayload())] as never);
-    await handleFacilitationGuardEvent(ctx(), event({ outcome: 'blocked' }));
+    await handleFacilitationGuardEvent(ctx(), event({ outcome: 'block' }));
     expect(notifyEscalation).toHaveBeenCalledWith(
       expect.objectContaining({
         agentId: 'a1',
@@ -69,7 +69,7 @@ describe('handleFacilitationGuardEvent', () => {
         priority: 'high',
         metadata: expect.objectContaining({
           guard: 'output',
-          outcome: 'blocked',
+          outcome: 'block',
           role: 'onboarding',
         }),
       })
@@ -99,7 +99,7 @@ describe('handleFacilitationGuardEvent', () => {
     vi.mocked(listEnabledFacilitationPolicies).mockResolvedValue([
       policy(escPayload({ signal: { guard: 'output', outcome: 'blocked' } })),
     ] as never);
-    await handleFacilitationGuardEvent(ctx(), event({ outcome: 'flagged' }));
+    await handleFacilitationGuardEvent(ctx(), event({ outcome: 'warn_and_continue' }));
     expect(notifyEscalation).not.toHaveBeenCalled();
   });
 
@@ -107,7 +107,7 @@ describe('handleFacilitationGuardEvent', () => {
     vi.mocked(listEnabledFacilitationPolicies).mockResolvedValue([
       policy(escPayload({ signal: { guard: 'output', outcome: 'flagged' } })),
     ] as never);
-    await handleFacilitationGuardEvent(ctx(), event({ outcome: 'blocked' }));
+    await handleFacilitationGuardEvent(ctx(), event({ outcome: 'block' }));
     expect(notifyEscalation).toHaveBeenCalledOnce();
   });
 

@@ -25,10 +25,8 @@ import { logger } from '@/lib/logging';
 import type { LlmMessage } from '@/lib/orchestration/llm/types';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
-import {
-  runStructuredCompletion,
-  tryParseJson,
-} from '@/lib/orchestration/evaluations/parse-structured';
+import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
+import { tryParseJson } from '@/lib/orchestration/evaluations/parse-structured';
 import { SLOT_DATA_TYPE } from '@/lib/framework/data-slots/vocabulary';
 import {
   typedValueSchema,

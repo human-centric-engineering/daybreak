@@ -21,12 +21,16 @@ vi.mock('@/lib/db/client', () => ({
 vi.mock('@/lib/email/send', () => ({ sendEmail: vi.fn() }));
 vi.mock('@/lib/api/server-fetch', () => ({ getBaseUrl: () => 'https://app.test' }));
 vi.mock('@/lib/logging', () => ({ logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() } }));
+vi.mock('@/lib/framework/facilitation/overlays/nudge-channel', () => ({
+  resolveNudgeChannelConfig: vi.fn(),
+}));
 
 import { deliverProactiveNudges } from '@/lib/framework/facilitation/overlays/nudge';
 import { runProactiveGuidanceSweep } from '@/lib/framework/facilitation/overlays/proactive-sweep';
 import { listRecentlyNudgedJourneyIds } from '@/lib/framework/facilitation/overlays/queries';
 import { prisma } from '@/lib/db/client';
 import { sendEmail } from '@/lib/email/send';
+import { resolveNudgeChannelConfig } from '@/lib/framework/facilitation/overlays/nudge-channel';
 
 const candidate = (userId: string, journeyId: string) => ({
   userId,
@@ -44,6 +48,9 @@ beforeEach(() => {
   vi.mocked(prisma.user.findMany).mockResolvedValue([] as never);
   vi.mocked(prisma.frameworkJourneyNudge.upsert).mockResolvedValue({} as never);
   vi.mocked(sendEmail).mockResolvedValue({ status: 'sent' } as never);
+  // Default channel: email only (f-overlays behaviour). Webhook tests override this.
+  vi.mocked(resolveNudgeChannelConfig).mockReturnValue({ emailEnabled: true, webhookUrl: null });
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, status: 200 }));
 });
 
 describe('deliverProactiveNudges', () => {
@@ -55,9 +62,11 @@ describe('deliverProactiveNudges', () => {
       candidates: 0,
       throttled: 0,
       emailsSent: 0,
+      webhooksSent: 0,
       journeysNudged: 0,
       noEmail: 0,
       failed: 0,
+      webhookFailed: 0,
     });
     expect(listRecentlyNudgedJourneyIds).not.toHaveBeenCalled();
     expect(sendEmail).not.toHaveBeenCalled();
@@ -199,5 +208,84 @@ describe('deliverProactiveNudges', () => {
     const result = await deliverProactiveNudges();
     // Email went out (counted), but the throttle row wasn't recorded (send not marked failed).
     expect(result).toMatchObject({ emailsSent: 1, journeysNudged: 0, failed: 0 });
+  });
+});
+
+describe('deliverProactiveNudges — webhook channel (f-governance-plus t-4)', () => {
+  const HOOK = 'https://hooks.test/nudge';
+
+  beforeEach(() => {
+    vi.mocked(runProactiveGuidanceSweep).mockResolvedValue({
+      scanned: 1,
+      candidates: [candidate('u1', 'j1')],
+    });
+    vi.mocked(prisma.user.findMany).mockResolvedValue([
+      { id: 'u1', email: 'u1@test.dev', name: 'U1' },
+    ] as never);
+  });
+
+  it('webhook-only: POSTs the grouped per-owner payload, sends no email, throttles', async () => {
+    vi.mocked(resolveNudgeChannelConfig).mockReturnValue({ emailEnabled: false, webhookUrl: HOOK });
+    const result = await deliverProactiveNudges({ now: new Date('2026-07-08T00:00:00Z') });
+
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    const [url, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(url).toBe(HOOK);
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({
+      event: 'proactive_nudge',
+      userId: 'u1',
+      email: 'u1@test.dev',
+      journeys: [
+        {
+          journeyId: 'j1',
+          graphSlug: 'onboarding',
+          nodeKey: 'next',
+          reason: candidate('u1', 'j1').reason,
+        },
+      ],
+      timestamp: '2026-07-08T00:00:00.000Z',
+    });
+    expect(result).toMatchObject({ emailsSent: 0, webhooksSent: 1, journeysNudged: 1, failed: 0 });
+  });
+
+  it('both: sends email AND webhook, throttling once', async () => {
+    vi.mocked(resolveNudgeChannelConfig).mockReturnValue({ emailEnabled: true, webhookUrl: HOOK });
+    const result = await deliverProactiveNudges();
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ emailsSent: 1, webhooksSent: 1, journeysNudged: 1 });
+  });
+
+  it('webhook non-OK is isolated; if email still delivered, the owner is throttled', async () => {
+    vi.mocked(resolveNudgeChannelConfig).mockReturnValue({ emailEnabled: true, webhookUrl: HOOK });
+    vi.mocked(fetch).mockResolvedValue({ ok: false, status: 500 } as never);
+    const result = await deliverProactiveNudges();
+    expect(result).toMatchObject({
+      emailsSent: 1,
+      webhooksSent: 0,
+      webhookFailed: 1,
+      journeysNudged: 1,
+    });
+  });
+
+  it('webhook-only with a failing POST: nothing delivered → NOT throttled (retried next sweep)', async () => {
+    vi.mocked(resolveNudgeChannelConfig).mockReturnValue({ emailEnabled: false, webhookUrl: HOOK });
+    vi.mocked(fetch).mockRejectedValue(new Error('network down'));
+    const result = await deliverProactiveNudges();
+    expect(result).toMatchObject({ webhooksSent: 0, webhookFailed: 1, journeysNudged: 0 });
+    expect(prisma.frameworkJourneyNudge.upsert).not.toHaveBeenCalled();
+  });
+
+  it('webhook can deliver to an owner with no email address', async () => {
+    vi.mocked(resolveNudgeChannelConfig).mockReturnValue({ emailEnabled: false, webhookUrl: HOOK });
+    vi.mocked(prisma.user.findMany).mockResolvedValue([
+      { id: 'u1', email: null, name: null },
+    ] as never);
+    const result = await deliverProactiveNudges();
+    expect(result).toMatchObject({ webhooksSent: 1, journeysNudged: 1, noEmail: 0 });
+    const [, init] = vi.mocked(fetch).mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string).email).toBeNull();
   });
 });

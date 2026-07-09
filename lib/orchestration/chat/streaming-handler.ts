@@ -59,8 +59,6 @@ import { withAgentBudgetLock } from '@/lib/orchestration/llm/budget-mutex';
 import { dispatchWebhookEvent } from '@/lib/orchestration/webhooks/dispatcher';
 import { resolveUserDisplayName } from '@/lib/orchestration/webhooks/payload-context';
 import { getOrchestrationSettings } from '@/lib/orchestration/settings';
-import { resolveGuardFloors, applyGuardFloor } from '@/lib/orchestration/chat/guard-floor';
-import { emitGuardEvent } from '@/lib/orchestration/chat/guard-events';
 import { scanForInjection } from '@/lib/orchestration/chat/input-guard';
 import { scanCitations, scanOutput } from '@/lib/orchestration/chat/output-guard';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
@@ -73,6 +71,12 @@ import {
   registerBuiltInCapabilities,
 } from '@/lib/orchestration/capabilities/registry';
 import { buildContext, invalidateContext } from '@/lib/orchestration/chat/context-builder';
+import {
+  collectGuardFloors,
+  applyGuardFloor,
+  type GuardFloors,
+} from '@/lib/orchestration/chat/guard-floor';
+import { emitGuardEvent, type GuardEventContext } from '@/lib/orchestration/chat/guard-events';
 import { buildMessagesAndBreakdown } from '@/lib/orchestration/chat/message-builder';
 import { estimateTokens } from '@/lib/orchestration/chat/token-estimator';
 import {
@@ -661,21 +665,6 @@ export class StreamingChatHandler {
 
       yield { type: 'start', conversationId: conversation.id, messageId: userMessage.id };
 
-      // The turn's guard context — shared by the guard-floor seam (raise a guard before detection)
-      // and the guard-event seam (observe a guard firing, e.g. escalate). Both are inert when no
-      // contributor is registered.
-      const guardCtx = {
-        contextType: request.contextType,
-        contextId: request.contextId,
-        agentId: agent.id,
-        userId: request.userId,
-        conversationId: conversation.id,
-      };
-      // Per-turn guard-mode floors from any registered contributor (generic seam; empty registry
-      // ⇒ `{}`, so the guard resolutions below are unchanged). Resolved once and applied at each
-      // guard site — a contributor can only RAISE a guard, never lower it.
-      const guardFloors = await resolveGuardFloors(guardCtx);
-
       // Emit hook event for message creation
       emitHookEvent('message.created', {
         conversationId: conversation.id,
@@ -685,6 +674,29 @@ export class StreamingChatHandler {
         userId: request.userId,
         role: 'user',
       });
+
+      // Guard-floor seam: a fork can RAISE any of the three inline guards
+      // (input / output / citation) to a minimum mode for this turn, keyed on
+      // the turn's (contextType, contextId, agentId). Collected once here and
+      // applied at each guard below. Empty registry → `{}` → guard modes
+      // resolve exactly as before (inert in vanilla Sunrise).
+      const guardFloors: GuardFloors = await collectGuardFloors({
+        contextType: request.contextType,
+        contextId: request.contextId,
+        agentId: agent.id,
+      });
+
+      // Guard-events seam: when an inline guard flags below, the handler emits
+      // a fire-and-forget event so a fork can OBSERVE the firing and react
+      // (notify / log / escalate). Built once here and reused at each guard.
+      // Empty registry → no-op (inert in vanilla Sunrise).
+      const guardEventContext: GuardEventContext = {
+        contextType: request.contextType,
+        contextId: request.contextId,
+        agentId: agent.id,
+        userId: request.userId,
+        conversationId: conversation.id,
+      };
 
       // Input guard — mode-dependent behaviour
       const scanResult = scanForInjection(request.message);
@@ -708,17 +720,13 @@ export class StreamingChatHandler {
             );
           }
         }
-        guardMode = applyGuardFloor(guardMode, guardFloors.input);
 
-        // An ARMED input guard detected a signal — notify any guard-event observer (e.g.
-        // escalation). Skipped when the guard is disabled ('none'), so a guard the operator turned
-        // off never escalates. Fire-and-forget: never delays or blocks the turn.
-        if (guardMode !== 'none') {
-          emitGuardEvent(guardCtx, {
-            guard: 'input',
-            outcome: guardMode === 'block' ? 'blocked' : 'flagged',
-          });
-        }
+        // Raise to the strictest registered floor for this turn (no-op when none).
+        guardMode = applyGuardFloor('input', guardMode, guardFloors);
+
+        // Post-detection observation (fire-and-forget; emitted before the block
+        // short-circuit so a `block` outcome is still observed).
+        emitGuardEvent(guardEventContext, 'input', guardMode);
 
         if (guardMode === 'block') {
           yield errorEvent('input_blocked', 'Message blocked by security policy.');
@@ -1216,15 +1224,13 @@ export class StreamingChatHandler {
                   );
                 }
               }
-              outputMode = applyGuardFloor(outputMode, guardFloors.output);
 
-              // Skipped when the guard is disabled ('none') — see the input guard above.
-              if (outputMode !== 'none') {
-                emitGuardEvent(guardCtx, {
-                  guard: 'output',
-                  outcome: outputMode === 'block' ? 'blocked' : 'flagged',
-                });
-              }
+              // Raise to the strictest registered floor for this turn (no-op when none).
+              outputMode = applyGuardFloor('output', outputMode, guardFloors);
+
+              // Post-detection observation (fire-and-forget; before the block
+              // short-circuit so a `block` outcome is still observed).
+              emitGuardEvent(guardEventContext, 'output', outputMode);
 
               if (outputMode === 'block') {
                 yield errorEvent(
@@ -1268,15 +1274,13 @@ export class StreamingChatHandler {
                   );
                 }
               }
-              citationMode = applyGuardFloor(citationMode, guardFloors.citation);
 
-              // Skipped when the guard is disabled ('none') — see the input guard above.
-              if (citationMode !== 'none') {
-                emitGuardEvent(guardCtx, {
-                  guard: 'citation',
-                  outcome: citationMode === 'block' ? 'blocked' : 'flagged',
-                });
-              }
+              // Raise to the strictest registered floor for this turn (no-op when none).
+              citationMode = applyGuardFloor('citation', citationMode, guardFloors);
+
+              // Post-detection observation (fire-and-forget; before the block
+              // short-circuit so a `block` outcome is still observed).
+              emitGuardEvent(guardEventContext, 'citation', citationMode);
 
               if (citationMode === 'block') {
                 yield errorEvent(
@@ -1803,7 +1807,9 @@ export class StreamingChatHandler {
           });
 
           if (request.contextType && request.contextId) {
-            invalidateContext(request.contextType, request.contextId, request.userId);
+            invalidateContext(request.contextType, request.contextId, {
+              userId: request.userId,
+            });
           }
 
           // run_workflow → pending approval: surface a card, persist a
@@ -2053,7 +2059,9 @@ export class StreamingChatHandler {
           yield { type: 'capability_results', results };
 
           if (request.contextType && request.contextId) {
-            invalidateContext(request.contextType, request.contextId, request.userId);
+            invalidateContext(request.contextType, request.contextId, {
+              userId: request.userId,
+            });
           }
 
           // Scan parallel results for any run_workflow pause. Each

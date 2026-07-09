@@ -28,11 +28,10 @@ import {
   resolveAgentDocumentAccess,
   invalidateAgentAccess,
   invalidateAllAgentAccess,
-} from '@/lib/orchestration/knowledge/resolveAgentDocumentAccess';
-import {
   registerAgentAccessContributor,
   __resetAgentAccessContributorsForTests,
-} from '@/lib/orchestration/knowledge/agent-access-contributors';
+} from '@/lib/orchestration/knowledge/resolveAgentDocumentAccess';
+import { logger } from '@/lib/logging';
 
 type Mocked = ReturnType<typeof vi.fn>;
 const agentFindUnique = prisma.aiAgent.findUnique as unknown as Mocked;
@@ -238,88 +237,124 @@ describe('resolveAgentDocumentAccess', () => {
     });
   });
 
-  describe('access contributors', () => {
-    it('unions a contributor’s documentIds into a restricted agent’s set', async () => {
+  describe('access-contributor seam (#403)', () => {
+    function restrictedWith(docs: string[] = [], tags: string[] = []): void {
       agentFindUnique.mockResolvedValueOnce({ knowledgeAccessMode: 'restricted' });
-      docGrantsFindMany.mockResolvedValueOnce([{ documentId: 'doc-direct' }]);
-      tagGrantsFindMany.mockResolvedValueOnce([]);
+      docGrantsFindMany.mockResolvedValueOnce(docs.map((documentId) => ({ documentId })));
+      tagGrantsFindMany.mockResolvedValueOnce(tags.map((tagId) => ({ tagId })));
+    }
+
+    it('unions a contributor’s documentIds into a restricted agent’s set', async () => {
+      restrictedWith(['doc-core']);
       registerAgentAccessContributor('mod', async () => ({ documentIds: ['doc-mod'] }));
 
       const result = await resolveAgentDocumentAccess('agent-c1');
 
       if (result.mode !== 'restricted') throw new Error('expected restricted');
-      expect(result.documentIds.sort()).toEqual(['doc-direct', 'doc-mod']);
+      expect(result.documentIds.sort()).toEqual(['doc-core', 'doc-mod']);
     });
 
-    it('expands a contributor’s tagIds into documents like a direct tag grant', async () => {
-      agentFindUnique.mockResolvedValueOnce({ knowledgeAccessMode: 'restricted' });
-      docGrantsFindMany.mockResolvedValueOnce([]);
-      tagGrantsFindMany.mockResolvedValueOnce([]);
-      docTagsFindMany.mockResolvedValueOnce([{ documentId: 'doc-from-mod-tag' }]);
-      registerAgentAccessContributor('mod', async () => ({ tagIds: ['mod-tag'] }));
+    it('expands a contributor’s tagIds through the tag→doc query (deduped with granted tags)', async () => {
+      restrictedWith([], ['tag-core']);
+      registerAgentAccessContributor('mod', async () => ({ tagIds: ['tag-mod', 'tag-core'] }));
+      docTagsFindMany.mockResolvedValueOnce([{ documentId: 'doc-from-tag' }]);
 
       const result = await resolveAgentDocumentAccess('agent-c2');
 
-      // The contributed tag must be part of the tag→doc expansion query.
-      expect(docTagsFindMany).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { tagId: { in: ['mod-tag'] } } })
-      );
       if (result.mode !== 'restricted') throw new Error('expected restricted');
-      expect(result.documentIds).toEqual(['doc-from-mod-tag']);
+      expect(result.documentIds).toEqual(['doc-from-tag']);
+      // tag-core (granted) and tag-mod (contributed) go into ONE deduped IN query.
+      expect(docTagsFindMany).toHaveBeenCalledTimes(1);
+      const inClause: string[] = docTagsFindMany.mock.calls[0][0].where.tagId.in;
+      expect([...inClause].sort()).toEqual(['tag-core', 'tag-mod']);
     });
 
-    it('dedups a document contributed and also directly granted', async () => {
-      agentFindUnique.mockResolvedValueOnce({ knowledgeAccessMode: 'restricted' });
-      docGrantsFindMany.mockResolvedValueOnce([{ documentId: 'shared' }]);
-      tagGrantsFindMany.mockResolvedValueOnce([]);
-      registerAgentAccessContributor('mod', async () => ({ documentIds: ['shared'] }));
+    it('deduplicates a contributed doc that overlaps a direct grant', async () => {
+      restrictedWith(['doc-shared']);
+      registerAgentAccessContributor('mod', async () => ({
+        documentIds: ['doc-shared', 'doc-mod'],
+      }));
 
       const result = await resolveAgentDocumentAccess('agent-c3');
 
       if (result.mode !== 'restricted') throw new Error('expected restricted');
-      expect(result.documentIds).toEqual(['shared']);
+      expect(result.documentIds.sort()).toEqual(['doc-mod', 'doc-shared']);
     });
 
-    it('does NOT consult contributors for a full agent (they only widen restricted)', async () => {
+    it('never consults contributors for a `full` agent (widen-only)', async () => {
       agentFindUnique.mockResolvedValueOnce({ knowledgeAccessMode: 'full' });
       const contributor = vi.fn(async () => ({ documentIds: ['doc-mod'] }));
       registerAgentAccessContributor('mod', contributor);
 
-      const result = await resolveAgentDocumentAccess('agent-c4');
+      const result = await resolveAgentDocumentAccess('agent-full');
 
       expect(result).toEqual({ mode: 'full' });
       expect(contributor).not.toHaveBeenCalled();
     });
 
-    it('ignores an async-throwing contributor and still resolves (never throws)', async () => {
-      agentFindUnique.mockResolvedValueOnce({ knowledgeAccessMode: 'restricted' });
-      docGrantsFindMany.mockResolvedValueOnce([{ documentId: 'doc-direct' }]);
-      tagGrantsFindMany.mockResolvedValueOnce([]);
-      registerAgentAccessContributor('bad', async () => {
-        throw new Error('contributor boom');
+    it('ignores a contributor that rejects, preserving the core grant set', async () => {
+      restrictedWith(['doc-core']);
+      registerAgentAccessContributor('boom', async () => {
+        throw new Error('contributor blew up');
+      });
+
+      const result = await resolveAgentDocumentAccess('agent-c4');
+
+      if (result.mode !== 'restricted') throw new Error('expected restricted');
+      expect(result.documentIds).toEqual(['doc-core']);
+      expect(vi.mocked(logger.error)).toHaveBeenCalled();
+    });
+
+    it('ignores a contributor that throws synchronously', async () => {
+      restrictedWith(['doc-core']);
+      // Not async-safe: throws before returning a promise.
+      registerAgentAccessContributor('sync-boom', () => {
+        throw new Error('sync throw');
       });
 
       const result = await resolveAgentDocumentAccess('agent-c5');
 
       if (result.mode !== 'restricted') throw new Error('expected restricted');
-      expect(result.documentIds).toEqual(['doc-direct']);
+      expect(result.documentIds).toEqual(['doc-core']);
     });
 
-    it('ignores a SYNCHRONOUSLY-throwing contributor and still resolves', async () => {
-      // A non-async contributor that throws before returning its promise: the throw
-      // happens inside the map callback, not the returned promise — the resolver must
-      // still catch it (Promise.resolve().then wrapper) and keep its never-throws contract.
-      agentFindUnique.mockResolvedValueOnce({ knowledgeAccessMode: 'restricted' });
-      docGrantsFindMany.mockResolvedValueOnce([{ documentId: 'doc-direct' }]);
-      tagGrantsFindMany.mockResolvedValueOnce([]);
-      registerAgentAccessContributor('sync-bad', (): Promise<never> => {
-        throw new Error('synchronous boom');
-      });
+    it('ignores a malformed (non-array) contribution shape without throwing or spreading garbage', async () => {
+      // A fork that violates the `string[]` contract must not crash the resolver
+      // (a bare number would make `.push(...)` throw "not iterable") nor poison
+      // the set (a string would spread into single characters).
+      restrictedWith(['doc-core']);
+      // Casts: these deliberately violate the `string[]` contract.
+      registerAgentAccessContributor('bad-number', (async () => ({ documentIds: 123 })) as never);
+      registerAgentAccessContributor('bad-string', (async () => ({
+        documentIds: 'doc-x',
+      })) as never);
+
+      const result = await resolveAgentDocumentAccess('agent-bad');
+
+      if (result.mode !== 'restricted') throw new Error('expected restricted');
+      expect(result.documentIds).toEqual(['doc-core']);
+    });
+
+    it('unions contributions from multiple contributors', async () => {
+      restrictedWith(['doc-core']);
+      registerAgentAccessContributor('a', async () => ({ documentIds: ['doc-a'] }));
+      registerAgentAccessContributor('b', async () => ({ documentIds: ['doc-b'] }));
 
       const result = await resolveAgentDocumentAccess('agent-c6');
 
       if (result.mode !== 'restricted') throw new Error('expected restricted');
-      expect(result.documentIds).toEqual(['doc-direct']);
+      expect(result.documentIds.sort()).toEqual(['doc-a', 'doc-b', 'doc-core']);
+    });
+
+    it('re-registering the same key replaces the prior contributor', async () => {
+      restrictedWith([]);
+      registerAgentAccessContributor('mod', async () => ({ documentIds: ['old'] }));
+      registerAgentAccessContributor('mod', async () => ({ documentIds: ['new'] }));
+
+      const result = await resolveAgentDocumentAccess('agent-c7');
+
+      if (result.mode !== 'restricted') throw new Error('expected restricted');
+      expect(result.documentIds).toEqual(['new']);
     });
   });
 });

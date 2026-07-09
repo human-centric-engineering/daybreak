@@ -1,67 +1,154 @@
 /**
- * Guard-floor contributor registry (core seam, added by Daybreak f-policies t-3). Proves the seam
- * is inert when empty (vanilla behaviour), raises never lowers, merges the strictest floor across
- * contributors, is idempotent per key, and swallows a throwing contributor.
+ * Tests for the guard-floor seam — per-turn minimum modes for the inline
+ * input / output / citation guards. A floor only ever RAISES a guard.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
-import {
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+
+vi.mock('@/lib/logging', () => ({
+  logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
+vi.mock('@/lib/app/guard-floor-contributors', () => ({
+  initAppGuardFloorContributors: vi.fn(),
+}));
+
+const { logger } = await import('@/lib/logging');
+const { initAppGuardFloorContributors } = await import('@/lib/app/guard-floor-contributors');
+const {
   registerGuardFloorContributor,
-  __resetGuardFloorContributorsForTests,
-  resolveGuardFloors,
+  collectGuardFloors,
   applyGuardFloor,
-} from '@/lib/orchestration/chat/guard-floor';
+  __resetGuardFloorContributorsForTests,
+} = await import('@/lib/orchestration/chat/guard-floor');
 
-const ctx = { contextType: 'facilitation', contextId: 'onboarding', agentId: 'a1' };
+const loggerError = logger.error as ReturnType<typeof vi.fn>;
+const initMock = initAppGuardFloorContributors as ReturnType<typeof vi.fn>;
 
-beforeEach(() => __resetGuardFloorContributorsForTests());
+const req = { contextType: 'module', contextId: 'm1', agentId: 'agent-1' };
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  __resetGuardFloorContributorsForTests();
+});
 
 describe('applyGuardFloor', () => {
-  it('returns base unchanged when there is no floor (inert)', () => {
-    expect(applyGuardFloor('log_only', undefined)).toBe('log_only');
-    expect(applyGuardFloor('none', undefined)).toBe('none');
+  it('returns the resolved mode unchanged when there is no floor for the guard', () => {
+    expect(applyGuardFloor('input', 'log_only', {})).toBe('log_only');
+    expect(applyGuardFloor('output', 'warn_and_continue', { input: 'block' })).toBe(
+      'warn_and_continue'
+    );
   });
 
-  it('raises to the floor when it is stricter', () => {
-    expect(applyGuardFloor('none', 'block')).toBe('block');
-    expect(applyGuardFloor('log_only', 'warn_and_continue')).toBe('warn_and_continue');
+  it('raises the resolved mode to a stricter floor', () => {
+    expect(applyGuardFloor('input', 'log_only', { input: 'block' })).toBe('block');
+    expect(applyGuardFloor('output', 'none', { output: 'warn_and_continue' })).toBe(
+      'warn_and_continue'
+    );
   });
 
-  it('never lowers below the base mode', () => {
-    expect(applyGuardFloor('block', 'log_only')).toBe('block');
-    expect(applyGuardFloor('warn_and_continue', 'warn_and_continue')).toBe('warn_and_continue');
+  it('does NOT lower the resolved mode when the floor is weaker', () => {
+    expect(applyGuardFloor('input', 'block', { input: 'log_only' })).toBe('block');
+    expect(applyGuardFloor('citation', 'warn_and_continue', { citation: 'none' })).toBe(
+      'warn_and_continue'
+    );
   });
 
-  it('treats an unknown base as lowest, so any known floor raises it', () => {
-    expect(applyGuardFloor('mystery', 'log_only')).toBe('log_only');
+  it('treats an unrecognised resolved mode as least strict, so a floor still raises it', () => {
+    expect(applyGuardFloor('input', 'garbage', { input: 'warn_and_continue' })).toBe(
+      'warn_and_continue'
+    );
   });
 });
 
-describe('resolveGuardFloors', () => {
-  it('returns {} when the registry is empty (the seam is inert — vanilla behaviour)', async () => {
-    expect(await resolveGuardFloors(ctx)).toEqual({});
+describe('collectGuardFloors', () => {
+  it('returns {} with an empty registry (no behaviour change)', async () => {
+    expect(await collectGuardFloors(req)).toEqual({});
   });
 
-  it('merges the strictest floor per guard across contributors', async () => {
-    registerGuardFloorContributor('a', async () => ({
-      input: 'warn_and_continue',
+  it('returns a single contributor’s floors', async () => {
+    registerGuardFloorContributor('policy', () => ({ output: 'warn_and_continue' }));
+    expect(await collectGuardFloors(req)).toEqual({ output: 'warn_and_continue' });
+  });
+
+  it('passes the turn identity to the contributor', async () => {
+    const contributor = vi.fn(() => ({ input: 'block' as const }));
+    registerGuardFloorContributor('policy', contributor);
+    await collectGuardFloors(req);
+    expect(contributor).toHaveBeenCalledWith(req);
+  });
+
+  it('merges multiple contributors to the strictest per guard', async () => {
+    registerGuardFloorContributor('a', () => ({ input: 'log_only', output: 'block' }));
+    registerGuardFloorContributor('b', () => ({ input: 'block', citation: 'warn_and_continue' }));
+
+    expect(await collectGuardFloors(req)).toEqual({
+      input: 'block', // b beats a
+      output: 'block',
+      citation: 'warn_and_continue',
+    });
+  });
+
+  it('awaits async contributors', async () => {
+    registerGuardFloorContributor('async', async () => ({ input: 'block' }));
+    expect(await collectGuardFloors(req)).toEqual({ input: 'block' });
+  });
+
+  it('ignores a contributor that throws — never fails the turn', async () => {
+    registerGuardFloorContributor('boom', () => {
+      throw new Error('policy bug');
+    });
+    registerGuardFloorContributor('ok', () => ({ output: 'block' }));
+
+    expect(await collectGuardFloors(req)).toEqual({ output: 'block' });
+    expect(loggerError).toHaveBeenCalledWith(
+      'guard-floor: contributor threw — ignoring',
+      expect.objectContaining({ contributorKey: 'boom', agentId: 'agent-1' })
+    );
+  });
+
+  it('ignores an async contributor that rejects', async () => {
+    registerGuardFloorContributor('reject', async () => {
+      throw new Error('async policy bug');
+    });
+    expect(await collectGuardFloors(req)).toEqual({});
+    expect(loggerError).toHaveBeenCalled();
+  });
+
+  it('ignores a malformed mode value returned by a contributor', async () => {
+    registerGuardFloorContributor('bad', () => ({
+      // A fork can't inject a bogus mode — unknown values are dropped.
+      input: 'super_block' as unknown as 'block',
       output: 'block',
     }));
-    registerGuardFloorContributor('b', async () => ({ input: 'block' })); // stricter input wins
-    expect(await resolveGuardFloors(ctx)).toEqual({ input: 'block', output: 'block' });
+    expect(await collectGuardFloors(req)).toEqual({ output: 'block' });
   });
 
-  it('skips a contributor that throws (a floor lookup must never break a turn)', async () => {
-    registerGuardFloorContributor('throws', async () => {
-      throw new Error('boom');
+  it('re-registering a key replaces the prior contributor (idempotent by key)', async () => {
+    registerGuardFloorContributor('policy', () => ({ input: 'block' }));
+    registerGuardFloorContributor('policy', () => ({ input: 'log_only' }));
+    expect(await collectGuardFloors(req)).toEqual({ input: 'log_only' });
+  });
+
+  it('runs the fork init exactly once across collections', async () => {
+    registerGuardFloorContributor('policy', () => ({ input: 'block' }));
+    await collectGuardFloors(req);
+    await collectGuardFloors(req);
+    expect(initMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('catches a throwing fork init — degrades without failing the turn and does not retry', async () => {
+    initMock.mockImplementationOnce(() => {
+      throw new Error('init boom');
     });
-    registerGuardFloorContributor('ok', async () => ({ citation: 'block' }));
-    expect(await resolveGuardFloors(ctx)).toEqual({ citation: 'block' });
-  });
 
-  it('replaces a contributor registered under the same key (idempotent)', async () => {
-    registerGuardFloorContributor('k', async () => ({ input: 'block' }));
-    registerGuardFloorContributor('k', async () => ({ input: 'log_only' }));
-    expect(await resolveGuardFloors(ctx)).toEqual({ input: 'log_only' });
+    expect(await collectGuardFloors(req)).toEqual({});
+    expect(loggerError).toHaveBeenCalledWith(
+      'guard-floor: initAppGuardFloorContributors threw — app guard-floor contributors disabled',
+      expect.objectContaining({ error: 'init boom' })
+    );
+
+    await collectGuardFloors(req);
+    expect(initMock).toHaveBeenCalledTimes(1);
   });
 });

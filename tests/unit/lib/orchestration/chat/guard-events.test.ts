@@ -1,87 +1,174 @@
 /**
- * Guard-event contributor registry (core seam, added by Daybreak f-emergence t-1). Proves the seam
- * is inert when empty, notifies every contributor fire-and-forget, swallows a throwing contributor,
- * and is idempotent per key. `emitGuardEvent` is fire-and-forget, so tests flush the microtask queue
- * before asserting.
+ * Tests for the guard-events seam — post-detection, fire-and-forget observation
+ * of an inline guard firing. Emission must never delay or break the turn.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import {
-  registerGuardEventContributor,
-  __resetGuardEventContributorsForTests,
-  emitGuardEvent,
-  type GuardEventContext,
-  type GuardEvent,
-} from '@/lib/orchestration/chat/guard-events';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const ctx: GuardEventContext = {
+vi.mock('@/lib/logging', () => ({
+  logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
+vi.mock('@/lib/app/guard-event-contributors', () => ({
+  initAppGuardEventContributors: vi.fn(),
+}));
+
+const { logger } = await import('@/lib/logging');
+const { initAppGuardEventContributors } = await import('@/lib/app/guard-event-contributors');
+const { registerGuardEventContributor, emitGuardEvent, __resetGuardEventContributorsForTests } =
+  await import('@/lib/orchestration/chat/guard-events');
+
+const loggerError = logger.error as ReturnType<typeof vi.fn>;
+const initMock = initAppGuardEventContributors as ReturnType<typeof vi.fn>;
+
+const ctx = {
   contextType: 'facilitation',
-  contextId: 'onboarding',
-  agentId: 'a1',
-  userId: 'u1',
-  conversationId: 'c1',
+  contextId: 'role-1',
+  agentId: 'agent-1',
+  userId: 'user-1',
+  conversationId: 'conv-1',
 };
-const event: GuardEvent = { guard: 'output', outcome: 'blocked' };
 
-/** Let the detached fire-and-forget contributor microtasks run. */
-const flush = () => new Promise((r) => setTimeout(r, 0));
+/** Flush the microtask + macrotask queues so fire-and-forget contributors run. */
+const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
-beforeEach(() => __resetGuardEventContributorsForTests());
+beforeEach(() => {
+  vi.clearAllMocks();
+  __resetGuardEventContributorsForTests();
+});
 
 describe('emitGuardEvent', () => {
-  it('is a no-op when the registry is empty (seam inert — vanilla behaviour)', async () => {
-    expect(() => emitGuardEvent(ctx, event)).not.toThrow();
-    await flush();
+  it('is a no-op with an empty registry (returns void, does not throw)', () => {
+    expect(() => emitGuardEvent(ctx, 'input', 'block')).not.toThrow();
   });
 
-  it('notifies every registered contributor with the ctx + event', async () => {
+  it('delivers (context, event) to a registered contributor', async () => {
+    const observer = vi.fn();
+    registerGuardEventContributor('obs', observer);
+
+    emitGuardEvent(ctx, 'output', 'warn_and_continue');
+    await flush();
+
+    expect(observer).toHaveBeenCalledWith(ctx, {
+      guard: 'output',
+      outcome: 'warn_and_continue',
+    });
+  });
+
+  it('is fire-and-forget — the contributor runs AFTER emit returns', async () => {
+    let ran = false;
+    registerGuardEventContributor('obs', () => {
+      ran = true;
+    });
+
+    emitGuardEvent(ctx, 'input', 'block');
+    // Deferred to a microtask: not yet run synchronously.
+    expect(ran).toBe(false);
+
+    await flush();
+    expect(ran).toBe(true);
+  });
+
+  it('normalises an unrecognised mode to outcome "none"', async () => {
+    const observer = vi.fn();
+    registerGuardEventContributor('obs', observer);
+
+    emitGuardEvent(ctx, 'citation', 'bogus_mode');
+    await flush();
+
+    expect(observer).toHaveBeenCalledWith(ctx, { guard: 'citation', outcome: 'none' });
+  });
+
+  it('passes every valid mode through as the outcome', async () => {
+    const observer = vi.fn();
+    registerGuardEventContributor('obs', observer);
+
+    for (const mode of ['none', 'log_only', 'warn_and_continue', 'block'] as const) {
+      emitGuardEvent(ctx, 'input', mode);
+    }
+    await flush();
+
+    const outcomes = observer.mock.calls.map((c) => (c[1] as { outcome: string }).outcome);
+    expect(outcomes).toEqual(['none', 'log_only', 'warn_and_continue', 'block']);
+  });
+
+  it('delivers to every registered contributor', async () => {
     const a = vi.fn();
     const b = vi.fn();
     registerGuardEventContributor('a', a);
     registerGuardEventContributor('b', b);
-    emitGuardEvent(ctx, event);
+
+    emitGuardEvent(ctx, 'input', 'block');
     await flush();
-    expect(a).toHaveBeenCalledWith(ctx, event);
-    expect(b).toHaveBeenCalledWith(ctx, event);
+
+    expect(a).toHaveBeenCalledTimes(1);
+    expect(b).toHaveBeenCalledTimes(1);
   });
 
-  it('returns synchronously without awaiting contributors (fire-and-forget)', () => {
-    let ran = false;
-    registerGuardEventContributor('slow', async () => {
-      await Promise.resolve();
-      ran = true;
+  it('swallows a synchronous throw and still runs the other contributors', async () => {
+    const good = vi.fn();
+    registerGuardEventContributor('boom', () => {
+      throw new Error('observer bug');
     });
-    emitGuardEvent(ctx, event); // returns before the async contributor resolves
-    expect(ran).toBe(false);
-  });
+    registerGuardEventContributor('good', good);
 
-  it('swallows a throwing contributor and still runs the others', async () => {
-    const ok = vi.fn();
-    registerGuardEventContributor('throws', () => {
-      throw new Error('boom');
-    });
-    registerGuardEventContributor('ok', ok);
-    expect(() => emitGuardEvent(ctx, event)).not.toThrow();
+    emitGuardEvent(ctx, 'input', 'block');
     await flush();
-    expect(ok).toHaveBeenCalledOnce();
+
+    expect(good).toHaveBeenCalledTimes(1);
+    expect(loggerError).toHaveBeenCalledWith(
+      'guard-events: contributor threw — ignoring',
+      expect.objectContaining({ contributorKey: 'boom', agentId: 'agent-1', guard: 'input' })
+    );
   });
 
-  it('swallows a rejecting async contributor', async () => {
-    registerGuardEventContributor('rejects', async () => {
-      throw new Error('async boom');
+  it('swallows an async rejection', async () => {
+    registerGuardEventContributor('reject', async () => {
+      throw new Error('async observer bug');
     });
-    emitGuardEvent(ctx, event);
-    await flush(); // no unhandled rejection
+
+    emitGuardEvent(ctx, 'input', 'block');
+    await flush();
+
+    expect(loggerError).toHaveBeenCalledWith(
+      'guard-events: contributor threw — ignoring',
+      expect.objectContaining({ contributorKey: 'reject' })
+    );
   });
 
-  it('replaces a contributor registered under the same key (idempotent)', async () => {
+  it('re-registering a key replaces the prior contributor (idempotent by key)', async () => {
     const first = vi.fn();
     const second = vi.fn();
-    registerGuardEventContributor('k', first);
-    registerGuardEventContributor('k', second);
-    emitGuardEvent(ctx, event);
+    registerGuardEventContributor('obs', first);
+    registerGuardEventContributor('obs', second);
+
+    emitGuardEvent(ctx, 'input', 'block');
     await flush();
+
     expect(first).not.toHaveBeenCalled();
-    expect(second).toHaveBeenCalledOnce();
+    expect(second).toHaveBeenCalledTimes(1);
+  });
+
+  it('runs the fork init exactly once across emits', async () => {
+    registerGuardEventContributor('obs', vi.fn());
+    emitGuardEvent(ctx, 'input', 'block');
+    emitGuardEvent(ctx, 'output', 'block');
+    await flush();
+    expect(initMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('catches a throwing fork init — degrades without failing, does not retry', async () => {
+    initMock.mockImplementationOnce(() => {
+      throw new Error('init boom');
+    });
+
+    expect(() => emitGuardEvent(ctx, 'input', 'block')).not.toThrow();
+    expect(loggerError).toHaveBeenCalledWith(
+      'guard-events: initAppGuardEventContributors threw — app guard-event contributors disabled',
+      expect.objectContaining({ error: 'init boom' })
+    );
+
+    emitGuardEvent(ctx, 'output', 'block');
+    expect(initMock).toHaveBeenCalledTimes(1);
   });
 });

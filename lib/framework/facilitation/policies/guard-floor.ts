@@ -12,9 +12,9 @@
  */
 
 import type {
-  GuardFloorContext,
-  GuardFloorContribution,
-  GuardFloorMode,
+  GuardFloorRequest,
+  GuardFloors,
+  GuardMode,
   GuardKind,
 } from '@/lib/orchestration/chat/guard-floor';
 import { FACILITATION_SURFACE_CONTEXT_TYPE } from '@/lib/framework/facilitation/agents/surface';
@@ -25,7 +25,7 @@ import { logger } from '@/lib/logging';
 /** The registration key for the core guard-floor seam (idempotent per key). */
 export const FACILITATION_GUARD_FLOOR_KEY = 'facilitation-guard-minimums';
 
-const RANK: Record<GuardFloorMode, number> = { log_only: 1, warn_and_continue: 2, block: 3 };
+const RANK: Record<GuardMode, number> = { none: 0, log_only: 1, warn_and_continue: 2, block: 3 };
 const GUARD_KINDS: readonly GuardKind[] = ['input', 'output', 'citation'];
 
 /**
@@ -33,15 +33,13 @@ const GUARD_KINDS: readonly GuardKind[] = ['input', 'output', 'citation'];
  * policies scoped to the turn's role (`contextId`). Returns the strictest minimum per guard across
  * matching policies, or `{}` when the turn isn't a facilitation surface or no policy applies.
  */
-export async function resolveFacilitationGuardFloor(
-  ctx: GuardFloorContext
-): Promise<GuardFloorContribution> {
+export async function resolveFacilitationGuardFloor(ctx: GuardFloorRequest): Promise<GuardFloors> {
   if (ctx.contextType !== FACILITATION_SURFACE_CONTEXT_TYPE || !ctx.contextId) return {};
 
   const policies = await listEnabledFacilitationPolicies('guard_minimum');
   if (policies.length === 0) return {};
 
-  const floor: GuardFloorContribution = {};
+  const floor: GuardFloors = {};
   for (const policy of policies) {
     const parsed = guardMinimumPayloadSchema.safeParse(policy.payload);
     if (!parsed.success) {

@@ -24,6 +24,7 @@ import { mapDefinitionSchema } from '@/lib/framework/facilitation/map/schema';
 import type { MapDefinition } from '@/lib/framework/facilitation/map/schema';
 import { validateMapFormat } from '@/lib/framework/facilitation/map/validate';
 import { validateGraphInvariants } from '@/lib/framework/facilitation/engine/invariants';
+import { notifyMapPublished } from '@/lib/framework/facilitation/map/publish-hooks';
 
 type Tx = Prisma.TransactionClient;
 
@@ -194,6 +195,10 @@ export async function createGraph(args: CreateGraphArgs): Promise<FacilitationGr
     clientIp: clientIp ?? null,
   });
 
+  // Auto-embed only when create published a v1 (a non-empty initial map); an empty map has nothing to
+  // embed (the on-demand route / a later publish will embed it once it has a version).
+  if (validated) notifyMapPublished(slug, userId);
+
   return graph;
 }
 
@@ -322,6 +327,9 @@ export async function publishDraft(args: PublishDraftArgs): Promise<PublishResul
     clientIp: clientIp ?? null,
   });
 
+  // Auto-embed the new published version (fire-and-forget, post-commit — see the post-publish hook seam).
+  notifyMapPublished(slug, userId);
+
   return result;
 }
 
@@ -410,6 +418,10 @@ export async function publishDefinition(args: PublishDefinitionArgs): Promise<Pu
     clientIp: clientIp ?? null,
   });
 
+  // Auto-embed the new published version (fire-and-forget, post-commit). `actorUserId` may be null
+  // (an auto-approved publish) — the system actor is recorded in the embed's own audit.
+  notifyMapPublished(slug, actorUserId);
+
   return result;
 }
 
@@ -469,6 +481,10 @@ export async function rollback(args: RollbackArgs): Promise<PublishResult> {
     metadata: { rolledBackToVersion: target.version },
     clientIp: clientIp ?? null,
   });
+
+  // Auto-embed the restored version (fire-and-forget, post-commit). Rollback publishes a NEW version
+  // pinned to the restored definition, so its embeddings must be regenerated like any other publish.
+  notifyMapPublished(slug, userId);
 
   return result;
 }

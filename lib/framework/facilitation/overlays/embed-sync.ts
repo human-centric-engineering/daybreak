@@ -5,14 +5,16 @@
  * is the framework adapter that composes node text and stores the vectors keyed on
  * `(graphSlug, nodeKey, version)`.
  *
- * On-demand only (an admin trigger) — embeddings cost money and maps change rarely; auto-embed on
- * publish is a documented follow-up. Idempotent: re-running upserts by the natural key. Staleness is
- * safe by construction — the key includes the published `version`, so after a republish the current
- * version simply has no rows until re-embedded and the advisory result degrades to empty (F9).
+ * Triggered two ways: on-demand (an admin route — the manual repair/backfill path) and, since
+ * f-governance-plus t-3, automatically after every map publish via `autoEmbedAfterPublish` (fire-and-
+ * forget, below). Idempotent: re-running upserts by the natural key. Staleness is safe by construction
+ * — the key includes the published `version`, so after a republish the current version simply has no
+ * rows until re-embedded and the advisory result degrades to empty (F9).
  */
 
 import { prisma } from '@/lib/db/client';
 import { NotFoundError } from '@/lib/api/errors';
+import { logger } from '@/lib/logging';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { embedBatch } from '@/lib/orchestration/knowledge/embedder';
 import { getPublishedMap } from '@/lib/framework/facilitation/map/version-service';
@@ -23,8 +25,9 @@ const ENTITY_TYPE = 'framework_node_embedding';
 
 export interface SyncMapNodeEmbeddingsArgs {
   slug: string;
-  /** The admin triggering the sync — the audit actor. */
-  actorUserId: string;
+  /** The actor — the admin triggering the sync, or `null` for a system-driven auto-embed (a publish
+   *  whose actor was itself null, e.g. an auto-approved `publishDefinition`). Audit actor only. */
+  actorUserId: string | null;
   clientIp?: string | null;
 }
 
@@ -141,4 +144,22 @@ export async function syncMapNodeEmbeddings(
     model: provenance.model,
     dimensions: provenance.dimensions,
   };
+}
+
+/**
+ * Fire-and-forget re-embed after a map publish (f-governance-plus t-3). Called by the map version
+ * service AFTER the publish transaction commits — NEVER inside it: embedding hits the network and
+ * must not fail or extend the publish. Embeddings are advisory (degrade to empty per F9) and the
+ * natural-key upsert makes re-runs idempotent, so a swallowed failure is safe — the on-demand route
+ * stays the manual repair/backfill path. A `NotFoundError` (nothing published to embed, e.g. an empty
+ * initial map) is benign and silent; any other failure is logged, not thrown.
+ */
+export function autoEmbedAfterPublish(slug: string, actorUserId: string | null): void {
+  void syncMapNodeEmbeddings({ slug, actorUserId }).catch((err: unknown) => {
+    if (err instanceof NotFoundError) return; // nothing to embed yet — benign
+    logger.warn('Auto-embed after publish failed (advisory, non-fatal)', {
+      slug,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
 }

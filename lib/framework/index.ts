@@ -27,7 +27,7 @@
  */
 
 import { registerContextContributor } from '@/lib/orchestration/chat/context-builder';
-import { registerAgentAccessContributor } from '@/lib/orchestration/knowledge/agent-access-contributors';
+import { registerAgentAccessContributor } from '@/lib/orchestration/knowledge/resolveAgentDocumentAccess';
 import { registerGuardFloorContributor } from '@/lib/orchestration/chat/guard-floor';
 import { registerGuardEventContributor } from '@/lib/orchestration/chat/guard-events';
 import {
@@ -58,6 +58,8 @@ import { engagementCapabilities } from '@/lib/framework/engagement/capabilities'
 import { emergenceCapabilities } from '@/lib/framework/facilitation/emergence/capabilities';
 import { registerProactiveGuidanceStep } from '@/lib/framework/facilitation/overlays/proactive-step';
 import { registerEvalSweepStep } from '@/lib/framework/facilitation/evaluation/sweep-step';
+import { registerMapPublishListener } from '@/lib/framework/facilitation/map/publish-hooks';
+import { autoEmbedAfterPublish } from '@/lib/framework/facilitation/overlays/embed-sync';
 
 export function initFramework(): void {
   registerContextContributor(MODULE_CONTEXT_TYPE, loadModuleContext);
@@ -91,6 +93,9 @@ export function initFramework(): void {
   // so an operator can cron the f-eval scorers + framework-rubric judge over recent framework
   // conversations via an `AiWorkflowSchedule`. BE executor registered at init; no schedule row seeded.
   registerEvalSweepStep();
+  // Auto-embed on publish (f-governance-plus t-4, F9): re-embed a map's nodes after every publish, via
+  // the map's post-publish hook seam (keeps the map spine free of an overlays import). Fire-and-forget.
+  registerMapPublishListener(autoEmbedAfterPublish);
 }
 
 export async function syncFramework(): Promise<void> {
