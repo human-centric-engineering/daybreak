@@ -95,14 +95,24 @@ describe('validateProposal — module_config', () => {
     expect((await validateProposal('module_config', 'welcome', {})).baseVersion).toBeNull();
   });
 
-  it('propagates a ValidationError from the config schema (no base read)', async () => {
+  it('propagates a ValidationError from the config schema (after resolving the base)', async () => {
     vi.mocked(validateModuleConfig).mockImplementation(() => {
       throw new ValidationError('bad config');
     });
     await expect(validateProposal('module_config', 'welcome', {})).rejects.toBeInstanceOf(
       ValidationError
     );
-    expect(getLatestModuleVersionNumber).not.toHaveBeenCalled();
+  });
+
+  it('propagates NotFoundError for an unknown module BEFORE validating the config (uniform target-not-found)', async () => {
+    vi.mocked(getLatestModuleVersionNumber).mockRejectedValue(
+      new NotFoundError('Module "nope" not found')
+    );
+    await expect(validateProposal('module_config', 'nope', {})).rejects.toBeInstanceOf(
+      NotFoundError
+    );
+    // Existence is checked first, so the schema validator never runs for an unknown target.
+    expect(validateModuleConfig).not.toHaveBeenCalled();
   });
 });
 

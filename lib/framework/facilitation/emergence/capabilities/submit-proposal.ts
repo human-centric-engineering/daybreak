@@ -20,6 +20,7 @@
 
 import { z } from 'zod';
 import { BaseCapability } from '@/lib/orchestration/capabilities/base-capability';
+import type { ProvenanceRedaction } from '@/lib/orchestration/capabilities/base-capability';
 import type {
   CapabilityContext,
   CapabilityFunctionDefinition,
@@ -31,11 +32,20 @@ import { submitStructureChangeProposal } from '@/lib/framework/facilitation/emer
 import { formatAgentAuthor } from '@/lib/framework/facilitation/emergence/author';
 import { PROPOSAL_SUBJECT_TYPES } from '@/lib/framework/facilitation/emergence/pipeline';
 
-const submitProposalSchema = z.object({
-  subjectType: z.enum(PROPOSAL_SUBJECT_TYPES),
-  subjectId: z.string().min(1).max(200),
-  proposedDefinition: z.unknown(),
-});
+const submitProposalSchema = z
+  .object({
+    subjectType: z.enum(PROPOSAL_SUBJECT_TYPES),
+    subjectId: z.string().min(1).max(200),
+    proposedDefinition: z.unknown(),
+  })
+  // A `z.unknown()` field is optional in a Zod object — a call omitting `proposedDefinition` would
+  // otherwise pass validation with it `undefined` (e.g. blanking a module config to its schema
+  // defaults). Enforce the presence the `required` contract declares; the VALUE is still opaque
+  // (the pipeline validates its shape per subject).
+  .refine((v) => v.proposedDefinition !== undefined, {
+    message: 'proposedDefinition is required',
+    path: ['proposedDefinition'],
+  });
 type SubmitProposalArgs = z.infer<typeof submitProposalSchema>;
 
 interface SubmitProposalData {
@@ -85,6 +95,28 @@ export class SubmitProposalCapability extends BaseCapability<
   protected readonly schema = submitProposalSchema;
 
   readonly processesPii = false;
+
+  /**
+   * `proposedDefinition` is an unbounded, model-authored blob (a whole map/config/policy payload,
+   * possibly carrying conversation-derived text) and is already persisted in full on the proposal
+   * row. Keep it OUT of the durable message-provenance trace: record only which subject was targeted
+   * (plus the small result). This is a provenance-hygiene decision, not a PII claim — the arguments
+   * are structural, so `processesPii` stays false; the override just avoids duplicating a large,
+   * separately-stored, separately-erasable payload onto every authoring call's audit row.
+   */
+  redactProvenance(
+    args: SubmitProposalArgs,
+    result: CapabilityResult<SubmitProposalData>
+  ): ProvenanceRedaction {
+    return {
+      args: {
+        subjectType: args.subjectType,
+        subjectId: args.subjectId,
+        proposedDefinition: '[omitted — stored on the proposal row]',
+      },
+      resultPreview: JSON.stringify(result),
+    };
+  }
 
   async execute(
     args: SubmitProposalArgs,

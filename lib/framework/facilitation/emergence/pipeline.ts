@@ -85,13 +85,16 @@ async function validateMapProposal(
   };
 }
 
-/** `module_config` — validate against the module's schema and capture its live version as base. */
+/** `module_config` — resolve the module (existence + base version) FIRST, then validate the config.
+ *  Existence-before-shape keeps the error contract uniform with the map/policy subjects: an unknown
+ *  target is a `NotFoundError` (the caller maps it to "subject not found"), and only a config that
+ *  fails the registered schema is a `ValidationError`. */
 async function validateModuleConfigProposal(
   subjectId: string,
   proposedDefinition: unknown
 ): Promise<ValidatedProposal> {
-  const definition = validateModuleConfig(subjectId, proposedDefinition); // throws if unregistered/invalid
   const baseVersion = await getLatestModuleVersionNumber(subjectId); // throws NotFoundError if unknown
+  const definition = validateModuleConfig(subjectId, proposedDefinition); // throws if unregistered/invalid
   return { definition, baseVersion, riskClass: 'unclassified' };
 }
 

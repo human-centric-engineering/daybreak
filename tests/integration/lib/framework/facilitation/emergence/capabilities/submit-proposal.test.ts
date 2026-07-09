@@ -53,6 +53,31 @@ describe('slug + metadata', () => {
   it('is registered in the emergence capability set (boot wiring)', () => {
     expect(emergenceCapabilities.some((c) => c.slug === 'submit_proposal')).toBe(true);
   });
+
+  it('rejects a call that omits proposedDefinition (the required contract is enforced)', () => {
+    // A z.unknown() field would otherwise be optional — validate() must fail when it is absent.
+    expect(() => cap.validate({ subjectType: 'map', subjectId: 'g' })).toThrow();
+    // A present-but-falsy definition (e.g. null / empty object) is allowed — the pipeline judges shape.
+    expect(
+      cap.validate({ subjectType: 'map', subjectId: 'g', proposedDefinition: {} })
+    ).toMatchObject({ subjectType: 'map' });
+  });
+
+  it('keeps the opaque proposedDefinition out of the provenance trace', () => {
+    const redacted = cap.redactProvenance(
+      { subjectType: 'map', subjectId: 'g', proposedDefinition: { huge: 'blob' } },
+      {
+        success: true,
+        data: { proposalId: 'scp-1', status: 'pending', subjectType: 'map', subjectId: 'g' },
+      }
+    );
+    expect(redacted.args).toEqual({
+      subjectType: 'map',
+      subjectId: 'g',
+      proposedDefinition: '[omitted — stored on the proposal row]',
+    });
+    expect(redacted.resultPreview).toContain('scp-1');
+  });
 });
 
 describe('execute', () => {
