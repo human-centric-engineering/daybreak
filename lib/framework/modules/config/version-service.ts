@@ -285,6 +285,33 @@ export async function listModuleVersions(
   };
 }
 
+/**
+ * Validate a config value against the registered module's `configSchema` and return its canonical
+ * (Zod-parsed) form — the public face of the internal `validateAgainstSchema`, reused by the
+ * emergence proposal pipeline so a `module_config` structure-change proposal validates through the
+ * exact same schema contract as a direct save. Throws `ValidationError` when the module is
+ * unregistered (code removed) or the config fails its schema.
+ */
+export function validateModuleConfig(slug: string, config: unknown): Prisma.InputJsonValue {
+  return validateAgainstSchema(slug, config);
+}
+
+/**
+ * The module's newest config version number (its live config), or `null` if it has never been
+ * configured. Used as the emergence proposal's conflict-detection base for `module_config` subjects
+ * (mirrors the map path reading the published version): a proposal captures this at submit time and
+ * an approve refuses if the module has moved since. Throws `NotFoundError` for an unknown slug.
+ */
+export async function getLatestModuleVersionNumber(slug: string): Promise<number | null> {
+  const mod = await loadModule(slug);
+  const row = await prisma.moduleVersion.findFirst({
+    where: { moduleId: mod.id },
+    orderBy: { version: 'desc' },
+    select: { version: true },
+  });
+  return row?.version ?? null;
+}
+
 /** A single immutable version by number, for diff / detail views. */
 export async function getModuleVersion(slug: string, version: number): Promise<ModuleVersion> {
   const mod = await loadModule(slug);

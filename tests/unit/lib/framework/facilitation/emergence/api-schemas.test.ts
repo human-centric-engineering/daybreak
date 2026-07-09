@@ -31,9 +31,26 @@ describe('submitProposalBodySchema', () => {
     ).toBe(true);
   });
 
-  it('rejects a non-map subjectType or a missing subjectId', () => {
+  it('accepts the widened module_config and policy subjects', () => {
     expect(
-      submitProposalBodySchema.safeParse({ subjectType: 'policy', subjectId: 'g' }).success
+      submitProposalBodySchema.safeParse({
+        subjectType: 'module_config',
+        subjectId: 'welcome',
+        proposedDefinition: { greeting: 'hi' },
+      }).success
+    ).toBe(true);
+    expect(
+      submitProposalBodySchema.safeParse({
+        subjectType: 'policy',
+        subjectId: 'auto_approval',
+        proposedDefinition: { mode: 'none' },
+      }).success
+    ).toBe(true);
+  });
+
+  it('rejects an unknown subjectType or a missing subjectId', () => {
+    expect(
+      submitProposalBodySchema.safeParse({ subjectType: 'workflow', subjectId: 'g' }).success
     ).toBe(false);
     expect(submitProposalBodySchema.safeParse({ subjectType: 'map' }).success).toBe(false);
   });
