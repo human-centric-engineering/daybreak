@@ -16,7 +16,7 @@
  * `initLeafAdminNav()`. Registration is idempotent by section `title`.
  */
 
-import { Boxes, Database, Map, Network, Route, Scale } from 'lucide-react';
+import { Boxes, Database, GitPullRequest, Map, Network, Route, Scale } from 'lucide-react';
 import { registerNavSection } from '@/lib/admin-nav/registry';
 
 export function initFrameworkNav(): void {
@@ -52,6 +52,12 @@ export function initFrameworkNav(): void {
         label: 'Policies',
         icon: Scale,
         description: 'Governance policies — approval, gating, guards, escalation',
+      },
+      {
+        href: '/admin/framework/proposals',
+        label: 'Proposals',
+        icon: GitPullRequest,
+        description: 'Review, approve, and reject structure-change proposals',
       },
       {
         href: '/admin/framework/atlas',

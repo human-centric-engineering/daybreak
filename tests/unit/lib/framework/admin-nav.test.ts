@@ -65,6 +65,17 @@ describe('initFrameworkNav', () => {
     expect(policies?.icon).toBeDefined();
   });
 
+  it('registers a Proposals item (f-admin-surfaces t-3)', () => {
+    initFrameworkNav();
+
+    const framework = getRegisteredNavSections().find((s) => s.title === 'Framework');
+    const proposals = framework?.items?.find((i) => i.href === '/admin/framework/proposals');
+    expect(proposals).toBeDefined();
+    expect(proposals?.label).toBe('Proposals');
+    expect(proposals?.description).toBeTruthy();
+    expect(proposals?.icon).toBeDefined();
+  });
+
   it('registers an Atlas item (f-atlas t-2a)', () => {
     initFrameworkNav();
 
