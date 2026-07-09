@@ -1,29 +1,30 @@
 /**
- * Guard-event contributor registry.
+ * Guard-events seam
  *
- * A generic extension seam letting a higher layer OBSERVE an inline guard firing (input / output /
- * citation) for a turn and react — e.g. route a detected safety signal into a configured escalation
- * pathway. This is the POST-detection sibling of the guard-floor seam (`./guard-floor.ts`): the
- * guard-floor contributor runs BEFORE detection and returns a *mode to raise to*; a guard-event
- * contributor runs AFTER a guard flags and is a fire-and-forget *observer* — it cannot change the
- * turn's outcome, only react to it.
+ * The post-detection sibling of the guard-floor seam. When an inline chat guard
+ * (input / output / citation) FLAGS, the handler calls `emitGuardEvent` so a
+ * fork can OBSERVE the firing and react (notify, log, escalate) WITHOUT editing
+ * the guard sites or changing detection.
  *
- * `emitGuardEvent` is fire-and-forget: contributors run detached (never awaited), and any throw is
- * swallowed — a guard-event handler must never delay or break a turn. An **empty registry is
- * completely inert** (emit is a no-op), so vanilla behaviour is unchanged. Keyed by a string id so a
- * repeated registration (e.g. a re-run boot hook) replaces rather than duplicates — the same shape
- * as `registerGuardFloorContributor` / `registerAgentAccessContributor`; core owns the registry,
- * extensions register inbound, no core code references a specific extension.
+ * **Fire-and-forget:** emission never delays or breaks the turn. Each
+ * contributor runs on a microtask; a synchronous throw OR an async rejection is
+ * swallowed and logged. An empty registry is a no-op, so vanilla behaviour is
+ * unchanged.
+ *
+ * Pairs with the guard-floor seam (`guard-floor.ts`): a floor is a
+ * **pre-detection** input to how strictly a guard acts; an event is a
+ * **post-detection** observation that a guard fired. A guard-event contributor
+ * cannot change detection or the action taken — use a guard-floor contributor
+ * for that.
+ *
+ * Platform-agnostic: no Next.js imports.
  */
 
-import type { GuardKind } from '@/lib/orchestration/chat/guard-floor';
+import { logger } from '@/lib/logging';
+import { initAppGuardEventContributors } from '@/lib/app/guard-event-contributors';
+import type { GuardKind, GuardMode } from '@/lib/orchestration/chat/guard-floor';
 
-/** What a guard did to a flagged turn: `flagged` = detected (log_only/warn), `blocked` = hard-stopped. */
-export type GuardOutcome = 'flagged' | 'blocked';
-
-/** The turn context a guard-event contributor keys on. Superset of `GuardFloorContext`: it also
- *  carries `userId`/`conversationId` so an observer can act on the affected conversation (notify,
- *  log). All fields are the turn's own values. */
+/** The turn identity a contributor keys its reaction on. */
 export interface GuardEventContext {
   contextType?: string;
   contextId?: string;
@@ -32,22 +33,48 @@ export interface GuardEventContext {
   conversationId: string;
 }
 
-/** A guard firing: which guard, and whether it merely flagged or hard-blocked. */
+/** What fired and what the guard did about it. */
 export interface GuardEvent {
+  /** Which inline guard flagged. */
   guard: GuardKind;
-  outcome: GuardOutcome;
+  /**
+   * The effective mode the guard acted in — after agent/global resolution and
+   * any guard-floor raise. `block` = the turn was stopped; `warn_and_continue`
+   * = a warning was surfaced; `log_only` = logged only; `none` = flagged but no
+   * action.
+   */
+  outcome: GuardMode;
 }
 
+/**
+ * Observes a guard firing. May be async. Runs fire-and-forget: its return value
+ * is not awaited and its errors never surface to the turn.
+ */
 export type GuardEventContributor = (
-  ctx: GuardEventContext,
+  context: GuardEventContext,
   event: GuardEvent
 ) => void | Promise<void>;
 
+function isGuardMode(value: string): value is GuardMode {
+  return (
+    value === 'none' || value === 'log_only' || value === 'warn_and_continue' || value === 'block'
+  );
+}
+
 const contributors = new Map<string, GuardEventContributor>();
 
+/** Whether the auto-wired app contributor init has run. */
+let appInited = false;
+
 /**
- * Register (or replace, by `key`) a contributor observed for every guard firing. Idempotent per key
- * so a double boot is harmless.
+ * Register a guard-event contributor. Lets a fork react to an inline guard
+ * firing (notify / log / escalate) without editing the guard sites. Idempotent
+ * by key: re-registering the same key replaces the prior contributor (mirrors
+ * `registerContextContributor`). Observation only — it cannot change detection
+ * or the guard's action. Call at module-import time from
+ * `lib/app/guard-event-contributors.ts`.
+ *
+ * @see .context/orchestration/chat.md — the app-author guide
  */
 export function registerGuardEventContributor(
   key: string,
@@ -56,24 +83,71 @@ export function registerGuardEventContributor(
   contributors.set(key, contributor);
 }
 
-/** Test-only: drop all registered contributors. */
-export function __resetGuardEventContributorsForTests(): void {
-  contributors.clear();
+/**
+ * Run the fork's auto-wired contributor init exactly once, lazily, before the
+ * first emit. Latch BEFORE running so a throwing init neither retries nor
+ * propagates — an init failure degrades to "no guard-event contributors".
+ */
+function ensureAppGuardEventContributorsInited(): void {
+  if (appInited) return;
+  appInited = true;
+  try {
+    initAppGuardEventContributors();
+  } catch (err) {
+    logger.error(
+      'guard-events: initAppGuardEventContributors threw — app guard-event contributors disabled',
+      { error: err instanceof Error ? err.message : String(err) }
+    );
+  }
 }
 
 /**
- * Notify every registered contributor that a guard fired — **fire-and-forget**. Contributors run
- * detached (not awaited) and their throws are swallowed, so this never delays or breaks the turn.
- * A no-op when the registry is empty (the seam is inert — vanilla behaviour).
+ * Test-only: drop all registered contributors and re-arm the one-shot app init
+ * so each test starts from a known state. Not exported from the barrel.
  */
-export function emitGuardEvent(ctx: GuardEventContext, event: GuardEvent): void {
-  for (const contributor of contributors.values()) {
-    void (async () => {
-      try {
-        await contributor(ctx, event);
-      } catch {
-        // a guard-event handler must never break a turn
-      }
-    })();
+export function __resetGuardEventContributorsForTests(): void {
+  contributors.clear();
+  appInited = false;
+}
+
+/**
+ * Emit a guard-firing event to every registered contributor, **fire-and-forget**.
+ * Returns immediately (`void`): contributors run on a microtask so emission
+ * never blocks the chat turn — even when the guard's action is `block` and the
+ * turn short-circuits right after. A synchronous throw or an async rejection
+ * from a contributor is caught and logged. An empty registry is a no-op.
+ *
+ * `resolvedMode` is the effective guard-mode string (post resolution + floor);
+ * an unrecognised value is reported to observers as `'none'` (the guard took no
+ * action), so a contributor never sees a bogus mode.
+ */
+export function emitGuardEvent(
+  context: GuardEventContext,
+  guard: GuardKind,
+  resolvedMode: string
+): void {
+  ensureAppGuardEventContributorsInited();
+  if (contributors.size === 0) return;
+
+  const event: GuardEvent = {
+    guard,
+    outcome: isGuardMode(resolvedMode) ? resolvedMode : 'none',
+  };
+
+  for (const [key, contributor] of contributors) {
+    // Defer to a microtask and isolate failures: a fork's observer must never
+    // delay or break the turn. Deferring means a slow/throwing SYNC contributor
+    // can't block the emit call; the `.catch` swallows both a synchronous throw
+    // (inside the `.then` callback) and a rejected promise.
+    void Promise.resolve()
+      .then(() => contributor(context, event))
+      .catch((err) => {
+        logger.error('guard-events: contributor threw — ignoring', {
+          contributorKey: key,
+          agentId: context.agentId,
+          guard,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
   }
 }

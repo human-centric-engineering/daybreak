@@ -11,11 +11,11 @@
  * The core resolver only consults this for a *restricted* agent (a `full` agent
  * already searches everything) and only ever UNIONS the result in — module scope
  * widens a restricted agent's reach, never narrows it. See
- * `lib/orchestration/knowledge/agent-access-contributors.ts`.
+ * `lib/orchestration/knowledge/resolveAgentDocumentAccess.ts`.
  */
 
 import { prisma } from '@/lib/db/client';
-import type { AgentAccessContribution } from '@/lib/orchestration/knowledge/agent-access-contributors';
+import type { AgentAccessContribution } from '@/lib/orchestration/knowledge/resolveAgentDocumentAccess';
 
 /** Registry key for the module knowledge contributor (idempotent re-registration). */
 export const MODULE_KNOWLEDGE_CONTRIBUTOR_KEY = 'framework:module-knowledge';

@@ -13,8 +13,9 @@ vi.mock('@/lib/orchestration/llm/provider-manager', () => ({ getProvider: vi.fn(
 vi.mock('@/lib/orchestration/llm/agent-resolver', () => ({
   resolveAgentProviderAndModel: vi.fn(),
 }));
-vi.mock('@/lib/orchestration/evaluations/parse-structured', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/orchestration/evaluations/parse-structured')>()),
+// `runStructuredCompletion` relocated to lib/orchestration/llm (Sunrise #410); mock it there.
+// `tryParseJson` stays in parse-structured and is used for real (the parse closure below).
+vi.mock('@/lib/orchestration/llm/structured-completion', () => ({
   runStructuredCompletion: vi.fn(),
 }));
 vi.mock('@/lib/logging', () => ({
@@ -25,7 +26,7 @@ import { extractTypedValue } from '@/lib/framework/data-slots/capabilities/extra
 import { prisma } from '@/lib/db/client';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
-import { runStructuredCompletion } from '@/lib/orchestration/evaluations/parse-structured';
+import { runStructuredCompletion } from '@/lib/orchestration/llm/structured-completion';
 
 const agentRow = { provider: 'openai', model: 'gpt-x', fallbackProviders: [] };
 

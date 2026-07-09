@@ -12,13 +12,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('@/lib/orchestration/chat/context-builder', () => ({
   registerContextContributor: vi.fn(),
 }));
-vi.mock('@/lib/orchestration/knowledge/agent-access-contributors', () => ({
+vi.mock('@/lib/orchestration/knowledge/resolveAgentDocumentAccess', () => ({
   registerAgentAccessContributor: vi.fn(),
 }));
 
 const { registerContextContributor } = await import('@/lib/orchestration/chat/context-builder');
 const { registerAgentAccessContributor } =
-  await import('@/lib/orchestration/knowledge/agent-access-contributors');
+  await import('@/lib/orchestration/knowledge/resolveAgentDocumentAccess');
 const { initFramework } = await import('@/lib/framework');
 const { loadModuleContext, MODULE_CONTEXT_TYPE, MODULE_CONTEXT_UNAVAILABLE } =
   await import('@/lib/framework/modules/context');

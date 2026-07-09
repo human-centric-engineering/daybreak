@@ -27,7 +27,7 @@
  */
 
 import { registerContextContributor } from '@/lib/orchestration/chat/context-builder';
-import { registerAgentAccessContributor } from '@/lib/orchestration/knowledge/agent-access-contributors';
+import { registerAgentAccessContributor } from '@/lib/orchestration/knowledge/resolveAgentDocumentAccess';
 import { registerGuardFloorContributor } from '@/lib/orchestration/chat/guard-floor';
 import { registerGuardEventContributor } from '@/lib/orchestration/chat/guard-events';
 import {

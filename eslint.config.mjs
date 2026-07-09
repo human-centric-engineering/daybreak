@@ -6,9 +6,12 @@ import jsxA11yPlugin from 'eslint-plugin-jsx-a11y';
 import tseslint from 'typescript-eslint';
 
 // Fork extension seams — tier ESLint blocks live in their own files and are
-// spread at the end of this config (see there for rationale). Fork-first shape
-// of Sunrise #382. `frameworkConfig` is Daybreak's; `appConfig` is the reserved
-// leaf seam (empty here).
+// spread at the end of this config (see there for rationale). Sunrise #382
+// shipped the fork-owned app seam; Daybreak adds the framework tier on top.
+// `frameworkConfig` is Daybreak's; `appConfig` is the reserved leaf seam
+// (empty here). Both spread LAST so a fork block wins for its own `files`
+// (mind the `no-restricted-imports` replace-not-merge footgun documented in
+// lib/app/eslint.config.mjs).
 import frameworkConfig from './lib/framework/eslint.config.mjs';
 import appConfig from './lib/app/eslint.config.mjs';
 

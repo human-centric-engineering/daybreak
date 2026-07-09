@@ -25,6 +25,9 @@ import { initAppContextContributors } from '@/lib/app/context-contributors';
 import { initLeafAdminNav } from '@/lib/app/leaf-admin-nav';
 import { publicNavItems, footerNavItems, footerLegalItems } from '@/lib/app/public-nav';
 import { emailOverrides } from '@/lib/app/emails';
+import { initApp } from '@/lib/app/bootstrap';
+import { initAppKnowledgeAccessContributors } from '@/lib/app/knowledge-access-contributors';
+import appEslintConfig from '@/lib/app/eslint.config.mjs';
 import { getEffectiveRateLimitPolicy, RATE_LIMIT_POLICY } from '@/lib/security/rate-limit-policy';
 import { getRegisteredNavSections, __resetNavRegistryForTests } from '@/lib/admin-nav/registry';
 
@@ -79,5 +82,30 @@ describe('lib/app/ bootstrap defaults are no-ops', () => {
   it('email overrides are empty by default (= use platform templates)', () => {
     // A stray override here would silently swap an auth email for every install.
     expect(emailOverrides).toEqual({});
+  });
+
+  it('initApp does no boot work by default (resolves to undefined)', async () => {
+    // The real default is an empty async fn; forks fill it. A stray default
+    // would run one-time work on every install boot. (The instrumentation
+    // wiring — that register() calls this in all envs, isolated in try/catch —
+    // is covered by tests/unit/instrumentation.test.ts.)
+    await expect(initApp()).resolves.toBeUndefined();
+  });
+
+  it('initAppKnowledgeAccessContributors is a no-op by default', () => {
+    // The real default registers no access contributors and returns void; forks
+    // add registerAgentAccessContributor() calls. A stray default would silently
+    // widen every restricted agent's document access on every install.
+    // (Behavioural reach into the resolver is covered by
+    // resolveAgentDocumentAccess.test.ts.)
+    expect(initAppKnowledgeAccessContributors()).toBeUndefined();
+  });
+
+  it('the ESLint config seam is an empty array by default', () => {
+    // A stray flat-config block here would silently apply lint rules to every
+    // fork (the root eslint.config.mjs spreads this array last). Forks fill it;
+    // vanilla Sunrise ships it empty. The root spread itself is exercised by
+    // every `npm run lint` run.
+    expect(appEslintConfig).toEqual([]);
   });
 });
