@@ -6,18 +6,37 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 vi.mock('@/lib/db/client', () => ({
-  prisma: { facilitationPolicy: { findMany: vi.fn() } },
+  prisma: { facilitationPolicy: { findMany: vi.fn(), findUnique: vi.fn() } },
 }));
 
 import {
   listFacilitationPolicies,
   listEnabledFacilitationPolicies,
+  getFacilitationPolicy,
 } from '@/lib/framework/facilitation/policies/policy-queries';
 import { prisma } from '@/lib/db/client';
+import { NotFoundError } from '@/lib/api/errors';
 
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(prisma.facilitationPolicy.findMany).mockResolvedValue([{ id: 'fp-1' }] as never);
+});
+
+describe('getFacilitationPolicy', () => {
+  it('returns a policy by id', async () => {
+    vi.mocked(prisma.facilitationPolicy.findUnique).mockResolvedValue({
+      id: 'fp-1',
+      kind: 'auto_approval',
+    } as never);
+    const policy = await getFacilitationPolicy('fp-1');
+    expect(prisma.facilitationPolicy.findUnique).toHaveBeenCalledWith({ where: { id: 'fp-1' } });
+    expect(policy).toMatchObject({ id: 'fp-1', kind: 'auto_approval' });
+  });
+
+  it('throws NotFoundError when the policy is absent', async () => {
+    vi.mocked(prisma.facilitationPolicy.findUnique).mockResolvedValue(null);
+    await expect(getFacilitationPolicy('nope')).rejects.toBeInstanceOf(NotFoundError);
+  });
 });
 
 describe('listFacilitationPolicies', () => {

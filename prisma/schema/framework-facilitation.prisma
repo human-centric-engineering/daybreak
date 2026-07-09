@@ -204,7 +204,7 @@ model FacilitationPolicy {
 model StructureChangeProposal {
   id                 String   @id @default(cuid())
   subjectType        String // 'map' | 'module_config' | 'policy' — CHECK-constrained (widened, f-governance-plus t-1)
-  subjectId          String // names the target: a map/graph slug, a module slug, or a policy kind
+  subjectId          String // names the existing target: a map/graph slug, a module slug, or a policy id
   baseVersion        Int? // the version the diff was made against (map/module_config conflict detection); null for policy or when none published yet
   proposedDefinition Json // the proposed content: a map definition, a module config value, or a policy payload
   status             String   @default("pending") // pending | approved | rejected | published — CHECK-constrained

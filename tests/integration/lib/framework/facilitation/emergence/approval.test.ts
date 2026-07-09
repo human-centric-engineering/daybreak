@@ -18,7 +18,7 @@ vi.mock('@/lib/framework/modules/config/version-service', () => ({
   getLatestModuleVersionNumber: vi.fn(),
 }));
 vi.mock('@/lib/framework/facilitation/policies/policy-service', () => ({
-  createFacilitationPolicy: vi.fn(),
+  updateFacilitationPolicy: vi.fn(),
 }));
 vi.mock('@/lib/db/client', () => ({
   prisma: { structureChangeProposal: { updateMany: vi.fn(), update: vi.fn() } },
@@ -33,7 +33,7 @@ import {
   saveModuleConfig,
   getLatestModuleVersionNumber,
 } from '@/lib/framework/modules/config/version-service';
-import { createFacilitationPolicy } from '@/lib/framework/facilitation/policies/policy-service';
+import { updateFacilitationPolicy } from '@/lib/framework/facilitation/policies/policy-service';
 import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { ValidationError } from '@/lib/api/errors';
@@ -159,11 +159,17 @@ describe('approveProposal — module_config subject', () => {
     );
   });
 
-  it('conflict-checks the module version, applies via saveModuleConfig, and marks published', async () => {
+  it('conflict-checks the module version, applies via saveModuleConfig (with base guard), and marks published', async () => {
     await approveProposal({ proposalId: 'scp-1', reviewedBy: 'admin-1' });
     expect(getLatestModuleVersionNumber).toHaveBeenCalledWith('welcome');
+    // The captured base is forwarded so saveModuleConfig re-checks it inside its own transaction.
     expect(saveModuleConfig).toHaveBeenCalledWith(
-      expect.objectContaining({ slug: 'welcome', config: { greeting: 'hi' }, userId: 'admin-1' })
+      expect.objectContaining({
+        slug: 'welcome',
+        config: { greeting: 'hi' },
+        userId: 'admin-1',
+        expectedBaseVersion: 2,
+      })
     );
     // The map path must NOT run for a config proposal.
     expect(getGraphDetail).not.toHaveBeenCalled();
@@ -209,7 +215,7 @@ describe('approveProposal — policy subject', () => {
   const policyProposal = (over: Record<string, unknown> = {}) =>
     proposal({
       subjectType: 'policy',
-      subjectId: 'auto_approval',
+      subjectId: 'pol-9', // an existing policy id (subjectId names the target policy)
       baseVersion: null,
       proposedDefinition: { mode: 'none' },
       ...over,
@@ -217,7 +223,7 @@ describe('approveProposal — policy subject', () => {
 
   beforeEach(() => {
     vi.mocked(getStructureChangeProposal).mockResolvedValue(policyProposal() as never);
-    vi.mocked(createFacilitationPolicy).mockResolvedValue({
+    vi.mocked(updateFacilitationPolicy).mockResolvedValue({
       id: 'pol-9',
       kind: 'auto_approval',
     } as never);
@@ -226,11 +232,12 @@ describe('approveProposal — policy subject', () => {
     );
   });
 
-  it('applies via createFacilitationPolicy (last-writer-wins — no conflict read) and marks published', async () => {
+  it('overwrites the target policy in place via updateFacilitationPolicy (last-writer-wins) and marks published', async () => {
     await approveProposal({ proposalId: 'scp-1', reviewedBy: 'admin-1' });
-    expect(createFacilitationPolicy).toHaveBeenCalledWith(
+    // Updates the SAME policy id (no duplicate row) so the change takes effect at enforcement.
+    expect(updateFacilitationPolicy).toHaveBeenCalledWith(
       expect.objectContaining({
-        kind: 'auto_approval',
+        policyId: 'pol-9',
         payload: { mode: 'none' },
         userId: 'admin-1',
       })
@@ -248,7 +255,7 @@ describe('approveProposal — policy subject', () => {
     await expect(approveProposal({ proposalId: 'scp-1', reviewedBy: null })).rejects.toBeInstanceOf(
       ValidationError
     );
-    expect(createFacilitationPolicy).not.toHaveBeenCalled();
+    expect(updateFacilitationPolicy).not.toHaveBeenCalled();
   });
 });
 
