@@ -75,6 +75,20 @@ describe('FrameworkSlotsPage (server component)', () => {
     expect(screen.getByText('No slot definitions registered yet.')).toBeInTheDocument();
   });
 
+  it('renders the empty state when the API envelope is unsuccessful', async () => {
+    const { serverFetch, parseApiResponse } = await import('@/lib/api/server-fetch');
+    vi.mocked(serverFetch).mockResolvedValue({ ok: true } as Response);
+    vi.mocked(parseApiResponse).mockResolvedValue({
+      success: false,
+      error: { code: 'INTERNAL', message: 'boom' },
+    });
+
+    const { default: FrameworkSlotsPage } = await import('@/app/admin/framework/slots/page');
+    render(await FrameworkSlotsPage());
+
+    expect(screen.getByText('No slot definitions registered yet.')).toBeInTheDocument();
+  });
+
   it('renders the empty state (no throw) when serverFetch rejects', async () => {
     const { serverFetch } = await import('@/lib/api/server-fetch');
     vi.mocked(serverFetch).mockRejectedValue(new Error('network down'));

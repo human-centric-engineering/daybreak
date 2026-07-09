@@ -96,6 +96,65 @@ describe('SlotValuesBrowser', () => {
     expect(screen.getByRole('button', { name: /hide/i })).toBeInTheDocument();
   });
 
+  it('re-masks the value when Hide is clicked after a reveal', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiClient.get).mockResolvedValue([
+      { ...head({ id: 'v1' }), value: 'secret reading', masked: false, sensitivity: 'sensitive' },
+    ] as SlotValueHeadView[]);
+
+    render(
+      <SlotValuesBrowser
+        slotSlug="health_note"
+        initialValues={[
+          head({
+            id: 'v1',
+            value: '<redacted: sensitive>',
+            masked: true,
+            sensitivity: 'sensitive',
+          }),
+        ]}
+        total={1}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: /reveal/i }));
+    await waitFor(() => expect(screen.getByText('secret reading')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: /hide/i }));
+
+    expect(screen.getByText('<redacted: sensitive>')).toBeInTheDocument();
+    expect(screen.queryByText('secret reading')).not.toBeInTheDocument();
+    // Re-revealing does not re-fetch — the stored form is cached from the first reveal.
+    expect(screen.getByRole('button', { name: /reveal/i })).toBeInTheDocument();
+  });
+
+  it('surfaces an error when the reveal fetch fails, leaving the value masked', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiClient.get).mockRejectedValue(new Error('network down'));
+
+    render(
+      <SlotValuesBrowser
+        slotSlug="health_note"
+        initialValues={[
+          head({
+            id: 'v1',
+            value: '<redacted: sensitive>',
+            masked: true,
+            sensitivity: 'sensitive',
+          }),
+        ]}
+        total={1}
+      />
+    );
+
+    await user.click(screen.getByRole('button', { name: /reveal/i }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(/failed to reveal/i);
+    });
+    expect(screen.getByText('<redacted: sensitive>')).toBeInTheDocument();
+  });
+
   it('labels a special_category row as not stored, with no reveal', () => {
     render(
       <SlotValuesBrowser
