@@ -73,6 +73,101 @@ describe('PoliciesTable', () => {
     ).toBeInTheDocument();
   });
 
+  it('summarises guard_minimum and escalation payloads', () => {
+    render(
+      <PoliciesTable
+        initialPolicies={[
+          makePolicy({
+            id: 'gm',
+            kind: 'guard_minimum',
+            payload: {
+              scope: { type: 'facilitation_role', id: 'facilitator' },
+              minimums: { input: 'block', citation: 'log_only' },
+            },
+          }),
+          makePolicy({
+            id: 'esc',
+            kind: 'escalation',
+            payload: {
+              scope: { type: 'facilitation_role', id: 'path' },
+              signal: { guard: 'output', outcome: 'blocked' },
+              priority: 'high',
+            },
+          }),
+        ]}
+      />
+    );
+    expect(screen.getByText(/facilitator · input: block, citation: log_only/)).toBeInTheDocument();
+    expect(screen.getByText(/path · output\/blocked · high/)).toBeInTheDocument();
+  });
+
+  it('summarises defensively when payload leaves are missing or non-string', () => {
+    render(
+      <PoliciesTable
+        initialPolicies={[
+          // A numeric leaf exercises disp's number branch.
+          makePolicy({ id: 'aa', kind: 'auto_approval', payload: { autoApprove: 5 } }),
+          // Missing graphSlug + non-array roles → both fall back to the em-dash.
+          makePolicy({ id: 'rg', kind: 'relevance_gating', payload: { allowedRoles: 'oops' } }),
+          // Empty minimums → the "no minimums" arm; null payload → the {} fallback.
+          makePolicy({ id: 'gm', kind: 'guard_minimum', payload: { minimums: {} } }),
+          makePolicy({ id: 'esc', kind: 'escalation', payload: null }),
+        ]}
+      />
+    );
+    expect(screen.getByText(/auto-approve: 5/)).toBeInTheDocument();
+    expect(screen.getByText(/— → —/)).toBeInTheDocument();
+    expect(screen.getByText(/— · no minimums/)).toBeInTheDocument();
+    expect(screen.getByText(/— · —\/— · —/)).toBeInTheDocument();
+  });
+
+  it('shows a per-kind empty state when the filter matches no rows', async () => {
+    const user = userEvent.setup();
+    render(
+      <PoliciesTable initialPolicies={[makePolicy({ id: 'pol-1', kind: 'auto_approval' })]} />
+    );
+
+    await user.click(screen.getByRole('combobox', { name: /kind/i }));
+    await user.click(await screen.findByRole('option', { name: /escalation/i }));
+
+    expect(await screen.findByText('No policies of this kind.')).toBeInTheDocument();
+  });
+
+  it('opens the edit dialog seeded from the row', async () => {
+    const user = userEvent.setup();
+    render(<PoliciesTable initialPolicies={POLICIES} />);
+
+    const row = screen.getByText('auto_approval').closest('tr') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: /edit/i }));
+
+    expect(await screen.findByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /edit policy/i })).toBeInTheDocument();
+  });
+
+  it('surfaces an error when a toggle fails', async () => {
+    const user = userEvent.setup();
+    const { APIClientError } = await import('@/lib/api/client');
+    vi.mocked(apiClient.patch).mockRejectedValue(new APIClientError('Update blew up', 'X', 500));
+    render(<PoliciesTable initialPolicies={POLICIES} />);
+
+    await user.click(screen.getByRole('switch', { name: /toggle auto_approval policy/i }));
+
+    expect(await screen.findByText('Update blew up')).toBeInTheDocument();
+  });
+
+  it('cancels a delete confirm without calling DELETE', async () => {
+    const user = userEvent.setup();
+    render(<PoliciesTable initialPolicies={POLICIES} />);
+
+    const row = screen.getByText('auto_approval').closest('tr') as HTMLElement;
+    await user.click(within(row).getByRole('button', { name: /^delete$/i }));
+    await user.click(within(row).getByRole('button', { name: /^cancel$/i }));
+
+    expect(apiClient.delete).not.toHaveBeenCalled();
+    // Back to the row action buttons.
+    expect(within(row).getByRole('button', { name: /edit/i })).toBeInTheDocument();
+  });
+
   it('toggles a policy enabled via PATCH { enabled }', async () => {
     const user = userEvent.setup();
     vi.mocked(apiClient.patch).mockResolvedValue({});
