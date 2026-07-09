@@ -20,3 +20,5 @@ export type {
   ModuleStatsFilter,
   RecentComment,
 } from '@/lib/framework/engagement/stats';
+export { getMapHeat } from '@/lib/framework/engagement/map-heat';
+export type { MapHeat, MapNodeHeat, MapHeatFilter } from '@/lib/framework/engagement/map-heat';
