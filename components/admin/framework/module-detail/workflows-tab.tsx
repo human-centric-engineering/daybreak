@@ -46,6 +46,7 @@ import {
   ROSTER_LIMIT,
   useBindingRoster,
 } from '@/components/admin/framework/module-detail/use-binding-roster';
+import { RosterSearch } from '@/components/admin/framework/module-detail/roster-search';
 import { useRowActions } from '@/components/admin/framework/module-detail/use-row-actions';
 import { RowConfirm } from '@/components/admin/framework/module-detail/row-confirm';
 import type { ModuleWorkflowBindingListItem } from '@/lib/framework/modules/view';
@@ -173,6 +174,8 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
           onSubmit={(e) => void bind(e)}
           className="bg-muted/40 space-y-4 rounded-md border p-4"
         >
+          <RosterSearch roster={roster} noun="workflow" id="bind-workflow-search" />
+
           {roster.error ? (
             <p className="text-destructive text-sm" role="alert">
               {roster.error}
@@ -254,7 +257,7 @@ export function WorkflowsTab({ slug, bindings }: WorkflowsTabProps) {
           {roster.capped && !roster.error && (
             <p className="text-muted-foreground text-xs">
               Showing the first {ROSTER_LIMIT} workflows. If the one you want isn&rsquo;t listed,
-              deactivate unused workflows to bring it into range.
+              type above to search the full set.
             </p>
           )}
 

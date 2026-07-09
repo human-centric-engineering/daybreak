@@ -279,4 +279,21 @@ describe('WorkflowsTab', () => {
 
     expect(apiClient.get).toHaveBeenCalledTimes(1);
   });
+
+  it('threads a debounced ?q= search into the roster fetch', async () => {
+    const user = userEvent.setup();
+    vi.mocked(apiClient.get).mockResolvedValue(ROSTER);
+
+    renderTab({ bindings: [] });
+    await user.click(screen.getByRole('button', { name: /bind workflow/i }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /workflow/i })).toBeEnabled());
+
+    await user.type(screen.getByRole('searchbox', { name: /search workflows/i }), 'welc');
+
+    await waitFor(() =>
+      expect(apiClient.get).toHaveBeenCalledWith(
+        '/api/v1/admin/orchestration/workflows?isActive=true&isTemplate=false&limit=100&q=welc'
+      )
+    );
+  });
 });
