@@ -4,12 +4,13 @@
  * "next step is waiting" nudge, and records each send so a later sweep won't re-nudge them.
  *
  * Reuses Sunrise-core email (`sendEmail`); the copy is deterministic (guidance is LLM-free). Nudges go
- * to the JOURNEY OWNER (there is no in-app notification store — email or outbound webhook are the only
- * channels; email is the v1 choice). The throttle table (`framework_journey_nudge`) is the idempotency
- * mechanism: a 60-second scheduler tick re-running the sweep won't re-send, because a just-nudged
- * journey is filtered out. Delivery is ONE email per user per sweep (see below); per-user failures are
- * isolated (logged, counted) so one bad send doesn't abort the batch; a non-sent result is NOT
- * throttled, so it is retried next sweep.
+ * to the JOURNEY OWNER over one or both channels selected by the fork-owned env (`nudge-channel.ts`):
+ * email (default) and/or an env-gated outbound webhook (f-governance-plus t-4). The throttle table
+ * (`framework_journey_nudge`) is the channel-independent idempotency mechanism: a 60-second scheduler
+ * tick re-running the sweep won't re-send, because a just-nudged journey is filtered out. Delivery is
+ * ONE nudge per user per sweep (see below); per-user failures are isolated (logged, counted) so one
+ * bad send doesn't abort the batch; a journey that reached NO channel is NOT throttled, so it is
+ * retried next sweep.
  */
 
 import { prisma } from '@/lib/db/client';
@@ -19,6 +20,7 @@ import { getBaseUrl } from '@/lib/api/server-fetch';
 import { sendEmail } from '@/lib/email/send';
 import ProactiveNudgeEmail from '@/emails/proactive-nudge';
 import { listRecentlyNudgedJourneyIds } from '@/lib/framework/facilitation/overlays/queries';
+import { resolveNudgeChannelConfig } from '@/lib/framework/facilitation/overlays/nudge-channel';
 import {
   runProactiveGuidanceSweep,
   stalledBeforeFromDays,
@@ -46,14 +48,18 @@ export interface DeliverNudgesResult {
   /** Candidate journeys skipped because they were nudged within the throttle window. */
   throttled: number;
   /** Emails sent — at most ONE per user per sweep (the nudge is generic, so a multi-journey user
-   *  gets one, not duplicates). */
+   *  gets one, not duplicates). Zero when the webhook-only channel is configured. */
   emailsSent: number;
-  /** Throttle rows written — every fresh journey of an emailed user, so none re-fire this window. */
+  /** Webhook payloads POSTed — at most ONE per user per sweep. Zero when no webhook channel is set. */
+  webhooksSent: number;
+  /** Throttle rows written — every fresh journey of a nudged user, so none re-fire this window. */
   journeysNudged: number;
-  /** Users skipped because the owner has no email address (or was erased between sweep and send). */
+  /** Users skipped for email because the owner has no address (or was erased between sweep and send). */
   noEmail: number;
-  /** Users whose send failed / was disabled (NOT throttled — retried next sweep). */
+  /** Users whose email send failed / was disabled (NOT throttled unless another channel delivered). */
   failed: number;
+  /** Users whose webhook POST failed (NOT throttled unless another channel delivered). */
+  webhookFailed: number;
 }
 
 /**
@@ -85,9 +91,11 @@ export async function deliverProactiveNudges(
       candidates: 0,
       throttled: 0,
       emailsSent: 0,
+      webhooksSent: 0,
       journeysNudged: 0,
       noEmail: 0,
       failed: 0,
+      webhookFailed: 0,
     };
   }
 
@@ -116,45 +124,76 @@ export async function deliverProactiveNudges(
   });
   const byId = new Map(users.map((u) => [u.id, u]));
 
+  const channel = resolveNudgeChannelConfig();
   const baseUrl = getBaseUrl();
   const subject = `A next step is waiting in ${BRAND.name}`;
+  const timestamp = now.toISOString();
   let emailsSent = 0;
+  let webhooksSent = 0;
   let journeysNudged = 0;
   let noEmail = 0;
   let failed = 0;
+  let webhookFailed = 0;
 
   for (const [userId, journeys] of journeysByUser) {
     const user = byId.get(userId);
-    if (!user?.email) {
-      // Owner has no address, or was erased between the sweep and this lookup — nothing to send.
-      noEmail += 1;
-      continue;
+    // `delivered` gates the throttle: it records only if the nudge reached AT LEAST ONE channel, so a
+    // total delivery failure is retried next sweep (whichever channel failed).
+    let delivered = false;
+
+    if (channel.emailEnabled) {
+      if (!user?.email) {
+        // Owner has no address, or was erased between the sweep and this lookup — email can't go.
+        noEmail += 1;
+      } else {
+        try {
+          const result = await sendEmail({
+            to: user.email,
+            subject,
+            react: ProactiveNudgeEmail({ userName: user.name ?? 'there', baseUrl }),
+          });
+          if (result.status === 'sent') {
+            emailsSent += 1;
+            delivered = true;
+          } else {
+            failed += 1; // 'failed' or 'disabled'
+          }
+        } catch (err) {
+          logger.warn('Proactive nudge email send failed', {
+            userId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+          failed += 1;
+        }
+      }
     }
 
-    let result;
-    try {
-      result = await sendEmail({
-        to: user.email,
-        subject,
-        react: ProactiveNudgeEmail({ userName: user.name ?? 'there', baseUrl }),
-      });
-    } catch (err) {
-      logger.warn('Proactive nudge send failed', {
+    if (channel.webhookUrl) {
+      // One grouped payload per nudged owner — carries the `reason`/`nodeKey`/`graphSlug` the email
+      // discards, so a downstream integration can route/notify per journey.
+      const ok = await postNudgeWebhook(channel.webhookUrl, {
         userId,
-        error: err instanceof Error ? err.message : String(err),
+        email: user?.email ?? null,
+        journeys: journeys.map((j) => ({
+          journeyId: j.journeyId,
+          graphSlug: j.graphSlug,
+          nodeKey: j.nodeKey,
+          reason: j.reason,
+        })),
+        timestamp,
       });
-      failed += 1;
-      continue;
+      if (ok) {
+        webhooksSent += 1;
+        delivered = true;
+      } else {
+        webhookFailed += 1;
+      }
     }
-    if (result.status !== 'sent') {
-      // 'failed' or 'disabled' — do NOT record throttle, so it's retried on the next sweep.
-      failed += 1;
-      continue;
-    }
-    emailsSent += 1;
 
-    // Record ALL of this user's fresh journeys so none re-fire this window. Best-effort: the email is
-    // already out, so a throttle-write failure only risks a rare re-nudge — never fail the send for it.
+    if (!delivered) continue; // no channel delivered — don't throttle, retry next sweep
+
+    // Record ALL of this user's fresh journeys so none re-fire this window. Best-effort: the nudge is
+    // already out, so a throttle-write failure only risks a rare re-nudge — never fail delivery for it.
     for (const journey of journeys) {
       try {
         await prisma.frameworkJourneyNudge.upsert({
@@ -169,7 +208,7 @@ export async function deliverProactiveNudges(
         });
         journeysNudged += 1;
       } catch (err) {
-        logger.warn('Proactive nudge throttle-record failed (send already delivered)', {
+        logger.warn('Proactive nudge throttle-record failed (nudge already delivered)', {
           journeyId: journey.journeyId,
           error: err instanceof Error ? err.message : String(err),
         });
@@ -182,8 +221,48 @@ export async function deliverProactiveNudges(
     candidates: candidates.length,
     throttled: candidates.length - fresh.length,
     emailsSent,
+    webhooksSent,
     journeysNudged,
     noEmail,
     failed,
+    webhookFailed,
   };
+}
+
+/** The per-owner webhook payload — one grouped POST per nudged user. */
+interface NudgeWebhookPayload {
+  userId: string;
+  email: string | null;
+  journeys: { journeyId: string; graphSlug: string; nodeKey: string; reason: string }[];
+  timestamp: string;
+}
+
+/**
+ * POST one grouped nudge payload to the configured webhook. Mirrors the escalation-notifier contract:
+ * a plain `fetch` POST with a 10s timeout that NEVER throws — a non-OK status or a network error is
+ * logged and returns `false` (so the journey isn't throttled and is retried next sweep).
+ */
+async function postNudgeWebhook(url: string, payload: NudgeWebhookPayload): Promise<boolean> {
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'proactive_nudge', ...payload }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) {
+      logger.warn('Proactive nudge webhook returned non-OK', {
+        status: response.status,
+        userId: payload.userId,
+      });
+      return false;
+    }
+    return true;
+  } catch (err) {
+    logger.warn('Proactive nudge webhook call failed', {
+      userId: payload.userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
 }
