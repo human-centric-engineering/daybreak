@@ -19,10 +19,12 @@ const prismaMock = vi.hoisted(() => ({
 }));
 const auditMock = vi.hoisted(() => ({ logAdminAction: vi.fn() }));
 const resolverMock = vi.hoisted(() => ({ invalidateAgentAccess: vi.fn() }));
+const dispatchMock = vi.hoisted(() => ({ runModuleWorkflowBindings: vi.fn() }));
 
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => auditMock);
 vi.mock('@/lib/orchestration/knowledge/resolveAgentDocumentAccess', () => resolverMock);
+vi.mock('@/lib/framework/modules/workflow-bindings', () => dispatchMock);
 
 import { updateModuleSettings, deleteModule } from '@/lib/framework/modules/service';
 import { NotFoundError, ConflictError, ValidationError } from '@/lib/api/errors';
@@ -46,7 +48,12 @@ function current(over: Record<string, unknown> = {}) {
 const ARGS = { userId: 'admin-1', clientIp: '10.0.0.1' };
 
 describe('updateModuleSettings', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // The status-change dispatch is `void`-called with a `.catch()`, so it must return a
+    // promise even when a test doesn't care about it.
+    dispatchMock.runModuleWorkflowBindings.mockResolvedValue({ matched: 0, dispatched: 0 });
+  });
 
   it('writes the patch and audits the changed fields', async () => {
     prismaMock.module.findUnique.mockResolvedValue(current());
@@ -125,6 +132,48 @@ describe('updateModuleSettings', () => {
     await expect(
       updateModuleSettings({ slug: 'missing', patch: { name: 'x' }, ...ARGS })
     ).rejects.toThrow(NotFoundError);
+  });
+
+  it('fires module.status_changed bindings on a status change, with { from, to }', async () => {
+    prismaMock.module.findUnique.mockResolvedValue(current({ status: 'draft' }));
+    prismaMock.module.update.mockResolvedValue(current({ status: 'active' }));
+
+    await updateModuleSettings({ slug: 'onboarding', patch: { status: 'active' }, ...ARGS });
+
+    expect(dispatchMock.runModuleWorkflowBindings).toHaveBeenCalledWith(
+      'onboarding',
+      'module.status_changed',
+      { from: 'draft', to: 'active' }
+    );
+  });
+
+  it('does NOT fire module.status_changed when a non-status field changes', async () => {
+    prismaMock.module.findUnique.mockResolvedValue(current());
+    prismaMock.module.update.mockResolvedValue(current({ name: 'Renamed' }));
+
+    await updateModuleSettings({ slug: 'onboarding', patch: { name: 'Renamed' }, ...ARGS });
+
+    expect(dispatchMock.runModuleWorkflowBindings).not.toHaveBeenCalled();
+  });
+
+  it('does NOT fire module.status_changed on a no-op status re-submit', async () => {
+    prismaMock.module.findUnique.mockResolvedValue(current({ status: 'active' }));
+    prismaMock.module.update.mockResolvedValue(current({ status: 'active' }));
+
+    await updateModuleSettings({ slug: 'onboarding', patch: { status: 'active' }, ...ARGS });
+
+    expect(dispatchMock.runModuleWorkflowBindings).not.toHaveBeenCalled();
+  });
+
+  it('swallows a status_changed dispatch failure (never fails the settings write)', async () => {
+    prismaMock.module.findUnique.mockResolvedValue(current({ status: 'draft' }));
+    prismaMock.module.update.mockResolvedValue(current({ status: 'active' }));
+    dispatchMock.runModuleWorkflowBindings.mockRejectedValue(new Error('dispatch boom'));
+
+    // The write resolves with the fresh row even though the dispatch rejected.
+    await expect(
+      updateModuleSettings({ slug: 'onboarding', patch: { status: 'active' }, ...ARGS })
+    ).resolves.toMatchObject({ status: 'active' });
   });
 });
 

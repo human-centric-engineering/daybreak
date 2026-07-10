@@ -20,6 +20,9 @@ vi.mock('@/lib/framework/facilitation/map/version-service', () => ({
 vi.mock('@/lib/framework/facilitation/overlays/related', () => ({
   enrichMovesWithRelated: vi.fn(),
 }));
+vi.mock('@/lib/framework/engagement/module-completion', () => ({
+  maybeEmitModuleCompleted: vi.fn(),
+}));
 
 import {
   loadGuidance,
@@ -33,6 +36,7 @@ import { applyEvent } from '@/lib/framework/facilitation/engine/apply-event';
 import { getJourneyTimeline } from '@/lib/framework/facilitation/journey/queries';
 import { getPublishedMapVersion } from '@/lib/framework/facilitation/map/version-service';
 import { enrichMovesWithRelated } from '@/lib/framework/facilitation/overlays/related';
+import { maybeEmitModuleCompleted } from '@/lib/framework/engagement/module-completion';
 
 const viewer = { userId: 'user-1' };
 const key = { userId: 'user-1', graphSlug: 'onboarding' };
@@ -159,5 +163,64 @@ describe('applyJourneyTransition', () => {
       await applyJourneyTransition(viewer, key, { nodeKey: 'n', kind: 'complete' })
     ).toBeNull();
     expect(applyEvent).not.toHaveBeenCalled();
+  });
+
+  // A context whose graph resolves `nodeKey` to the given node — the module.completed
+  // detection reads `graph.node(nodeKey).moduleSlug` after a committed `complete`.
+  function contextWithNode(node: { moduleSlug?: string } | undefined) {
+    return {
+      ...(context as object),
+      availabilityInput: { ...availabilityInput, graph: { node: () => node } },
+    } as never;
+  }
+
+  it('checks module.completed after a committed complete of a module node', async () => {
+    vi.mocked(assembleJourneyContext).mockResolvedValue(
+      contextWithNode({ moduleSlug: 'onboarding' })
+    );
+    vi.mocked(applyEvent).mockResolvedValue({ ok: true, nodeState: {}, event: {} } as never);
+
+    await applyJourneyTransition(viewer, key, { nodeKey: 'deep', kind: 'complete' });
+
+    expect(maybeEmitModuleCompleted).toHaveBeenCalledWith({
+      userId: 'user-1',
+      moduleSlug: 'onboarding',
+      journeyId: 'journey-1',
+      graph: expect.anything(),
+    });
+  });
+
+  it('does NOT check module.completed when the completed node is not a module node', async () => {
+    vi.mocked(assembleJourneyContext).mockResolvedValue(contextWithNode({})); // no moduleSlug
+    vi.mocked(applyEvent).mockResolvedValue({ ok: true, nodeState: {}, event: {} } as never);
+
+    await applyJourneyTransition(viewer, key, { nodeKey: 'stage-1', kind: 'complete' });
+
+    expect(maybeEmitModuleCompleted).not.toHaveBeenCalled();
+  });
+
+  it('does NOT check module.completed when the engine refused the complete', async () => {
+    vi.mocked(assembleJourneyContext).mockResolvedValue(
+      contextWithNode({ moduleSlug: 'onboarding' })
+    );
+    vi.mocked(applyEvent).mockResolvedValue({
+      ok: false,
+      rejection: { code: 'not_active' },
+    } as never);
+
+    await applyJourneyTransition(viewer, key, { nodeKey: 'deep', kind: 'complete' });
+
+    expect(maybeEmitModuleCompleted).not.toHaveBeenCalled();
+  });
+
+  it('does NOT check module.completed on an enter (only completes finish a module)', async () => {
+    vi.mocked(assembleJourneyContext).mockResolvedValue(
+      contextWithNode({ moduleSlug: 'onboarding' })
+    );
+    vi.mocked(applyEvent).mockResolvedValue({ ok: true, nodeState: {}, event: {} } as never);
+
+    await applyJourneyTransition(viewer, key, { nodeKey: 'deep', kind: 'enter' });
+
+    expect(maybeEmitModuleCompleted).not.toHaveBeenCalled();
   });
 });
