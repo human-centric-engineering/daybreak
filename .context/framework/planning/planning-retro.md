@@ -743,3 +743,24 @@ startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registra
   read-merge)? (3) does calling the reused thing directly invert a layer (prefer a local hook seam over a
   cross-layer import)?_ Budget a review-fix commit per task — `/code-review` at high effort caught all four here,
   none of which the passing unit tests surfaced. _Status: open._
+
+### B32 · A board-sketch "just plug in the overlay/prop" hides a missing host hook — the recon that reconciles the sketch against the tree turns a 1-line task into its true first move
+
+- **Discovery ([[f-engagement-analytics]] t-1).** The board sketched t-1 as "the explorer/atlas **overlay host
+  prop** + heat aggregation + the overlay" — as if the host slot already existed and this feature merely plugged
+  into it. The feature-doc reconciliation against the tree (per [[planning-retro#B2]]) found the opposite: the
+  journey-canvas took exactly `{ nodes, edges }` with **no extension slot**, and the atlas canvas's nodes are
+  composition entities, not map nodes (so heat doesn't project onto it at all). The [[f-ops-views]] "host-first,
+  overlay-plugs-in" promise had shipped the host **without** the plug. So t-1's real first move was **adding the
+  `overlay` slot** — the "prop" the sketch assumed was a precondition was actually the deliverable.
+- **The tell.** A task phrased as "add X **to** the existing Y hook" where Y was promised by a _different_ shipped
+  feature's decision ("deferred to 15", "15 will expose the prop"). A deferral-to-another-feature is exactly where a
+  promised seam silently doesn't get built ([[planning-retro#B28|B28]]) — so when a task depends on such a seam,
+  **grep the seam in the tree before sizing the task**, don't trust the promise. Here it flipped t-1 from "plug in"
+  to "build the socket + plug in", and (correctly) ruled the atlas out of scope for heat entirely.
+- **Lesson.** When a follow-on task reads as "just add the overlay/prop/handler to the existing hook", the
+  reconciliation's job is to **prove the hook exists** — find the extension point in the actual code, confirm its
+  shape matches what you'll pass, and confirm the surface it lives on is the right one (map-node canvas, not
+  composition canvas). If it's absent, the task's honest first deliverable is the host hook; size and split
+  accordingly ([[planning-retro#B25]] — t-1 split on exactly this API/host-slot vs. UI seam). Cheap check, saves a
+  mid-build "wait, there's nowhere to plug this in". _Status: open._
