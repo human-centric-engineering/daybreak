@@ -138,3 +138,102 @@ describe('getModuleStats', () => {
     });
   });
 });
+
+const MIN = 60 * 1000;
+
+/** Arm findMany to dispatch by query so entered/completed dwell rows are distinguishable. */
+function armStreams(opts: {
+  distinctUsers?: Array<{ userId: string }>;
+  entered?: Array<{ userId: string; occurredAt: Date }>;
+  completed?: Array<{ userId: string; occurredAt: Date }>;
+  feedback?: unknown[];
+}) {
+  const { distinctUsers = [], entered = [], completed = [], feedback = [] } = opts;
+  findMock.mockImplementation((args: { distinct?: string[]; where?: { type?: string } }) => {
+    if (args.distinct) return Promise.resolve(distinctUsers);
+    switch (args.where?.type) {
+      case 'module.entered':
+        return Promise.resolve(entered);
+      case 'node_completed':
+        return Promise.resolve(completed);
+      case 'module.feedback':
+        return Promise.resolve(feedback);
+      default:
+        return Promise.resolve([]);
+    }
+  });
+}
+
+describe('getModuleStats — dwell', () => {
+  it('pairs an entry with the same user’s next completion within the session gap', async () => {
+    armStreams({
+      entered: [{ userId: 'u1', occurredAt: d('2026-07-03T10:00:00Z') }],
+      completed: [{ userId: 'u1', occurredAt: d('2026-07-03T10:02:00Z') }],
+    });
+    const { dwell } = await getModuleStats('onboarding');
+    expect(dwell).toEqual({ medianMs: 2 * MIN, sampleCount: 1 });
+  });
+
+  it('returns the median over an odd number of pairs', async () => {
+    armStreams({
+      entered: [
+        { userId: 'a', occurredAt: d('2026-07-03T10:00:00Z') },
+        { userId: 'b', occurredAt: d('2026-07-03T10:00:00Z') },
+        { userId: 'c', occurredAt: d('2026-07-03T10:00:00Z') },
+      ],
+      completed: [
+        { userId: 'a', occurredAt: d('2026-07-03T10:01:00Z') }, // 1m
+        { userId: 'b', occurredAt: d('2026-07-03T10:02:00Z') }, // 2m (median)
+        { userId: 'c', occurredAt: d('2026-07-03T10:05:00Z') }, // 5m
+      ],
+    });
+    const { dwell } = await getModuleStats('onboarding');
+    expect(dwell).toEqual({ medianMs: 2 * MIN, sampleCount: 3 });
+  });
+
+  it('averages the two middle samples for an even number of pairs', async () => {
+    armStreams({
+      entered: [
+        { userId: 'a', occurredAt: d('2026-07-03T10:00:00Z') },
+        { userId: 'b', occurredAt: d('2026-07-03T10:00:00Z') },
+      ],
+      completed: [
+        { userId: 'a', occurredAt: d('2026-07-03T10:02:00Z') }, // 2m
+        { userId: 'b', occurredAt: d('2026-07-03T10:04:00Z') }, // 4m
+      ],
+    });
+    const { dwell } = await getModuleStats('onboarding');
+    expect(dwell).toEqual({ medianMs: 3 * MIN, sampleCount: 2 });
+  });
+
+  it('ignores a completion that lands beyond the 30-minute session gap', async () => {
+    armStreams({
+      entered: [{ userId: 'u1', occurredAt: d('2026-07-03T10:00:00Z') }],
+      completed: [{ userId: 'u1', occurredAt: d('2026-07-03T10:45:00Z') }], // 45m > gap
+    });
+    const { dwell } = await getModuleStats('onboarding');
+    expect(dwell).toBeNull();
+  });
+
+  it('consumes each completion once — two entries can’t both claim one completion', async () => {
+    armStreams({
+      entered: [
+        { userId: 'u1', occurredAt: d('2026-07-03T10:00:00Z') },
+        { userId: 'u1', occurredAt: d('2026-07-03T10:05:00Z') },
+      ],
+      completed: [{ userId: 'u1', occurredAt: d('2026-07-03T10:10:00Z') }],
+    });
+    const { dwell } = await getModuleStats('onboarding');
+    // The first entry claims the completion (10m); the second is left unpaired.
+    expect(dwell).toEqual({ medianMs: 10 * MIN, sampleCount: 1 });
+  });
+
+  it('returns null when there are entries but no completions to pair with', async () => {
+    armStreams({
+      entered: [{ userId: 'u1', occurredAt: d('2026-07-03T10:00:00Z') }],
+      completed: [],
+    });
+    const { dwell } = await getModuleStats('onboarding');
+    expect(dwell).toBeNull();
+  });
+});

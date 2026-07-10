@@ -33,6 +33,7 @@ const STATS = {
   entries: 10,
   completions: 4,
   returningUsers: 2,
+  dwell: { medianMs: 120_000, sampleCount: 5 },
   feedback: { count: 1, averageRating: 5, distribution: {}, recentComments: [] },
 };
 

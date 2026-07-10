@@ -23,14 +23,27 @@ interface StatsTabProps {
 /** Distribution rows render high→low so 5-star sits on top. */
 const RATING_ROWS = ['5', '4', '3', '2', '1'] as const;
 
-function StatCard({ label, value }: { label: string; value: number }) {
+/** Format a millisecond duration as a compact human string (e.g. `2m 30s`, `1h 5m`). */
+function formatDurationMs(ms: number): string {
+  const totalSec = Math.round(ms / 1000);
+  if (totalSec < 60) return `${totalSec}s`;
+  const totalMin = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  if (totalMin < 60) return sec > 0 ? `${totalMin}m ${sec}s` : `${totalMin}m`;
+  const hr = Math.floor(totalMin / 60);
+  const min = totalMin % 60;
+  return min > 0 ? `${hr}h ${min}m` : `${hr}h`;
+}
+
+function StatCard({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-muted-foreground text-sm font-medium">{label}</CardTitle>
       </CardHeader>
       <CardContent>
-        <p className="text-2xl font-semibold tabular-nums">{value.toLocaleString()}</p>
+        <p className="text-2xl font-semibold tabular-nums">{value}</p>
+        {hint !== undefined ? <p className="text-muted-foreground mt-1 text-xs">{hint}</p> : null}
       </CardContent>
     </Card>
   );
@@ -45,17 +58,26 @@ export function StatsTab({ stats }: StatsTabProps) {
     );
   }
 
-  const { uniqueUsers, entries, completions, returningUsers, feedback } = stats;
+  const { uniqueUsers, entries, completions, returningUsers, dwell, feedback } = stats;
   // Scale the bars to the tallest bucket; guard the empty case so we never divide by zero.
   const maxCount = Math.max(1, ...Object.values(feedback.distribution));
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Unique users" value={uniqueUsers} />
-        <StatCard label="Entries" value={entries} />
-        <StatCard label="Completions" value={completions} />
-        <StatCard label="Returning users" value={returningUsers} />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        <StatCard label="Unique users" value={uniqueUsers.toLocaleString()} />
+        <StatCard label="Entries" value={entries.toLocaleString()} />
+        <StatCard label="Completions" value={completions.toLocaleString()} />
+        <StatCard label="Returning users" value={returningUsers.toLocaleString()} />
+        <StatCard
+          label="Median dwell"
+          value={dwell !== null ? formatDurationMs(dwell.medianMs) : '—'}
+          hint={
+            dwell !== null
+              ? `over ${dwell.sampleCount.toLocaleString()} ${dwell.sampleCount === 1 ? 'session' : 'sessions'}`
+              : 'No data yet'
+          }
+        />
       </div>
 
       <Card>
