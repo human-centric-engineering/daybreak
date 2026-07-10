@@ -24,6 +24,7 @@ import {
 import { getJourneyTimeline } from '@/lib/framework/facilitation/journey/queries';
 import { getPublishedMapVersion } from '@/lib/framework/facilitation/map/version-service';
 import { enrichMovesWithRelated } from '@/lib/framework/facilitation/overlays/related';
+import { maybeEmitModuleCompleted } from '@/lib/framework/engagement/module-completion';
 import { assembleJourneyContext, type JourneyContext } from '@/lib/framework/guidance/assemble';
 import {
   rankMoves,
@@ -135,7 +136,7 @@ export async function applyJourneyTransition(
   const context = await assembleJourneyContext(viewer, key, scope);
   if (context === null) return null;
 
-  return applyEvent({
+  const result = await applyEvent({
     ...context.availabilityInput,
     transition: {
       userId: key.userId,
@@ -144,4 +145,23 @@ export async function applyJourneyTransition(
       kind: move.kind,
     },
   });
+
+  // module.completed detection (f-engagement-analytics t-3, spec §4.3): after a *committed*
+  // `complete` on a node that belongs to a module, check whether that finished the whole
+  // module for this user and, if so, emit `module.completed`. Fire-and-forget and
+  // non-throwing — the pure engine (`applyEvent`) stays untouched (F11); the derived,
+  // whole-module fact is computed here in the transition caller, after the write commits.
+  if (result.ok && move.kind === 'complete') {
+    const node = context.availabilityInput.graph.node(move.nodeKey);
+    if (node?.moduleSlug !== undefined) {
+      void maybeEmitModuleCompleted({
+        userId: key.userId,
+        moduleSlug: node.moduleSlug,
+        journeyId: context.journey.id,
+        graph: context.availabilityInput.graph,
+      });
+    }
+  }
+
+  return result;
 }

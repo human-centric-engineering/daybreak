@@ -241,11 +241,11 @@ tests). Concretely:
 
 ## Tasks (promoted)
 
-| ID  | Task                                                                                                                                                                                                                                                   | Files (indicative)                                                                                                                                                                                                                                                                                                                              | Deps | Status        | PR  |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ------------- | --- |
-| t-1 | **Collective heat/drop-off** — per-node cross-user aggregate over the stream + `GET …/maps/[slug]/heat` + a generic `overlay` slot on the journey canvas + a heat overlay (intensity + drop-off) + a map-scoped heat page + legend/toggle              | `lib/framework/engagement/map-heat.ts` (new), `app/api/v1/admin/framework/maps/[slug]/heat/route.ts` (new), `components/admin/framework/journey-explorer/journey-canvas.tsx` (+`overlay` slot), `components/admin/framework/map-heat/*` (new: heat mapper + node + page view), `app/admin/framework/maps/[slug]/heat/page.tsx` (new), `tests/…` | —    | **in flight** | —   |
-| t-2 | **Dwell metric** — a sessionised `module.entered`→`node_completed` dwell on `getModuleStats` + a dwell stat card on the module Stats tab                                                                                                               | `lib/framework/engagement/stats.ts` (+`dwell`), `components/admin/framework/module-detail/stats-tab.tsx` (+card), `tests/…`                                                                                                                                                                                                                     | —    | **planned**   | —   |
-| t-3 | **Deferred emit sites** — `module.completed` (all-nodes-complete, idempotent, from the transition caller — engine untouched) + `module.status_changed` (direct binding fire in `updateModuleSettings`, no `JourneyEvent`) + optional `session.started` | `lib/framework/engagement/vocabulary.ts` (+literals), `lib/framework/engagement/module-completion.ts` (new checker), the engine transition caller (edit), `lib/framework/modules/service.ts` (+status-change fire), `app/api/v1/framework/modules/[slug]/chat/stream/route.ts` (opt. `session.started`), `tests/…`                              | —    | **planned**   | —   |
+| ID  | Task                                                                                                                                                                                                                                                                                                        | Files (indicative)                                                                                                                                                                                                                                                                                                                              | Deps | Status                              | PR          |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---- | ----------------------------------- | ----------- |
+| t-1 | **Collective heat/drop-off** — per-node cross-user aggregate over the stream + `GET …/maps/[slug]/heat` + a generic `overlay` slot on the journey canvas + a heat overlay (intensity + drop-off) + a map-scoped heat page + legend/toggle                                                                   | `lib/framework/engagement/map-heat.ts` (new), `app/api/v1/admin/framework/maps/[slug]/heat/route.ts` (new), `components/admin/framework/journey-explorer/journey-canvas.tsx` (+`overlay` slot), `components/admin/framework/map-heat/*` (new: heat mapper + node + page view), `app/admin/framework/maps/[slug]/heat/page.tsx` (new), `tests/…` | —    | **shipped** (t-1a #140 · t-1b #141) | #140 · #141 |
+| t-2 | **Dwell metric** — a sessionised `module.entered`→`node_completed` dwell on `getModuleStats` + a dwell stat card on the module Stats tab                                                                                                                                                                    | `lib/framework/engagement/stats.ts` (+`dwell`), `components/admin/framework/module-detail/stats-tab.tsx` (+card), `tests/…`                                                                                                                                                                                                                     | —    | **shipped**                         | #142        |
+| t-3 | **Deferred emit sites** — `module.completed` (all-nodes-complete, idempotent, from the transition caller — engine untouched) + `module.status_changed` (direct binding fire in `updateModuleSettings`, no `JourneyEvent`); **`session.started` dropped** (decision D — most-negotiable emit, hot-path cost) | `lib/framework/engagement/vocabulary.ts` (+literals), `lib/framework/engagement/module-completion.ts` (new checker), `lib/framework/guidance/guidance.ts` (transition-caller wiring), `lib/framework/modules/service.ts` (+status-change fire), `tests/…`                                                                                       | —    | **in flight**                       | —           |
 
 **Three promoted PRs, mutually independent** (disjoint subsystems, no shared schema — decision A) → any
 order / parallel after this claim PR. Each is a candidate split-at-build (t-1 on the API/UI seam; t-3
@@ -303,12 +303,18 @@ journeyId)` after a `node_completed` commit, load the published map's `module`-n
   include `status`, `void runModuleWorkflowBindings(slug, 'module.status_changed', { from, to })`
   fire-and-forget, isolated (a dispatch failure never breaks the settings write). No `JourneyEvent`
   (operator action, no subject user).
-- **`session.started`** (optional, decision D) — if included, emit from the surface chat route alongside
-  `module.entered` when the user has no `JourneyEvent` within the session gap; `moduleSlug`/`journeyId`
-  null. Drop if the PR runs hot.
-- **Vocabulary** — add `moduleCompleted` (+ optional `sessionStarted`) to `ENGAGEMENT_EVENT_TYPE`;
-  `module.status_changed` is a **binding-event** literal (no `JourneyEvent`), kept as a module-lifecycle
-  constant, not an engagement-stream kind.
+- **`session.started`** (optional, decision D) — **DROPPED at build.** The decision-D drop trigger fired:
+  its "no `JourneyEvent` within the session gap" check is an **unbounded, un-indexed full-stream scan on
+  the hot module-chat path** (decision E ships no `(userId, occurredAt)` index), and its session-boundary
+  semantics are fuzzier than the two committed emits (they'd warrant their own design pass if a consumer
+  ever needs them). "Done when" already marks it optional, so dropping it satisfies the gate. Promote to
+  its own small feature if a real trigger appears. The surface chat route is therefore **untouched**.
+- **Vocabulary** — added `moduleCompleted` to `ENGAGEMENT_EVENT_TYPE` (a real `JourneyEvent` stream kind);
+  `module.status_changed` lives in a **separate `MODULE_LIFECYCLE_EVENT_TYPE`** binding-event map (no
+  `JourneyEvent`, no subject user — kept out of the erasable engagement stream the stats read).
+- **Build note — the transition caller is `applyJourneyTransition` (`guidance/guidance.ts`), not the
+  engine.** `applyEvent` stays the pure sole-writer (F11); the `module.completed` check runs after it
+  commits, reading completion from the `node_completed` stream (repeatable-node-safe).
 - **Done when:** `module.completed` fires once when every module node is complete for a user (idempotent,
   engine untouched), `module.status_changed` fires bindings on a status change with no `JourneyEvent`,
   and (if included) `session.started` respects the session gap; detection + isolation + idempotency tests
@@ -363,8 +369,9 @@ Resolved at plan time so a builder doesn't relitigate; re-confirm at build only 
 An operator can: open a **map's collective heat view** and see per-node traffic + drop-off over the
 published structure (all derived from the insert-only stream, no counters); read a module's **dwell**
 alongside its other engagement stats; and rely on the framework firing **`module.completed`** when a
-user finishes a module, **`module.status_changed` → bound workflows** when an operator changes a
-module's lifecycle, and (optionally) **`session.started`** at a session boundary. All framework-tier,
+user finishes a module, and **`module.status_changed` → bound workflows** when an operator changes a
+module's lifecycle. (`session.started` was dropped — the most-negotiable emit, on its hot-path cost; see
+t-3.) All framework-tier,
 all reusing shipped primitives, **no new table** — the pure engine stays untouched and the only possible
 migration is a deferred scale index. **Deliberately out of scope:** the shared-canvas primitive
 extraction, atlas heat, a stored dwell counter, per-owner subject-scoped views (seam shaped, not wired),

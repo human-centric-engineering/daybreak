@@ -20,9 +20,12 @@
  */
 
 import { prisma } from '@/lib/db/client';
+import { logger } from '@/lib/logging';
 import { ConflictError, ValidationError } from '@/lib/api/errors';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { invalidateAgentAccess } from '@/lib/orchestration/knowledge/resolveAgentDocumentAccess';
+import { runModuleWorkflowBindings } from '@/lib/framework/modules/workflow-bindings';
+import { MODULE_LIFECYCLE_EVENT_TYPE } from '@/lib/framework/engagement/vocabulary';
 import { mapPrismaWriteError } from '@/lib/framework/shared/prisma-errors';
 import {
   getModuleSettings,
@@ -104,6 +107,25 @@ export async function updateModuleSettings(
       changes,
       metadata: { slug },
       clientIp: clientIp ?? null,
+    });
+  }
+
+  // module.status_changed (f-engagement-analytics t-3, decision D): a status change fires
+  // the module's `module.status_changed` workflow bindings directly. This is an operator
+  // action with no subject user, so it writes NO `JourneyEvent` (it is not engagement) —
+  // it dispatches straight through `runModuleWorkflowBindings`. Fire-and-forget and
+  // isolated: a dispatch failure is logged, never allowed to fail the settings write.
+  if (changes.status !== undefined) {
+    const { from, to } = changes.status;
+    void runModuleWorkflowBindings(slug, MODULE_LIFECYCLE_EVENT_TYPE.statusChanged, {
+      from,
+      to,
+    }).catch((err) => {
+      logger.error(
+        'updateModuleSettings: module.status_changed dispatch failed',
+        err instanceof Error ? err : new Error(String(err)),
+        { slug }
+      );
     });
   }
 
