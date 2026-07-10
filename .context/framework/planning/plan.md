@@ -228,7 +228,7 @@ The data-slot shape the other layers need (spec §6); deep capture-loop design d
 
 ### 06 · `f-module-config` — config form + versioning
 
-_Owner:_ Simon Holmes · _Status:_ **in flight** · _Depends on:_ f-module-core ✅ · _~4 PRs (2 promoted)_ · **detailed plan: [[f-module-config]]**
+_Owner:_ Simon Holmes · _Status:_ **shipped** (t-1 #56 · t-2 #58) · _Depends on:_ f-module-core ✅ · _~4 PRs (2 promoted)_ · **detailed plan: [[f-module-config]]**
 
 Generic admin config from each module's Zod schema (A4) + config versioning (A10). **API-first: ships
 the config-validation + versioning engine (incl. the server-side Zod→field-descriptor walker that is
