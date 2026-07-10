@@ -11,10 +11,12 @@
  * admin surface passes none today (a cross-user aggregate under `withAdminAuth`), but the
  * query is one WHERE clause from owner/team/cohort-scoped stats, not a rewrite.
  *
- * **Scale.** v1 reads are Prisma (`distinct` for unique users, a full feedback fetch for
- * the ratings summary) — fine at single-tenant volume. The scale follow-ups, when the event
- * table grows: a `framework_journey_event (moduleSlug, occurredAt)` index and a raw
- * `COUNT(DISTINCT …)` / DB-side rating rollup (deliberately NOT shipped speculatively).
+ * **Scale.** v1 reads are Prisma row fetches — `distinct` for unique users, and full
+ * entered/completed/feedback fetches folded in-process (counts, returning users, dwell, and
+ * the ratings summary all derive from those rows, so one scan per stream feeds several
+ * metrics) — fine at single-tenant volume. The scale follow-ups, when the event table grows:
+ * a `framework_journey_event (moduleSlug, occurredAt)` index and DB-side rollups
+ * (`COUNT`/`COUNT(DISTINCT …)`, a median aggregate) — deliberately NOT shipped speculatively.
  */
 
 import { z } from 'zod';
@@ -106,25 +108,12 @@ export async function getModuleStats(
     ...(filter.userId !== undefined ? { userId: filter.userId } : {}),
   };
 
-  const [
-    distinctUsers,
-    entries,
-    completions,
-    entriesPerUser,
-    enteredRows,
-    completedRows,
-    feedbackRows,
-  ] = await Promise.all([
+  // Dwell needs the full entered/completed rows (userId + occurredAt), not just counts, to
+  // pair within a session gap — so `entries`, `completions`, and `returningUsers` are derived
+  // from those same rows rather than issuing separate count/groupBy queries over the identical
+  // partitions (each metric is still stream-derived, A9).
+  const [distinctUsers, enteredRows, completedRows, feedbackRows] = await Promise.all([
     prisma.journeyEvent.findMany({ where: base, select: { userId: true }, distinct: ['userId'] }),
-    prisma.journeyEvent.count({ where: { ...base, type: ENGAGEMENT_EVENT_TYPE.moduleEntered } }),
-    prisma.journeyEvent.count({ where: { ...base, type: JOURNEY_EVENT_TYPE.nodeCompleted } }),
-    prisma.journeyEvent.groupBy({
-      by: ['userId'],
-      where: { ...base, type: ENGAGEMENT_EVENT_TYPE.moduleEntered },
-      _count: { _all: true },
-    }),
-    // Dwell needs the timestamps, not just counts: each entered/completed row per user,
-    // ascending, to pair within a session gap.
     prisma.journeyEvent.findMany({
       where: { ...base, type: ENGAGEMENT_EVENT_TYPE.moduleEntered },
       select: { userId: true, occurredAt: true },
@@ -142,12 +131,19 @@ export async function getModuleStats(
     }),
   ]);
 
+  // Users with more than one entry (came back).
+  const entriesByUser = new Map<string, number>();
+  for (const row of enteredRows) {
+    entriesByUser.set(row.userId, (entriesByUser.get(row.userId) ?? 0) + 1);
+  }
+  const returningUsers = [...entriesByUser.values()].filter((n) => n > 1).length;
+
   return {
     moduleSlug,
     uniqueUsers: distinctUsers.length,
-    entries,
-    completions,
-    returningUsers: entriesPerUser.filter((g) => g._count._all > 1).length,
+    entries: enteredRows.length,
+    completions: completedRows.length,
+    returningUsers,
     dwell: computeDwell(enteredRows, completedRows),
     feedback: summariseFeedback(feedbackRows, recentCommentLimit),
   };
