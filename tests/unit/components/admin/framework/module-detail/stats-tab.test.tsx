@@ -19,6 +19,7 @@ const STATS: ModuleStats = {
   entries: 42,
   completions: 28,
   returningUsers: 13,
+  dwell: { medianMs: 150_000, sampleCount: 9 },
   feedback: {
     count: 3,
     averageRating: 4.33,
@@ -42,6 +43,37 @@ describe('StatsTab', () => {
     expect(screen.getByText('4.33')).toBeInTheDocument();
     expect(screen.getByText('Recent comments')).toBeInTheDocument();
     expect(screen.getByText('wonderful onboarding')).toBeInTheDocument();
+  });
+
+  it('renders the median dwell formatted as a duration with its sample count', () => {
+    render(<StatsTab stats={STATS} />);
+    expect(screen.getByText('Median dwell')).toBeInTheDocument();
+    // 150_000 ms → 2m 30s.
+    expect(screen.getByText('2m 30s')).toBeInTheDocument();
+    expect(screen.getByText('over 9 sessions')).toBeInTheDocument();
+  });
+
+  it('degrades the dwell card to a dash + no-data hint when dwell is null', () => {
+    render(<StatsTab stats={{ ...STATS, dwell: null }} />);
+    expect(screen.getByText('Median dwell')).toBeInTheDocument();
+    expect(screen.getByText('—')).toBeInTheDocument();
+    expect(screen.getByText('No data yet')).toBeInTheDocument();
+  });
+
+  it('uses the singular session label for a single dwell sample', () => {
+    render(<StatsTab stats={{ ...STATS, dwell: { medianMs: 45_000, sampleCount: 1 } }} />);
+    // 45_000 ms → 45s (under a minute).
+    expect(screen.getByText('45s')).toBeInTheDocument();
+    expect(screen.getByText('over 1 session')).toBeInTheDocument();
+  });
+
+  it.each([
+    [120_000, '2m'], // whole minutes, no trailing seconds
+    [3_900_000, '1h 5m'], // hours + minutes
+    [3_600_000, '1h'], // whole hours, no trailing minutes
+  ])('formats a %d ms dwell as "%s"', (medianMs, expected) => {
+    render(<StatsTab stats={{ ...STATS, dwell: { medianMs, sampleCount: 4 } }} />);
+    expect(screen.getByText(expected)).toBeInTheDocument();
   });
 
   it('shows the couldn’t-load state on a null stats (never a false all-zero)', () => {

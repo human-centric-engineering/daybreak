@@ -18,6 +18,7 @@ export type {
   ModuleStats,
   ModuleFeedbackStats,
   ModuleStatsFilter,
+  DwellStats,
   RecentComment,
 } from '@/lib/framework/engagement/stats';
 export { getMapHeat } from '@/lib/framework/engagement/map-heat';

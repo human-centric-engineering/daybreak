@@ -27,6 +27,15 @@ import { JOURNEY_EVENT_TYPE } from '@/lib/framework/facilitation/journey/vocabul
 /** How many recent comments the summary carries by default. */
 const DEFAULT_RECENT_COMMENT_LIMIT = 5;
 
+/**
+ * Coarse sessionisation gap for dwell (30 min). A `module.entered` pairs only with the
+ * user's next `node_completed` that lands within this window — a completion further out is
+ * a separate session, not the same sitting, and does not count as dwell. Mirrors the
+ * "derive from the stream, never a stored counter" rule (A9): dwell is a fold over the same
+ * events, not a persisted timer.
+ */
+const DWELL_SESSION_GAP_MS = 30 * 60 * 1000;
+
 /** The stored shape of a `module.feedback` event's payload (validated — DB JSON is untyped). */
 const feedbackPayloadSchema = z.object({
   rating: z.number().int().min(1).max(5),
@@ -52,6 +61,14 @@ export interface ModuleFeedbackStats {
   recentComments: RecentComment[];
 }
 
+/** Sessionised dwell derived from `module.entered`→`node_completed` deltas (A9). */
+export interface DwellStats {
+  /** Median elapsed ms from entering the module to completing a node in the same session. */
+  medianMs: number;
+  /** How many entered→completed pairs the median is over. */
+  sampleCount: number;
+}
+
 /** Engagement stats for one module, all derived from the event stream (A9). */
 export interface ModuleStats {
   moduleSlug: string;
@@ -63,6 +80,8 @@ export interface ModuleStats {
   completions: number;
   /** Users with more than one entry (came back). */
   returningUsers: number;
+  /** Median entered→completed dwell (sessionised); `null` with no paired samples. */
+  dwell: DwellStats | null;
   feedback: ModuleFeedbackStats;
 }
 
@@ -87,7 +106,15 @@ export async function getModuleStats(
     ...(filter.userId !== undefined ? { userId: filter.userId } : {}),
   };
 
-  const [distinctUsers, entries, completions, entriesPerUser, feedbackRows] = await Promise.all([
+  const [
+    distinctUsers,
+    entries,
+    completions,
+    entriesPerUser,
+    enteredRows,
+    completedRows,
+    feedbackRows,
+  ] = await Promise.all([
     prisma.journeyEvent.findMany({ where: base, select: { userId: true }, distinct: ['userId'] }),
     prisma.journeyEvent.count({ where: { ...base, type: ENGAGEMENT_EVENT_TYPE.moduleEntered } }),
     prisma.journeyEvent.count({ where: { ...base, type: JOURNEY_EVENT_TYPE.nodeCompleted } }),
@@ -95,6 +122,18 @@ export async function getModuleStats(
       by: ['userId'],
       where: { ...base, type: ENGAGEMENT_EVENT_TYPE.moduleEntered },
       _count: { _all: true },
+    }),
+    // Dwell needs the timestamps, not just counts: each entered/completed row per user,
+    // ascending, to pair within a session gap.
+    prisma.journeyEvent.findMany({
+      where: { ...base, type: ENGAGEMENT_EVENT_TYPE.moduleEntered },
+      select: { userId: true, occurredAt: true },
+      orderBy: { occurredAt: 'asc' },
+    }),
+    prisma.journeyEvent.findMany({
+      where: { ...base, type: JOURNEY_EVENT_TYPE.nodeCompleted },
+      select: { userId: true, occurredAt: true },
+      orderBy: { occurredAt: 'asc' },
     }),
     prisma.journeyEvent.findMany({
       where: { ...base, type: ENGAGEMENT_EVENT_TYPE.moduleFeedback },
@@ -109,8 +148,63 @@ export async function getModuleStats(
     entries,
     completions,
     returningUsers: entriesPerUser.filter((g) => g._count._all > 1).length,
+    dwell: computeDwell(enteredRows, completedRows),
     feedback: summariseFeedback(feedbackRows, recentCommentLimit),
   };
+}
+
+/**
+ * Sessionise dwell: pair each `module.entered` with the same user's next `node_completed`
+ * within {@link DWELL_SESSION_GAP_MS}, and return the median of the elapsed deltas (`null`
+ * with no pairs). A two-pointer walk per user consumes each completion at most once, so two
+ * entries can't both claim one completion (which would double-count); an entry with no
+ * completion inside the gap is simply unpaired.
+ */
+function computeDwell(
+  enteredRows: Array<{ userId: string; occurredAt: Date }>,
+  completedRows: Array<{ userId: string; occurredAt: Date }>
+): DwellStats | null {
+  const enteredByUser = groupTimestampsByUser(enteredRows);
+  const completedByUser = groupTimestampsByUser(completedRows);
+
+  const deltas: number[] = [];
+  for (const [userId, entries] of enteredByUser) {
+    const completions = completedByUser.get(userId);
+    if (completions === undefined) continue;
+    let ci = 0;
+    for (const enteredAt of entries) {
+      // Skip completions strictly before this entry — unpairable with it or any later entry.
+      while (ci < completions.length && completions[ci] < enteredAt) ci += 1;
+      if (ci >= completions.length) break; // no completions left for any later entry either
+      const delta = completions[ci] - enteredAt;
+      if (delta <= DWELL_SESSION_GAP_MS) {
+        deltas.push(delta);
+        ci += 1; // consume: this completion can't pair with a later entry too
+      }
+      // delta > gap → leave ci; a later (closer) entry may still pair with it.
+    }
+  }
+
+  if (deltas.length === 0) return null;
+  deltas.sort((a, b) => a - b);
+  const mid = Math.floor(deltas.length / 2);
+  const median = deltas.length % 2 === 1 ? deltas[mid] : (deltas[mid - 1] + deltas[mid]) / 2;
+  return { medianMs: Math.round(median), sampleCount: deltas.length };
+}
+
+/** Group event rows into per-user ascending epoch-ms arrays (defensively re-sorted). */
+function groupTimestampsByUser(
+  rows: Array<{ userId: string; occurredAt: Date }>
+): Map<string, number[]> {
+  const byUser = new Map<string, number[]>();
+  for (const row of rows) {
+    const list = byUser.get(row.userId);
+    const ms = row.occurredAt.getTime();
+    if (list === undefined) byUser.set(row.userId, [ms]);
+    else list.push(ms);
+  }
+  for (const list of byUser.values()) list.sort((a, b) => a - b);
+  return byUser;
 }
 
 /** Fold the module's feedback events (newest first) into the ratings summary. */
