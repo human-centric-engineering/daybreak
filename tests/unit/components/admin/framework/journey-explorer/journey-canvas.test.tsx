@@ -20,6 +20,7 @@ vi.mock('@xyflow/react', () => ({
   Background: () => null,
   Controls: () => null,
   MiniMap: () => null,
+  Panel: ({ children }: { children?: ReactNode }) => <div data-testid="rf-panel">{children}</div>,
   MarkerType: { ArrowClosed: 'arrowclosed' },
 }));
 const theme = vi.hoisted(() => ({ value: 'light' }));
@@ -52,5 +53,18 @@ describe('JourneyCanvas', () => {
     theme.value = 'dark';
     render(<JourneyCanvas nodes={NODES} edges={[]} />);
     expect(screen.getByTestId('journey-canvas')).toBeInTheDocument();
+  });
+
+  it('renders no overlay panel by default (the explorer case is unchanged)', () => {
+    theme.value = 'light';
+    render(<JourneyCanvas nodes={NODES} edges={[]} />);
+    expect(screen.queryByTestId('rf-panel')).not.toBeInTheDocument();
+  });
+
+  it('mounts an overlay in a panel when one is provided (the heat host hook)', () => {
+    theme.value = 'light';
+    render(<JourneyCanvas nodes={NODES} edges={[]} overlay={<span>legend</span>} />);
+    const panel = screen.getByTestId('rf-panel');
+    expect(panel).toHaveTextContent('legend');
   });
 });
