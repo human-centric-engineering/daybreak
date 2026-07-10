@@ -15,7 +15,7 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-import { listGraphs, getGraphDetail } from '@/lib/framework/facilitation/map/queries';
+import { listGraphs, getGraphDetail, graphExists } from '@/lib/framework/facilitation/map/queries';
 import { prisma } from '@/lib/db/client';
 import { NotFoundError } from '@/lib/api/errors';
 
@@ -51,5 +51,22 @@ describe('getGraphDetail', () => {
   it('throws NotFoundError when the map does not exist', async () => {
     vi.mocked(prisma.facilitationGraph.findUnique).mockResolvedValue(null);
     await expect(getGraphDetail('ghost')).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
+describe('graphExists', () => {
+  it('probes id-only and returns true when the map row exists', async () => {
+    vi.mocked(prisma.facilitationGraph.findUnique).mockResolvedValue({ id: 'g1' } as never);
+
+    await expect(graphExists('main')).resolves.toBe(true);
+    expect(prisma.facilitationGraph.findUnique).toHaveBeenCalledWith({
+      where: { slug: 'main' },
+      select: { id: true },
+    });
+  });
+
+  it('returns false for an unknown slug', async () => {
+    vi.mocked(prisma.facilitationGraph.findUnique).mockResolvedValue(null);
+    await expect(graphExists('ghost')).resolves.toBe(false);
   });
 });

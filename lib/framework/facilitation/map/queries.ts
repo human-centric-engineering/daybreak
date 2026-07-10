@@ -20,6 +20,13 @@ export async function listGraphs(): Promise<FacilitationGraph[]> {
   return prisma.facilitationGraph.findMany({ orderBy: { slug: 'asc' } });
 }
 
+/** Whether a map row exists (a cheap id-only probe, mirroring `moduleExists`). Lets a
+ *  route 404 an unknown map before running an aggregate, without over-fetching the row. */
+export async function graphExists(slug: string): Promise<boolean> {
+  const row = await prisma.facilitationGraph.findUnique({ where: { slug }, select: { id: true } });
+  return row !== null;
+}
+
 /** One map (with its published version) by slug; throws `NotFoundError` if absent. */
 export async function getGraphDetail(slug: string): Promise<FacilitationGraphWithPublished> {
   const graph = await prisma.facilitationGraph.findUnique({
