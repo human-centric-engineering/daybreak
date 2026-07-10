@@ -15,7 +15,7 @@
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Plus, Search } from 'lucide-react';
+import { Flame, Plus, Search } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -113,12 +113,13 @@ export function MapsTable({ initialMaps }: MapsTableProps) {
               <TableHead>Slug</TableHead>
               <TableHead>Status</TableHead>
               <TableHead>Updated</TableHead>
+              <TableHead className="text-right">Analytics</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4} className="text-muted-foreground py-8 text-center">
+                <TableCell colSpan={5} className="text-muted-foreground py-8 text-center">
                   {initialMaps.length === 0
                     ? 'No facilitation maps yet. Create one to start authoring.'
                     : 'No maps match your search.'}
@@ -147,6 +148,14 @@ export function MapsTable({ initialMaps }: MapsTableProps) {
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">
                       {formatDate(map.updatedAt)}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Link
+                        href={`/admin/framework/maps/${encodeURIComponent(map.slug)}/heat`}
+                        className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-sm hover:underline"
+                      >
+                        <Flame className="h-3.5 w-3.5" /> Heat
+                      </Link>
                     </TableCell>
                   </TableRow>
                 );

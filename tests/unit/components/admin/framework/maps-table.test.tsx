@@ -42,6 +42,12 @@ beforeEach(() => {
 });
 
 describe('MapsTable rows', () => {
+  it('links each row to its collective heat view (f-engagement-analytics t-1b)', () => {
+    render(<MapsTable initialMaps={[map({ slug: 'onboarding', name: 'Onboarding' })]} />);
+    const heat = screen.getByRole('link', { name: /heat/i });
+    expect(heat).toHaveAttribute('href', '/admin/framework/maps/onboarding/heat');
+  });
+
   it('renders a row per map with the right status badge', () => {
     render(
       <MapsTable
