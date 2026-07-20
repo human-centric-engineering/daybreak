@@ -102,7 +102,7 @@ jobs:
       DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/sunrise_ci'
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: 'npm'
@@ -132,7 +132,7 @@ jobs:
       DATABASE_URL: 'postgresql://postgres:postgres@localhost:5432/sunrise_ci'
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: 'npm'
@@ -183,7 +183,7 @@ jobs:
       NEXT_PUBLIC_APP_URL: 'http://localhost:3000'
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: 'npm'
@@ -233,7 +233,7 @@ jobs:
       NEXT_PUBLIC_APP_URL: 'http://localhost:3000'
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: 'npm'
@@ -277,7 +277,7 @@ jobs:
         with:
           # Full history so `vitest --changed` can diff against the PR base SHA.
           fetch-depth: 0
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: 'npm'
@@ -321,7 +321,7 @@ jobs:
       NEXT_PUBLIC_APP_URL: 'http://localhost:3000'
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: '20'
           cache: 'npm'
