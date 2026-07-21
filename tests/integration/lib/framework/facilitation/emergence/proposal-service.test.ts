@@ -32,7 +32,7 @@ beforeEach(() => {
     definition: { nodes: [] },
     baseVersion: 2,
     riskClass: 'unclassified',
-  } as never);
+  });
   vi.mocked(prisma.structureChangeProposal.create).mockResolvedValue(row as never);
 });
 
