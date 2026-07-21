@@ -10,7 +10,6 @@
  * or a user id); `actorUserId` is who submitted it via the API (for the audit actor).
  */
 
-import { Prisma } from '@prisma/client';
 import type { StructureChangeProposal } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { NotFoundError } from '@/lib/api/errors';
@@ -54,7 +53,7 @@ export async function submitStructureChangeProposal(
       subjectType,
       subjectId,
       baseVersion,
-      proposedDefinition: definition as Prisma.InputJsonValue,
+      proposedDefinition: definition,
       status: 'pending',
       riskClass,
       createdBy,
