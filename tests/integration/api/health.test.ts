@@ -14,6 +14,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 import { GET } from '@/app/api/health/route';
 import { SUNRISE_VERSION } from '@/lib/sunrise-version';
+import { DAYBREAK_VERSION } from '@/lib/daybreak-version';
 
 /**
  * Mock dependencies
@@ -78,6 +79,7 @@ interface HealthResponse {
   status: 'ok' | 'error';
   version: string;
   sunrise: string;
+  daybreak: string;
   uptime: number;
   timestamp: string;
   services: {
@@ -167,6 +169,24 @@ describe('GET /api/health', () => {
       // a 500 regression slip through (anti-pattern #7).
       expect(response.status).toBe(200);
       expect(body.sunrise).toBe(SUNRISE_VERSION);
+    });
+
+    it('should include daybreak framework version field equal to DAYBREAK_VERSION', async () => {
+      // The mirror of the `sunrise` assertion above, one tier down. For a leaf
+      // app this is the only field that says which FRAMEWORK is deployed —
+      // `version` is the leaf's own and `sunrise` is the platform, so neither
+      // can answer it. Asserting equality with the imported constant catches a
+      // missing field AND a hand-edited route hard-coding the wrong literal.
+      vi.mocked(getDatabaseHealth).mockResolvedValue({
+        connected: true,
+        latency: 5,
+      });
+
+      const response = await GET(createMockRequest());
+      const body = await parseResponse<HealthResponse>(response);
+
+      expect(response.status).toBe(200);
+      expect(body.daybreak).toBe(DAYBREAK_VERSION);
     });
 
     it('should include uptime field as number', async () => {
@@ -349,6 +369,9 @@ describe('GET /api/health', () => {
       // need to know which Sunrise the failing deployment is on are exactly
       // the case where the field matters most.
       expect(body.sunrise).toBe(SUNRISE_VERSION);
+      // Same for the framework version — a failing leaf deployment is precisely
+      // when someone needs to know which Daybreak it is running.
+      expect(body.daybreak).toBe(DAYBREAK_VERSION);
       expect(mockLoggerWithContext.error).toHaveBeenCalledWith('Health check failed', dbError);
     });
 
@@ -400,6 +423,7 @@ describe('GET /api/health', () => {
       expect(body).toHaveProperty('status');
       expect(body).toHaveProperty('version');
       expect(body).toHaveProperty('sunrise');
+      expect(body).toHaveProperty('daybreak');
       expect(body).toHaveProperty('uptime');
       expect(body).toHaveProperty('timestamp');
       expect(body).toHaveProperty('services');

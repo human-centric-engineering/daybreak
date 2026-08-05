@@ -75,13 +75,35 @@ ban exists.
 `['moduleSlug', 'nodeKey', 'moduleId', 'dataSlot']` — domain tokens only. A
 `DAYBREAK_VERSION` constant in core-adjacent code introduces none of them.
 
-### 4. The health route has no seam — a 2-line core edit, deliberately
+### 4. The health route has no seam — a core edit across **5 files**, deliberately
+
+> **Corrected at build (t-1).** The plan estimated "2 lines, one file". That was
+> wrong: the response is typed AND mirrored by a Zod schema AND asserted by two
+> Sunrise test files, all of which must move together. Recorded here rather than
+> quietly absorbed, because it changes the cost of the decision.
 
 `app/api/health/route.ts` imports `APP_VERSION` and `SUNRISE_VERSION` directly and
-builds the response shape in one place. There is no registration seam and inventing
-one upstream is disproportionate for two fields. Adding `daybreak: DAYBREAK_VERSION`
-is the banner's sanctioned _"keep the edit minimal"_ case — a one-line-ish merge on
-future syncs, versus an operator who cannot tell which framework version is deployed.
+builds the response in one place, but the shape is pinned in four more:
+
+| File                                                    | Change                                      |
+| ------------------------------------------------------- | ------------------------------------------- |
+| `lib/monitoring/types.ts`                               | `daybreak: string` on `HealthCheckResponse` |
+| `lib/validations/monitoring.ts`                         | `daybreak: z.string()` on the Zod mirror    |
+| `app/api/health/route.ts`                               | import + field + doc block                  |
+| `tests/unit/lib/validations/monitoring.test.ts`         | fixture + a "rejects missing" case          |
+| `tests/unit/components/status/use-health-check.test.ts` | two fixtures                                |
+| `tests/integration/api/health.test.ts`                  | mirrors the three `sunrise` assertions      |
+
+**Still worth doing, and it was re-decided rather than assumed:** every edit is an
+additive one-liner (a "keep both" on a future sync, not a restructure); Sunrise set
+this exact precedent — type + Zod mirror + a rejects-missing test — when _it_ added
+`sunrise` for forks, so this follows a pattern rather than inventing one; and
+without it `DAYBREAK_VERSION` would be a constant with **no runtime consumer at
+all**, which is both inert and untestable end-to-end.
+
+The field is **required**, not optional, in both the type and the schema — an
+optional field would let a stripping proxy or an older deployment pass silently,
+which is the failure the schema exists to catch.
 
 ### 5. `app:ci-checks` is the lawful home for the changelog guard
 

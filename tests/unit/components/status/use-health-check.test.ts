@@ -23,6 +23,7 @@ const validOkPayload: HealthCheckResponse = {
   status: 'ok',
   version: '1.0.0',
   sunrise: '0.1.0',
+  daybreak: '0.1.0',
   uptime: 1234,
   timestamp: '2026-05-28T10:00:00.000Z',
   services: {
@@ -38,6 +39,7 @@ const validErrorPayload: HealthCheckResponse = {
   status: 'error',
   version: '1.0.0',
   sunrise: '0.1.0',
+  daybreak: '0.1.0',
   uptime: 1234,
   timestamp: '2026-05-28T10:00:00.000Z',
   services: {
