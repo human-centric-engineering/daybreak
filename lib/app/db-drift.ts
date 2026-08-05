@@ -34,7 +34,10 @@
  *   }
  *
  * Available probe factories from `@/lib/db/drift-probes`: `indexExists`,
- * `constraintExists` (optional definition-substring assertion), `columnExists`.
+ * `constraintExists` (optional definition-substring assertion), `columnExists`,
+ * and `generatedColumnExists`. For a `GENERATED ALWAYS` column use the latter —
+ * `columnExists` passes on a plain column of the same name, which is never
+ * populated, so the check goes green while the feature is silently broken.
  *
  * Daybreak fills it to register the **framework** tier's probes, then delegates to the reserved
  * **leaf** hook — the drift analogue of the boot bridge (`bootstrap.ts` → `initFramework()` →
