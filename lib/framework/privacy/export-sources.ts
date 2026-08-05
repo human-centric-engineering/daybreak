@@ -233,13 +233,3 @@ export const FRAMEWORK_SUBJECT_DATA_SOURCES: SubjectDataSource[] = [
  * with a written reason, not a silent deletion from the manifest.
  */
 export const FRAMEWORK_EXCLUDED_SOURCES: ExcludedSource[] = [];
-
-/** Framework sources returned in full. */
-export function frameworkExportedSources(): SubjectDataSource[] {
-  return FRAMEWORK_SUBJECT_DATA_SOURCES.filter((source) => source.disposition === 'export');
-}
-
-/** Framework sources returned as id + label + date only. */
-export function frameworkAttributionSources(): SubjectDataSource[] {
-  return FRAMEWORK_SUBJECT_DATA_SOURCES.filter((source) => source.disposition === 'attribution');
-}

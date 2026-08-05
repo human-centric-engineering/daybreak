@@ -181,6 +181,37 @@ describe('collectFrameworkSubjectData', () => {
     expect(events?.description.length).toBeGreaterThan(10);
   });
 
+  it('discloses a narrowing by surfacing the source’s scopeNote in meta', async () => {
+    // No framework source narrows TODAY, so this branch would otherwise never
+    // run — and it is the one that keeps a narrowed source honest. A source that
+    // returns only some of the subject's rows without a scopeNote is the
+    // silent-omission failure at row granularity instead of table granularity:
+    // the count looks like a complete answer either way.
+    const { FRAMEWORK_SUBJECT_DATA_SOURCES } =
+      await import('@/lib/framework/privacy/export-sources');
+    FRAMEWORK_SUBJECT_DATA_SOURCES.push({
+      model: 'JourneyEvent',
+      section: 'narrowedProbe',
+      disposition: 'export',
+      description: 'A deliberately narrowed probe source.',
+      scopeNote: 'Withholds rows belonging to a third party.',
+      fetch: () => Promise.resolve([{ id: 'x' }]),
+    });
+
+    try {
+      const result = await collectFrameworkSubjectData(SUBJECT);
+      const probe = result.meta.exported.find((entry) => entry.section === 'narrowedProbe');
+
+      expect(probe?.scopeNote).toBe('Withholds rows belonging to a third party.');
+      // Sources that do NOT narrow must stay free of the key, so its presence
+      // always means something.
+      const slots = result.meta.exported.find((entry) => entry.section === 'slotValues');
+      expect(slots && 'scopeNote' in slots).toBe(false);
+    } finally {
+      FRAMEWORK_SUBJECT_DATA_SOURCES.pop();
+    }
+  });
+
   it('fails the whole export when a source throws, rather than dropping a section', async () => {
     // The deliberate opposite of the erasure path. A swallowed failure here
     // yields a bundle that looks complete and is not.
