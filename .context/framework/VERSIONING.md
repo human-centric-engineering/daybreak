@@ -16,6 +16,12 @@ read that one for the _platform's_ contract with Daybreak.
 > [`CHANGELOG.md`](./CHANGELOG.md) beside it are **Daybreak-owned** and describe
 > the framework.
 
+> **Two companion docs referenced below land in the next task.**
+> `CHANGELOG.md` and `building-on-daybreak.md` (the leaf's sync guide) arrive in
+> [`f-release`](./planning/f-release.md) **t-2**; this file ships first because it
+> defines the contract they implement. Until then those links are forward
+> references, not omissions.
+
 ---
 
 ## The three versions

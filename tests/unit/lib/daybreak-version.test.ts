@@ -36,20 +36,18 @@ describe('DAYBREAK_VERSION', () => {
     expect(DAYBREAK_VERSION).toBe(packageJson.version);
   });
 
-  it('is independent of the Sunrise platform version', () => {
-    // Guards a tempting shortcut: "just mirror whatever Sunrise is on." The two
-    // tiers release on their own cadence — Daybreak ships releases without a
-    // Sunrise bump and vice versa — so tying them together would be wrong the
-    // first time either happened. This asserts they are separately sourced, not
-    // that the values differ (they may coincide).
-    expect(DAYBREAK_VERSION).not.toBe(SUNRISE_VERSION);
-  });
-
   it('exposes all three tiers as distinct, independently sourced constants', () => {
     // The three-tier contract in one assertion: every tier answers, and each is
     // a real string rather than an empty default. In Daybreak's own repo
-    // APP_VERSION and DAYBREAK_VERSION coincide (previous test); in a leaf they
-    // diverge, which is exactly why all three are exported separately.
+    // APP_VERSION and DAYBREAK_VERSION coincide (the parity test above); in a
+    // leaf they diverge, which is exactly why all three are exported separately.
+    //
+    // There is deliberately NO assertion that DAYBREAK_VERSION !== SUNRISE_VERSION.
+    // "Separately sourced" is a structural property — three constants in three
+    // modules, owned by three parties — and no runtime assertion can express it.
+    // Asserting the values differ would encode a coincidence instead: Daybreak is
+    // at 0.1.0 climbing and Sunrise at 0.8.0, so the two WILL cross, and the test
+    // would then fail on a release that did nothing wrong.
     for (const [name, value] of Object.entries({
       APP_VERSION,
       DAYBREAK_VERSION,
