@@ -1,0 +1,99 @@
+# Daybreak changelog
+
+All notable changes to the **Daybreak framework** are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/) — see
+[`VERSIONING.md`](./VERSIONING.md) for the public-surface contract and the release
+process.
+
+> **This is Daybreak's changelog, not Sunrise's.**
+> [`../../CHANGELOG.md`](../../CHANGELOG.md) at the repo root is **Sunrise's** and
+> describes the platform. A leaf reads **both**: this file for framework changes,
+> that one for platform changes Daybreak carries through.
+>
+> Changes Daybreak merely inherits unchanged from a Sunrise sync do **not** get an
+> entry here — they are already in Sunrise's changelog, and duplicating them would
+> dilute the signal. What _does_ get an entry is anything the sync changed about
+> **the leaf's contract with Daybreak** (see `0.1.0` below for exactly that case).
+
+> **Status: `0.x` alpha.** The strict SemVer contract activates at `1.0.0`. During
+> `0.x`, leaf forks should expect real merge work between any two releases. See
+> [`VERSIONING.md`](./VERSIONING.md#0x-semantics--loose-by-design).
+
+---
+
+## [Unreleased]
+
+## [0.1.0] — 2026-08-05
+
+> **First tagged Daybreak release.** The framework has been in use for some time
+> (Framework v1 and v1.1 — 23 features — are shipped); this is the point it becomes
+> **versioned and consumable**, so a leaf fork merges a named release rather than
+> whatever `main` happens to be.
+>
+> The entry below describes the leaf-facing surface **as it stands today**. It is
+> deliberately not a retroactive log of 23 features — that history lives in
+> [`planning/plan.md`](./planning/plan.md)'s Work-completed log.
+
+### ⚠️ Changed — action required for existing leaf forks
+
+- **`lib/app/data-export.ts` is now Daybreak-owned; leaf collectors move to the new
+  `lib/app/leaf-data-export.ts`.**
+
+  **If your leaf fills `lib/app/data-export.ts`, move that code before merging** —
+  otherwise the merge conflicts, and resolving it the obvious way (keeping yours)
+  silently drops the framework's own tables from every subject-access export.
+
+  Why it moved: Sunrise v0.8.0 added a GDPR Art. 15 subject-access export
+  (`exportUserData()`) plus a coverage guard that fails until every `User`-linked
+  model declares what a data subject receives from it. Sunrise's design assumes
+  **two** tiers — core declares its tables, the leaf declares its own via
+  `lib/app/data-export.ts` — and Daybreak is a **third** tier in between, with ten
+  `framework_*` models of its own to declare. Because the seam is a static function
+  rather than a registry, there was no way for the framework tier to contribute
+  without occupying it.
+
+  Daybreak therefore fills `data-export.ts` as a **bridge** (its third, after
+  `bootstrap.ts` and `admin-nav.ts`) and delegates to a reserved
+  **`lib/app/leaf-data-export.ts`** for the leaf — the same pattern as
+  `leaf-bootstrap.ts` and `leaf-admin-nav.ts`. Your collector goes there, unchanged
+  in shape; only the file name and export name differ
+  (`collectLeafSubjectData`).
+
+  Tracked upstream as Sunrise
+  [#533](https://github.com/human-centric-engineering/sunrise/issues/533) — if
+  Sunrise grows a contributor seam, `data-export.ts` returns to the leaf and this
+  reverses. See [`upstream-asks.md`](./upstream-asks.md).
+
+### Added
+
+- **`DAYBREAK_VERSION`** (`lib/daybreak-version.ts`) — the framework version, and
+  the middle of three tiers. `APP_VERSION` reads `package.json`, which in a leaf
+  names the **leaf**, so it cannot answer which framework the app is running;
+  `SUNRISE_VERSION` answers for the platform. Merged through to leaves, **never
+  edited by them**.
+- **`daybreak` on `GET /api/health`** — so an operator can read all three tiers
+  (`version` / `daybreak` / `sunrise`) off a running deployment. Required in the
+  response schema, matching `sunrise`.
+- **`.context/framework/VERSIONING.md`** — what a Daybreak version commits to, the
+  tight definition of the leaf-facing **public surface**, the `daybreak-vX.Y.Z` tag
+  convention, and the release checklist.
+- **`.context/framework/building-on-daybreak.md`** — the guide for building a leaf
+  app on Daybreak: the reserved leaf surface, the sync recipe, and how migrations
+  from three tiers interleave.
+- **`npm run framework:changelog`** — a CI guard (wired into `app:ci-checks`) that
+  fails a PR touching the mechanically-detectable public surface without a
+  changelog entry, so this file cannot quietly go stale.
+
+### Platform
+
+- **Sunrise v0.8.0** is the platform version as of this release (synced in
+  [#181](https://github.com/human-centric-engineering/daybreak/pull/181)). Its own
+  changes — the subject-access export, `SIGNUP_MODE`, the email-change security
+  fix, private storage objects, the authenticated-nav and post-auth landing seams —
+  are documented in [`../../CHANGELOG.md`](../../CHANGELOG.md). Only the
+  leaf-contract consequence is repeated above.
+
+[unreleased]: https://github.com/human-centric-engineering/daybreak/compare/daybreak-v0.1.0...HEAD
+[0.1.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.1.0

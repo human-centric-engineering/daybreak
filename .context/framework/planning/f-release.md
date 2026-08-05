@@ -168,11 +168,20 @@ describe. A leaf may depend on:
 Internal refactors inside `lib/framework/` that change none of the above do **not**
 belong in the changelog — the same signal-preserving rule Sunrise applies.
 
-### C. Three tasks, and they are a **chain**, not parallel
+### C. ~~Three tasks, a chain~~ → **one PR** (re-sized at build)
 
-t-2's changelog references the contract t-1 defines; t-3's guard needs the changelog
-file t-2 creates. Sized per the [[building-a-feature]] self-check — each is a
-cohesive PR, none is scaffolding-plus-one-file.
+> **Corrected during t-1, by the owner.** The three tasks were planned as three
+> PRs. They are a strict chain (t-2's changelog references the contract t-1
+> defines; t-3's guard needs the file t-2 creates), and once t-1 was built it was
+> obvious the remaining two were **two docs and one small script** — precisely the
+> case [[building-a-feature]]'s sizing self-check calls a commit, not a PR
+> ([[planning-retro#B1|B1]]). I had applied the chain reasoning ("they depend on
+> each other, so they're sequential") and skipped the size question.
+>
+> Folded onto the existing t-1 branch rather than opening two more. The three
+> **commits** remain separate so the history still reads as three steps.
+
+The chain is real; it just argues for one PR built in order, not three PRs.
 
 ### D. The release itself is a **process step**, not a task
 
@@ -226,7 +235,9 @@ vitest on `happy-dom`, no live DB — nothing here touches Prisma.
 | t-2 | **Changelog + leaf-facing guide** — `CHANGELOG.md` seeded with the `0.1.0` entry (**must** carry the 0.8.0 leaf-contract change: `data-export.ts` now Daybreak-owned, new `leaf-data-export.ts`) + `building-on-daybreak.md` (reserved leaf surface, remote/fetch/merge recipe, migration interleaving) | `.context/framework/CHANGELOG.md` (new), `.context/framework/building-on-daybreak.md` (new), `.context/framework/README.md` (+links)                                          | t-1  | available | —   |
 | t-3 | **Changelog CI guard** — a pure public-surface→changelog checker + `framework:changelog` script wired into `app:ci-checks`                                                                                                                                                                              | `scripts/boundary/changelog.ts` (or `scripts/release/`), `package.json` (`app:ci-checks`), `tests/unit/scripts/…` (new)                                                       | t-2  | available | —   |
 
-**Three promoted PRs, a strict chain** (t-1 → t-2 → t-3, decision C).
+**One PR, three commits** (decision C — re-sized at build). The task rows stay
+distinct because they are genuinely three pieces of work with three "done when"s;
+they simply ship together.
 
 ### Per-task "Done when"
 
