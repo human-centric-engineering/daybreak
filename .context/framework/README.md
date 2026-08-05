@@ -153,20 +153,36 @@ bridge the four.**
 
 ## Version model
 
-| Constant                                                      | Means                                        | Who edits it                                    |
-| ------------------------------------------------------------- | -------------------------------------------- | ----------------------------------------------- |
-| `package.json.version` → `APP_VERSION` (`lib/app-version.ts`) | **Daybreak's** version                       | Daybreak, on each Daybreak release              |
-| `SUNRISE_VERSION` (`lib/sunrise-version.ts`)                  | The **Sunrise platform** version forked from | Sunrise upstream — merged through, never edited |
+Three tiers, three constants. Each is owned by a different party, so **none can
+be derived from another** — full contract in [`VERSIONING.md`](./VERSIONING.md).
 
-Both surface on `/api/health`. When a leaf app forks Daybreak it will add a
-**third** version of its own (the same way Daybreak's `package.json.version`
-sits above Sunrise's) — a concern for the app tier, not designed here yet.
+| Constant                                                      | Means                                                     | Who edits it                                                                |
+| ------------------------------------------------------------- | --------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `package.json.version` → `APP_VERSION` (`lib/app-version.ts`) | The **leaf app's** version (in this repo, Daybreak's own) | Whoever owns the repo, on each of their releases                            |
+| `DAYBREAK_VERSION` (`lib/daybreak-version.ts`)                | The **Daybreak framework** version                        | Daybreak, on each Daybreak release — leaves merge it through, never edit it |
+| `SUNRISE_VERSION` (`lib/sunrise-version.ts`)                  | The **Sunrise platform** version forked from              | Sunrise upstream — merged through, never edited                             |
+
+All three surface on `/api/health` (`version` / `daybreak` / `sunrise`), which is
+how an operator answers "what is actually deployed?" for a three-tier app.
+
+`APP_VERSION` reads `package.json` — which in a **leaf** names the leaf, not
+Daybreak. That is exactly why `DAYBREAK_VERSION` is its own constant rather than
+derived: once an app forks Daybreak, `package.json` stops being able to answer
+which framework it is running. _(Superseded the earlier note here that a leaf's
+third version was "not designed here yet" — it is, as of `f-release` (24).)_
 
 ## Tracking changes
 
-`CHANGELOG.md` is **Sunrise's** public-surface log — leave it untouched so
-upstream edits merge cleanly. Daybreak's own release notes, when we cut Daybreak
-releases, live in a **separate** file (e.g. `CHANGELOG.daybreak.md`).
+`CHANGELOG.md` at the repo root is **Sunrise's** public-surface log — leave it
+untouched so upstream edits merge cleanly. Daybreak's own release notes live in a
+separate, Daybreak-owned file: **[`CHANGELOG.md`](./CHANGELOG.md) beside this
+README**, paired with [`VERSIONING.md`](./VERSIONING.md), which defines what a
+Daybreak version commits to and what counts as public surface.
+
+_(This supersedes the earlier suggestion of a root `CHANGELOG.daybreak.md`: keeping
+the changelog next to the versioning contract that governs it means a leaf reads one
+tree, not two, and the root pair stays unambiguously Sunrise's. Landing in
+[`f-release`](./planning/f-release.md) t-2.)_
 
 ## Pulling an upstream Sunrise release
 

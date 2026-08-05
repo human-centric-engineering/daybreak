@@ -75,13 +75,35 @@ ban exists.
 `['moduleSlug', 'nodeKey', 'moduleId', 'dataSlot']` — domain tokens only. A
 `DAYBREAK_VERSION` constant in core-adjacent code introduces none of them.
 
-### 4. The health route has no seam — a 2-line core edit, deliberately
+### 4. The health route has no seam — a core edit across **5 files**, deliberately
+
+> **Corrected at build (t-1).** The plan estimated "2 lines, one file". That was
+> wrong: the response is typed AND mirrored by a Zod schema AND asserted by two
+> Sunrise test files, all of which must move together. Recorded here rather than
+> quietly absorbed, because it changes the cost of the decision.
 
 `app/api/health/route.ts` imports `APP_VERSION` and `SUNRISE_VERSION` directly and
-builds the response shape in one place. There is no registration seam and inventing
-one upstream is disproportionate for two fields. Adding `daybreak: DAYBREAK_VERSION`
-is the banner's sanctioned _"keep the edit minimal"_ case — a one-line-ish merge on
-future syncs, versus an operator who cannot tell which framework version is deployed.
+builds the response in one place, but the shape is pinned in four more:
+
+| File                                                    | Change                                      |
+| ------------------------------------------------------- | ------------------------------------------- |
+| `lib/monitoring/types.ts`                               | `daybreak: string` on `HealthCheckResponse` |
+| `lib/validations/monitoring.ts`                         | `daybreak: z.string()` on the Zod mirror    |
+| `app/api/health/route.ts`                               | import + field + doc block                  |
+| `tests/unit/lib/validations/monitoring.test.ts`         | fixture + a "rejects missing" case          |
+| `tests/unit/components/status/use-health-check.test.ts` | two fixtures                                |
+| `tests/integration/api/health.test.ts`                  | mirrors the three `sunrise` assertions      |
+
+**Still worth doing, and it was re-decided rather than assumed:** every edit is an
+additive one-liner (a "keep both" on a future sync, not a restructure); Sunrise set
+this exact precedent — type + Zod mirror + a rejects-missing test — when _it_ added
+`sunrise` for forks, so this follows a pattern rather than inventing one; and
+without it `DAYBREAK_VERSION` would be a constant with **no runtime consumer at
+all**, which is both inert and untestable end-to-end.
+
+The field is **required**, not optional, in both the type and the schema — an
+optional field would let a stripping proxy or an older deployment pass silently,
+which is the failure the schema exists to catch.
 
 ### 5. `app:ci-checks` is the lawful home for the changelog guard
 
@@ -146,11 +168,20 @@ describe. A leaf may depend on:
 Internal refactors inside `lib/framework/` that change none of the above do **not**
 belong in the changelog — the same signal-preserving rule Sunrise applies.
 
-### C. Three tasks, and they are a **chain**, not parallel
+### C. ~~Three tasks, a chain~~ → **one PR** (re-sized at build)
 
-t-2's changelog references the contract t-1 defines; t-3's guard needs the changelog
-file t-2 creates. Sized per the [[building-a-feature]] self-check — each is a
-cohesive PR, none is scaffolding-plus-one-file.
+> **Corrected during t-1, by the owner.** The three tasks were planned as three
+> PRs. They are a strict chain (t-2's changelog references the contract t-1
+> defines; t-3's guard needs the file t-2 creates), and once t-1 was built it was
+> obvious the remaining two were **two docs and one small script** — precisely the
+> case [[building-a-feature]]'s sizing self-check calls a commit, not a PR
+> ([[planning-retro#B1|B1]]). I had applied the chain reasoning ("they depend on
+> each other, so they're sequential") and skipped the size question.
+>
+> Folded onto the existing t-1 branch rather than opening two more. The three
+> **commits** remain separate so the history still reads as three steps.
+
+The chain is real; it just argues for one PR built in order, not three PRs.
 
 ### D. The release itself is a **process step**, not a task
 
@@ -204,7 +235,9 @@ vitest on `happy-dom`, no live DB — nothing here touches Prisma.
 | t-2 | **Changelog + leaf-facing guide** — `CHANGELOG.md` seeded with the `0.1.0` entry (**must** carry the 0.8.0 leaf-contract change: `data-export.ts` now Daybreak-owned, new `leaf-data-export.ts`) + `building-on-daybreak.md` (reserved leaf surface, remote/fetch/merge recipe, migration interleaving) | `.context/framework/CHANGELOG.md` (new), `.context/framework/building-on-daybreak.md` (new), `.context/framework/README.md` (+links)                                          | t-1  | available | —   |
 | t-3 | **Changelog CI guard** — a pure public-surface→changelog checker + `framework:changelog` script wired into `app:ci-checks`                                                                                                                                                                              | `scripts/boundary/changelog.ts` (or `scripts/release/`), `package.json` (`app:ci-checks`), `tests/unit/scripts/…` (new)                                                       | t-2  | available | —   |
 
-**Three promoted PRs, a strict chain** (t-1 → t-2 → t-3, decision C).
+**One PR, three commits** (decision C — re-sized at build). The task rows stay
+distinct because they are genuinely three pieces of work with three "done when"s;
+they simply ship together.
 
 ### Per-task "Done when"
 

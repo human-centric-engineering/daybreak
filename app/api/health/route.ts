@@ -5,6 +5,11 @@ import { getMemoryUsage } from '@/lib/monitoring';
 import type { HealthCheckResponse, ServiceStatus } from '@/lib/monitoring';
 import { APP_VERSION } from '@/lib/app-version';
 import { SUNRISE_VERSION } from '@/lib/sunrise-version';
+// DAYBREAK — the framework tier's version, beside the platform's. Imported from
+// `lib/` root rather than `lib/framework/`: the ESLint boundary bans core from
+// importing `@/lib/framework` (a static specifier resolves at build time and
+// would break a fork without that folder).
+import { DAYBREAK_VERSION } from '@/lib/daybreak-version';
 
 /**
  * Check if memory should be included in health response
@@ -34,7 +39,7 @@ function determineServiceStatus(connected: boolean, latency?: number): ServiceSt
  * Build the health response payload.
  *
  * Centralises the response-shape construction so the version fields (`version`,
- * `sunrise`), uptime, timestamp, and memory toggle live in ONE place — the
+ * `sunrise`, `daybreak`), uptime, timestamp, and memory toggle live in ONE place — the
  * success and error branches both call through here. Adding a new top-level
  * field to the contract means one edit, not two.
  */
@@ -47,6 +52,7 @@ function buildHealthPayload(params: {
     status: params.status,
     version: APP_VERSION,
     sunrise: SUNRISE_VERSION,
+    daybreak: DAYBREAK_VERSION,
     uptime: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
     services: {
@@ -75,6 +81,7 @@ function buildHealthPayload(params: {
  *   status: 'ok' | 'error',
  *   version: string,        // fork's app version (package.json)
  *   sunrise: string,        // Sunrise platform version (lib/sunrise-version.ts)
+ *   daybreak: string,       // Daybreak framework version (lib/daybreak-version.ts)
  *   uptime: number,
  *   timestamp: string,
  *   services: {

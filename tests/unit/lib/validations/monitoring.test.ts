@@ -22,6 +22,7 @@ const validPayload = {
   status: 'ok' as const,
   version: '0.0.0',
   sunrise: '0.0.0',
+  daybreak: '0.0.0',
   uptime: 1234,
   timestamp: '2026-05-28T10:00:00.000Z',
   services: {
@@ -63,6 +64,22 @@ describe('healthCheckResponseSchema', () => {
       // the runtime error want to know what's wrong, not just that
       // "something" failed.
       expect(JSON.stringify(result.error.issues)).toContain('sunrise');
+    }
+  });
+
+  it('rejects a payload missing the daybreak field', () => {
+    // DAYBREAK — the exact mirror of the `sunrise` case above, and it exists for
+    // the same reason: a leaf app reporting no framework version looks identical,
+    // to whoever reads the response, to one reporting a correct version. If this
+    // field is ever made optional, this test is what should stop it.
+    const { daybreak: _, ...payloadWithoutDaybreak } = validPayload;
+    void _;
+
+    const result = healthCheckResponseSchema.safeParse(payloadWithoutDaybreak);
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(JSON.stringify(result.error.issues)).toContain('daybreak');
     }
   });
 

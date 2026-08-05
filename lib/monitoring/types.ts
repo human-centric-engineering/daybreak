@@ -96,6 +96,15 @@ export interface HealthCheckResponse {
    * version. Sourced from `lib/sunrise-version.ts`. See `VERSIONING.md`.
    */
   sunrise: string;
+  /**
+   * DAYBREAK — the framework version this checkout is built on. Sourced from
+   * `lib/daybreak-version.ts`. The third member of the three-tier set: `version`
+   * is the leaf app's own, `daybreak` is the framework it forked, `sunrise` is
+   * the platform underneath. Distinct for the same reason `sunrise` is distinct
+   * from `version` — each tier is owned by a different party, so none can be
+   * derived from another. See `.context/framework/VERSIONING.md`.
+   */
+  daybreak: string;
   /** Process uptime in seconds */
   uptime: number;
   /** Timestamp of the health check */
