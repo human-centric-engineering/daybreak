@@ -764,3 +764,29 @@ startsWith "module:"`), never a blanket `notIn`; and (c) **key the "did registra
   composition canvas). If it's absent, the task's honest first deliverable is the host hook; size and split
   accordingly ([[planning-retro#B25]] — t-1 split on exactly this API/host-slot vs. UI seam). Cheap check, saves a
   mid-build "wait, there's nowhere to plug this in". _Status: open._
+
+### B33 · A strict task _chain_ is not an argument for separate PRs — sizing is a question you must ask separately, and asking it late costs a re-plan
+
+- **Discovery ([[f-release]]).** The plan promoted three tasks and declared them "a strict chain, not parallel"
+  (t-2's changelog references the contract t-1 defines; t-3's guard needs the file t-2 creates), then concluded
+  **three PRs**. The owner pushed back after t-1 shipped: "these tasks are all so small it should be one PR not
+  three." Correct — t-2 was two docs and t-3 was one small script plus tests, which is precisely what
+  [[building-a-feature]]'s sizing self-check ([[planning-retro#B1|B1]]) calls a commit, not a PR.
+- **The mistake was a substitution.** I had answered _"are these separable?"_ and let the answer stand in for
+  _"is each one PR-sized?"_ — two genuinely different questions. Dependency order tells you the **sequence** to
+  build in; it says nothing about **volume**. A chain of three one-file tasks is one PR built in order; three
+  independent 500-line tasks are three PRs that could run in parallel. Sequencing and sizing are orthogonal, and
+  a plan that reasons carefully about one can silently skip the other precisely _because_ the reasoning felt
+  thorough.
+- **The tell.** A decision section that argues dependency order and then states a PR count **without a
+  line-count or file-count estimate per task**. If the sizing self-check isn't visible in the decision, it wasn't
+  run. Also: tasks whose "Files (indicative)" column lists one or two new files and no edits to existing
+  subsystems — that shape is a commit.
+- **Cost when caught late.** Cheap here (t-1 was open, so t-2/t-3 folded onto the same branch and the PR was
+  retitled — nothing wasted). It would have been expensive one PR later: three merged PRs cannot be recombined,
+  and a reviewer reading three thin PRs loses the single coherent story the feature actually had.
+- **Lesson.** In the promoted-tasks table, **state the expected size per task and let that decide the PR count** —
+  dependency order goes in the `Deps` column and drives build sequence only. Write the sizing verdict explicitly
+  in the shape-decisions section ("t-2 ≈ 2 docs → fold into t-1's PR"), so a reader can see the check was run
+  rather than inferring it from silence. _Status: adopted — applied in [[f-release]] decision C, which now records
+  the re-size and why the chain argument didn't settle it._
