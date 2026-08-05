@@ -74,9 +74,9 @@ model FacilitationGraphVersion {
 // plain string, NOT an FK to `FacilitationGraph` — state is interpreted against the
 // live *published* version (F2), so republishing must never orphan a journey.
 model UserJourney {
-  id     String @id @default(cuid())
-  userId String // FK to User.id — no @relation; ON DELETE CASCADE hand-written in the migration
-  graphSlug String // the map being walked — plain string (F2), not an FK
+  id         String   @id @default(cuid())
+  userId     String // FK to User.id — no @relation; ON DELETE CASCADE hand-written in the migration
+  graphSlug  String // the map being walked — plain string (F2), not an FK
   // Distinguishes parallel instances of the same map for one user (e.g. one user
   // supporting two different people through the same map — §8). NON-NULLABLE by
   // design (X3): Postgres treats NULLs as distinct in unique indexes, so a nullable
@@ -99,11 +99,11 @@ model UserJourney {
 // events). `status` is free-form `String` (X1); the vocabulary lives in
 // `lib/framework/facilitation/journey/vocabulary.ts`.
 model UserNodeState {
-  id             String @id @default(cuid())
+  id             String    @id @default(cuid())
   journeyId      String
   nodeKey        String
   status         String // unvisited | available | active | visited | completed
-  timesCompleted Int    @default(0) // repeatable nodes count completions; status reflects the latest pass (F6)
+  timesCompleted Int       @default(0) // repeatable nodes count completions; status reflects the latest pass (F6)
   // Optional module-defined progress payload (e.g. % through a unit, mastery levels)
   // — shape owned by the node's module, opaque to the engine. Deeper attainment data
   // belongs in slots (F7).

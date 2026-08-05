@@ -55,25 +55,48 @@ reserves for its own forks.**
   **Sunrise** migration
 - Daybreak registers its framework pieces into Sunrise's seams **from within
   `lib/framework/`** (driven by `initFramework()`) — exactly as Sunrise
-  registers its own built-ins from core. The **two exceptions** are the
+  registers its own built-ins from core. The **three exceptions** are the
   `lib/app/*` **bridges** Daybreak fills: `bootstrap.ts` (server boot →
-  `initFramework()`) and `admin-nav.ts` (client sidebar → the framework nav
-  section). A framework registration that must run in a realm `initFramework()`
-  can't reach — server-boot, or the client sidebar — has nowhere else to go; each
-  delegates to a reserved leaf hook (`leaf-bootstrap.ts` / `leaf-admin-nav.ts`).
-  Otherwise Daybreak does **not** fill `lib/app/*` (see next).
+  `initFramework()`), `admin-nav.ts` (client sidebar → the framework nav
+  section), and `data-export.ts` (subject access → the framework's own
+  GDPR Art. 15 manifest). A framework registration that must run in a realm
+  `initFramework()` can't reach — server-boot, the client sidebar, or a static
+  function core imports directly — has nowhere else to go; each delegates to a
+  reserved leaf hook (`leaf-bootstrap.ts` / `leaf-admin-nav.ts` /
+  `leaf-data-export.ts`). Otherwise Daybreak does **not** fill `lib/app/*` (see
+  next).
+
+  `data-export.ts` is the newest and the least willing of the three. Sunrise
+  v0.8.0 (#467) shipped subject access assuming exactly **two** tiers — core
+  declares its tables in `lib/privacy/export-sources.ts`, the leaf declares its
+  own in `lib/app/data-export.ts` — and a framework fork has three. It is a
+  static function rather than a boot-time registry (an unregistered export
+  collector yields a bundle that looks complete and is not), so there is no
+  registry for the framework to push into. Until Sunrise grows a contributor
+  seam, Daybreak occupies the seam and hands the leaf `leaf-data-export.ts`
+  beside it. Tracked in [`upstream-asks.md`](./upstream-asks.md).
+
+  The framework's own manifest lives at `lib/framework/privacy/export-sources.ts`,
+  guarded by `tests/unit/lib/framework/privacy/export-sources.test.ts` — which
+  parses `prisma/schema/framework-*.prisma` and fails until a new user-linked
+  framework table declares what a data subject receives from it. Its dispositions
+  mirror the erasure policy already in each migration: a `userId` column with
+  `ON DELETE CASCADE` exports in full; a `createdBy` column with `SET NULL`
+  exports as attribution. **Both halves of GDPR must agree on what a row is** —
+  change one, change the other.
 
 **Reserved for the leaf app — Daybreak keeps these empty:**
 
 - `lib/app/*` **leaf** scaffolds (`capabilities.ts`, `context-contributors.ts`,
   `knowledge-access-contributors.ts`, `guard-floor-contributors.ts`,
   `guard-event-contributors.ts`, `modules.ts`, `leaf-bootstrap.ts`,
-  `leaf-admin-nav.ts`, …) — Sunrise ships these empty; Daybreak keeps them empty
+  `leaf-admin-nav.ts`, `leaf-data-export.ts`, …) — Sunrise ships these empty;
+  Daybreak keeps them empty
   (and may add new empty framework-concept scaffolds like `lib/app/modules.ts`)
   for the **leaf app** to fill. Daybreak filling one would collide with the
   leaf's own registrations on a Daybreak upgrade. (The `bootstrap.ts` /
-  `admin-nav.ts` bridges above are the deliberate exception — Daybreak fills
-  those, and the leaf uses their `leaf-*` counterparts.) The four
+  `admin-nav.ts` / `data-export.ts` bridges above are the deliberate exception —
+  Daybreak fills those, and the leaf uses their `leaf-*` counterparts.) The four
   `*-contributors.ts` files are Sunrise's **auto-wire** seams (a seam lazily
   calls `initApp<Seam>Contributors()` on first use); Daybreak registers its own
   framework contributors a different way — see [Contributor registration](#contributor-registration-the-framework-pushes-the-leaf-pulls).
