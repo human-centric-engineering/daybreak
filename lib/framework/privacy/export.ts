@@ -24,6 +24,17 @@ import {
   FRAMEWORK_SUBJECT_DATA_SOURCES,
 } from '@/lib/framework/privacy/export-sources';
 import type { ExcludedSource, SubjectQuery } from '@/lib/privacy/export-sources';
+// MUST stay `import type`. There is a cycle here that is only harmless because
+// this edge is erased at compile time:
+//
+//   export-user.ts → lib/app/data-export.ts → THIS FILE → export-user.ts
+//
+// The first two edges are real value imports (core calls the bridge, the bridge
+// calls this collector). Turning this one into a value import closes the loop at
+// runtime, and the module that breaks is the subject-access export — a GDPR path
+// that fails in production, not in a unit test where the collector is mocked.
+// If you need a runtime symbol from `export-user`, move it to `export-sources`
+// (which is a leaf of this graph) rather than importing it here.
 import type { ExportedSourceSummary } from '@/lib/privacy/export-user';
 
 /** The framework tier's contribution to a subject export. */

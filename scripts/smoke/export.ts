@@ -31,6 +31,9 @@
 import { prisma } from '@/lib/db/client';
 import { exportUserData, SubjectNotFoundError } from '@/lib/privacy/export-user';
 import { SUBJECT_DATA_SOURCES } from '@/lib/privacy/export-sources';
+// DAYBREAK — the framework tier's manifest, so the assertions below derive their
+// expected counts rather than hardcoding them (see the framework block near the end).
+import { FRAMEWORK_SUBJECT_DATA_SOURCES } from '@/lib/framework/privacy/export-sources';
 
 const PREFIX = 'smoke-test-export';
 const stamp = Date.now();
@@ -318,8 +321,21 @@ async function main(): Promise<void> {
       personalData: Record<string, unknown[]>;
       attributions: Record<string, unknown[]>;
     };
+    // Derived from the manifest, exactly as the core assertion above derives from
+    // SUBJECT_DATA_SOURCES — NOT a hardcoded count. A literal here would be a
+    // second place to edit every time the framework gains a table, and the two
+    // would drift apart silently the first time someone forgot.
+    const frameworkSections = [
+      ...Object.keys(framework.personalData),
+      ...Object.keys(framework.attributions),
+    ];
     check(
-      framework.meta.exported.length === 4 && framework.meta.attribution.length === 6,
+      frameworkSections.length === FRAMEWORK_SUBJECT_DATA_SOURCES.length,
+      `all ${FRAMEWORK_SUBJECT_DATA_SOURCES.length} framework manifest sources ran against real Postgres`
+    );
+    check(
+      framework.meta.exported.length + framework.meta.attribution.length ===
+        frameworkSections.length,
       'framework meta summarises every framework source'
     );
     // Every declared section produced a key — a query that threw would have
