@@ -40,6 +40,23 @@ vi.mock('@/lib/db/client', () => ({ prisma: {} }));
 
 const { SUBJECT_DATA_SOURCES, EXCLUDED_SOURCES } = await import('@/lib/privacy/export-sources');
 
+// DAYBREAK — this scan reads every prisma/schema/*.prisma, which in this fork
+// includes the framework tier's `framework-*.prisma`. Those models are covered
+// by the framework's OWN manifest and its own coverage guard
+// (tests/unit/lib/framework/privacy/export-sources.test.ts), reached through the
+// `lib/app/data-export.ts` bridge — so they are handled, just not by the core
+// manifest this file guards.
+//
+// Derived from the framework manifest rather than hardcoded, so a framework
+// table added tomorrow is still forced into ONE of the two manifests: it is
+// exempt here only for as long as it is declared there.
+const { FRAMEWORK_SUBJECT_DATA_SOURCES, FRAMEWORK_EXCLUDED_SOURCES } =
+  await import('@/lib/framework/privacy/export-sources');
+const FRAMEWORK_DECLARED = new Set([
+  ...FRAMEWORK_SUBJECT_DATA_SOURCES.map((source) => source.model),
+  ...FRAMEWORK_EXCLUDED_SOURCES.map((source) => source.model),
+]);
+
 const SCHEMA_DIR = path.join(process.cwd(), 'prisma', 'schema');
 
 /** A field declaring an FK to `User` — `creator User? @relation(...)`. */
@@ -159,7 +176,13 @@ describe('subject-data source manifest', () => {
 
   describe('coverage', () => {
     it('declares every User-linked model', () => {
-      const missing = [...userLinked].filter((model) => !declared.has(model)).sort();
+      const missing = [...userLinked]
+        .filter((model) => !declared.has(model))
+        // DAYBREAK — covered by the framework tier's manifest instead (see top).
+        // Framework models declare no `@relation` today, so none reach this scan;
+        // the filter is here so one that gains a relation later stays correct.
+        .filter((model) => !FRAMEWORK_DECLARED.has(model))
+        .sort();
 
       expect(
         missing,
@@ -200,6 +223,8 @@ describe('subject-data source manifest', () => {
         .filter((model) => !declared.has(model))
         .filter((model) => !EXCLUDED_SOURCES.some((source) => source.model === model))
         .filter((model) => !HANDLED_OUTSIDE_MANIFEST.has(model))
+        // DAYBREAK — covered by the framework tier's manifest instead (see top).
+        .filter((model) => !FRAMEWORK_DECLARED.has(model))
         .sort();
 
       expect(

@@ -62,7 +62,7 @@ import { appEnvSchema } from '@/lib/app/env';
 import appEslintConfig from '@/lib/app/eslint.config.mjs';
 import { appFrameSrc } from '@/lib/app/csp';
 import { initAppUserCreatedHooks } from '@/lib/app/user-created';
-import { collectAppSubjectData } from '@/lib/app/data-export';
+import { collectLeafSubjectData } from '@/lib/app/leaf-data-export';
 import { getAppJobs, __resetAppJobsForTests } from '@/lib/orchestration/maintenance/app-jobs';
 import { getEffectiveRateLimitPolicy, RATE_LIMIT_POLICY } from '@/lib/security/rate-limit-policy';
 import { getRegisteredNavSections, __resetNavRegistryForTests } from '@/lib/admin-nav/registry';
@@ -95,6 +95,12 @@ const UNASSERTED_SEAMS = new Set([
   // Daybreak's reserved leaf drift seam — asserted behaviourally alongside the
   // bridge that calls it, in tests/unit/lib/db/drift-probes.test.ts.
   'lib/app/leaf-db-drift.ts',
+  // A bridge Daybreak FILLS, and the only one whose body issues real database
+  // queries — running it here would need a full Prisma stub for the whole file.
+  // Asserted behaviourally instead, against a stubbed client, in
+  // tests/unit/lib/framework/privacy/export.test.ts. Its reserved-empty leaf
+  // seam (`leaf-data-export.ts`) still carries the no-op contract in a row below.
+  'lib/app/data-export.ts',
 ]);
 
 const SEAM_DEFAULTS: SeamDefault[] = [
@@ -170,10 +176,10 @@ const SEAM_DEFAULTS: SeamDefault[] = [
     assert: () => expect(emailOverrides).toEqual({}),
   },
   {
-    seam: 'lib/app/data-export.ts',
-    risk: 'a stray collector would leak app rows into every install’s subject-access export',
+    seam: 'lib/app/leaf-data-export.ts',
+    risk: 'a stray collector would leak leaf rows into every Daybreak leaf’s subject-access export',
     assert: async () =>
-      expect(await collectAppSubjectData({ userId: 'user-1', email: 'user@example.com' })).toEqual(
+      expect(await collectLeafSubjectData({ userId: 'user-1', email: 'user@example.com' })).toEqual(
         {}
       ),
   },

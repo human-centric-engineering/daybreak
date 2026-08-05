@@ -1,50 +1,44 @@
 /**
- * App subject-data export seam (GDPR Art. 15).
+ * App subject-data export seam (GDPR Art. 15) — Daybreak's framework/leaf bridge.
  *
- * **Fork-owned scaffold** — Sunrise ships this returning nothing and does NOT
- * change it after release, so your edits here merge cleanly on upgrade (the
- * stable contract is this file's `collectAppSubjectData` export, not its body).
- * Treat it like the other `lib/app/*` seams.
+ * **Fork-owned scaffold.** Upstream Sunrise ships this returning nothing and does
+ * NOT change it after release, so Daybreak's edits here merge cleanly on upgrade
+ * (the stable contract is this file's `collectAppSubjectData` export, not its
+ * body).
  *
  * Auto-wired: `exportUserData()` (`lib/privacy/export-user.ts`) calls this and
  * folds the result into the `app` section of the export bundle, so both the
  * self-service and admin export endpoints pick it up with no core edit.
  *
- * Declare every app-owned table that holds data about a person. Core covers its
- * own tables via `lib/privacy/export-sources.ts`; it cannot see yours.
+ * Daybreak fills it to contribute the **framework** tier's tables, then delegates
+ * to the reserved **leaf** seam — the subject-access analogue of the boot bridge
+ * (`bootstrap.ts` → `initFramework()` → `leaf-bootstrap.ts`) and the nav bridge
+ * (`admin-nav.ts` → `initFrameworkNav()` → `leaf-admin-nav.ts`). This is the
+ * THIRD `lib/app/*` file Daybreak fills; `lib/app/**` is the sanctioned
+ * core→framework bridge (the ESLint boundary exempts it).
  *
- * ```ts
- * export async function collectAppSubjectData({ userId }: AppSubjectQuery): Promise<AppSubjectData> {
- *   const [invoices, bookings] = await Promise.all([
- *     prisma.appInvoice.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } }),
- *     prisma.appBooking.findMany({ where: { userId }, orderBy: { createdAt: 'asc' } }),
- *   ]);
- *   return { invoices, bookings };
- * }
- * ```
+ * Core covers its own tables via `lib/privacy/export-sources.ts` and cannot see
+ * the framework's; the framework's own manifest lives at
+ * `lib/framework/privacy/export-sources.ts`, guarded by its own coverage test.
  *
- * **Why a plain function and not a registry.** The erasure sibling
- * (`lib/privacy/erasure-hooks.ts`) is a boot-time registry, and this seam
- * deliberately is not. Erasure fails loudly if a hook never registers — the
- * rows are still there afterwards. An export fails *silently*: an unregistered
- * collector yields a bundle that looks complete and is not, and neither the
- * subject nor the operator can tell. A static import cannot be missed.
+ * NOTE — `@/lib/framework/privacy/export` is imported STATICALLY, matching
+ * `admin-nav.ts` rather than `bootstrap.ts`. The static specifier is safe because
+ * this filled bridge lives only in Daybreak: vanilla Sunrise ships the empty
+ * version with no framework import, and every Daybreak leaf fork has the
+ * `lib/framework/` folder, so it always resolves. (`bootstrap.ts` reaches for a
+ * dynamic import because it runs at server boot in every runtime; this seam runs
+ * only inside the two export route handlers.)
  *
- * **Keep it complete.** The core guard test (`export-sources.test.ts`) diffs
- * `prisma/schema/*.prisma` against the core manifest so a new core table can't
- * quietly narrow the export. Your tables need the same protection, and core
- * cannot write it for you — the pattern worth copying is a constant listing the
- * tables you export plus a test that greps your own schema file for
- * `@@map("app_…")` and asserts each mapped table appears in it. Then adding a
- * table without extending the export fails your build instead of shipping a
- * short answer to a data subject.
- *
- * A table holding no personal data (lookup tables, org config with no person in
- * it) is fine to leave out — but say so in a comment where you list them, so
- * the omission reads as a decision rather than an oversight.
+ * **Failures are NOT swallowed here.** A collector that throws fails the whole
+ * export — the deliberate opposite of the erasure path, where hook failures are
+ * swallowed so app trouble can never block a deletion. An export that quietly
+ * lost a section looks exactly like a complete answer to the person reading it.
  *
  * Full guide: .context/privacy/data-export.md · CUSTOMIZATION.md §4
  */
+
+import { collectFrameworkSubjectData } from '@/lib/framework/privacy/export';
+import { collectLeafSubjectData } from '@/lib/app/leaf-data-export';
 
 /** Identity of the subject being exported. */
 export interface AppSubjectQuery {
@@ -61,15 +55,17 @@ export interface AppSubjectQuery {
 export type AppSubjectData = Record<string, unknown>;
 
 /**
- * Collect this app's data about one subject. Ships empty — vanilla Sunrise has
- * no app tables, so the export's `app` section is `{}`.
+ * Collect Daybreak's data about one subject: the framework tier under the
+ * reserved `framework` section, plus whatever the leaf app contributes.
  */
-/*
- * `async` is the seam's contract, not an implementation detail: every real
- * collector awaits its queries, and the empty default must not force forks to
- * change the signature just to add one.
- */
-// eslint-disable-next-line @typescript-eslint/require-await
-export async function collectAppSubjectData(_subject: AppSubjectQuery): Promise<AppSubjectData> {
-  return {};
+export async function collectAppSubjectData(subject: AppSubjectQuery): Promise<AppSubjectData> {
+  const [framework, leaf] = await Promise.all([
+    collectFrameworkSubjectData(subject),
+    collectLeafSubjectData(subject),
+  ]);
+
+  // Leaf sections spread first so that `framework` cannot be shadowed by a leaf
+  // returning that key — the framework's contribution is the one section a leaf
+  // must not be able to overwrite (documented as reserved in leaf-data-export.ts).
+  return { ...leaf, framework };
 }

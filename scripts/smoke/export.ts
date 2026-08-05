@@ -299,7 +299,36 @@ async function main(): Promise<void> {
       'meta summarises every source'
     );
     check(bundle.meta.excluded.length > 0, 'meta discloses the documented exclusions');
-    check(Object.keys(bundle.app).length === 0, 'app seam is empty in vanilla Sunrise');
+    // DAYBREAK — pinned, not deleted. Vanilla Sunrise asserts this seam is empty;
+    // Daybreak FILLS it (lib/app/data-export.ts bridges the framework tier), so
+    // the value moves rather than the check disappearing. What still has to hold
+    // is that the bridge contributes exactly the reserved `framework` section and
+    // nothing leaf-owned — and, more importantly, that every framework manifest
+    // query actually EXECUTED against real Postgres to produce it. That is the
+    // property this whole script exists for, and unit tests (which mock Prisma)
+    // cannot prove it.
+    const appSections = Object.keys(bundle.app);
+    check(
+      appSections.length === 1 && appSections[0] === 'framework',
+      'app seam carries exactly the framework section (Daybreak)'
+    );
+
+    const framework = bundle.app.framework as {
+      meta: { exported: { section: string }[]; attribution: { section: string }[] };
+      personalData: Record<string, unknown[]>;
+      attributions: Record<string, unknown[]>;
+    };
+    check(
+      framework.meta.exported.length === 4 && framework.meta.attribution.length === 6,
+      'framework meta summarises every framework source'
+    );
+    // Every declared section produced a key — a query that threw would have
+    // failed the export outright, and one silently skipped would be missing here.
+    check(
+      framework.meta.exported.every((entry) => entry.section in framework.personalData) &&
+        framework.meta.attribution.every((entry) => entry.section in framework.attributions),
+      'every framework source ran and produced its section'
+    );
 
     // A missing subject is a distinct, catchable failure — not a silent empty bundle.
     let notFound = false;
