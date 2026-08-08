@@ -1,0 +1,442 @@
+# Issue backlog — phased plan (2026-08-08)
+
+The first real leaf (`reclaim-your-week`) has been building on Daybreak since the
+Sunrise v0.8.0 sync, and has filed **ten issues** against this repo. In parallel,
+the Sunrise upstream tracker holds **33 open issues**, ~16 of them fork-readiness
+gaps Daybreak/RYW found — and **six upstream asks Daybreak is still shimming have
+already landed upstream**.
+
+This is the phased plan for all three. It is not a board claim: when a phase is
+picked up, add its row to [`plan.md`](./plan.md) per
+[`building-a-feature.md`](./building-a-feature.md) step 1.
+
+**Proposed epic:** _Framework v1.3 — leaf-consumer hardening_ (v1.2 made Daybreak
+distributable; v1.3 makes it usable by the app that took the distribution).
+
+---
+
+## The finding that reorders everything
+
+[`upstream-asks.md`](./upstream-asks.md) lists eight open rows as "filed —
+awaiting the seam". **Six of those Sunrise issues are closed and their seams are
+in this tree already**, merged with the v0.7.0/v0.8.0 syncs:
+
+| Ask                                                           | Upstream state    | Seam present in tree                                                  | Fork shim still carried                                                                                      |
+| ------------------------------------------------------------- | ----------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| **#398** `register(cap, { slug, guard })`                     | closed 2026-07-06 | ✅ `dispatcher.ts:133` + `CapabilityRegisterOptions`                  | ✅ `lib/framework/modules/capabilities/namespace.ts` (whole wrapper)                                         |
+| **#403** `registerAgentAccessContributor`                     | closed 2026-07-06 | ✅ `resolveAgentDocumentAccess.ts:75`, core-owned                     | ❌ already delegated — **row is just stale**                                                                 |
+| **#410** relocate `runStructuredCompletion` + open `phase`    | closed 2026-07-09 | ✅ `lib/orchestration/llm/structured-completion.ts`, `phase?: string` | ⚠️ partly delegated — `extract.ts:28` uses the new path but still omits `phase`                              |
+| **#411** `CapabilityContext.customConfig`                     | closed 2026-07-09 | ✅ `capabilities/types.ts:65`                                         | ✅ `data-slots/capabilities/exposure.ts:59` still runs its own `aiAgentCapability.findFirst` **per capture** |
+| **#415** `scope` on `consumerChatRequestSchema`               | closed 2026-07-09 | ✅ `lib/validations/orchestration.ts:4045`                            | ✅ two shadow routes: `framework/facilitation/[role]/chat/stream`, `framework/modules/[slug]/chat/stream`    |
+| **#416** find-or-resume by `(contextType, contextId)`         | closed 2026-07-09 | ✅ `chat/resume-conversation.ts` → `findResumableConversation`        | ✅ `guidance/surface.ts:69` + `facilitation/agents/surface.ts:83` hand-rolled `findFirst`                    |
+| **#366 / #367** tenancy · **#533** subject-access contributor | **open**          | —                                                                     | correctly carried; rows stay open                                                                            |
+
+Two consequences, both of which drive the phasing:
+
+1. **Daybreak is carrying five shims it is entitled to delete.** Every one is
+   merge surface on the next Sunrise pull, and `exposure.ts` is also an indexed
+   DB lookup on every slot capture.
+2. **Deleting them makes later work cheaper.** #169 (facet enforcement) becomes a
+   `guard` passed to the #398 seam rather than a new `BaseModuleCapability`
+   class; #411's `context.customConfig` is the value that guard reads. Build #169
+   first and you build it twice.
+
+The ledger's own closing note warns about exactly this failure mode ("a row that
+claims the fork carries a seam it has already given up") — it was written during
+the 0.8.0 reconciliation, which covered #412/#413/#414 and stopped there.
+
+---
+
+## Phase 0 — Stop the bleeding, establish truth
+
+_Two PRs. Nothing depends on either, and everything reads better after them._
+
+### t-0.1 · Module registry survives the request realm (#160) — **leaf-blocking**
+
+`lib/framework/modules/registry.ts:24` is a bare module-scoped `Map`.
+`registerModule()` runs only from `initLeafApp()` inside `instrumentation.ts`;
+under Next 16 + Turbopack the instrumentation graph is a different realm from the
+route/RSC graph, so every request-time `getRegisteredModule()` sees an empty map.
+A correctly-registered, active, DB-synced module renders _"This module's code is
+no longer registered, so its config can't be edited"_ — the whole A4 config
+surface is dead for any leaf module.
+
+Sunrise fixed the same split for its own registries in **#462** (closed
+2026-07-30, in this tree: `context-builder.ts:88`, `dispatcher.ts:752` are both
+`globalThis`-backed). The framework registry was never in that sweep.
+
+- Back the `Map` with `globalThis`, mirroring `globalForPrisma` / `globalForDispatcher`.
+- **Audit the rest** (the issue's "broader concern"). Done here, so the task
+  is bounded:
+  - `lib/framework/capabilities/registry.ts:23` — same shape. Lower blast radius,
+    because `registerFrameworkCapabilityHandlers()` flushes the handlers into the
+    (globalThis-backed) dispatcher at boot, so runtime dispatch survives; only
+    `getRegisteredFrameworkCapabilities()` is empty at request time. Back it
+    anyway — it is one line and the asymmetry is a trap.
+  - `facilitation/engine/graph-store.ts` — a per-call factory, not a registry. No change.
+  - The remaining `new Map<` hits under `lib/framework/` are all local
+    aggregation maps inside a single function. No change.
+- Test: a unit test that populates the map, clears the module-local binding, and
+  proves a fresh import still sees the registration.
+
+**Done when:** the admin module Config tab renders fields for a leaf module on a
+cold server; RYW can delete its local `keep-mine` copy of this file.
+
+### t-0.2 · Reconcile `upstream-asks.md` (docs PR)
+
+Rewrite the six stale rows against the table above: #403 → **Landed** section;
+#398/#410/#411/#415/#416 → status `landed — shim still carried, delegate in
+Phase 1`, each row naming its Phase 1 task. Keep #366/#367/#533 open.
+
+Also close the loop the ledger cannot currently check: **the clone has no
+`upstream` remote and no Sunrise tags** (`git tag` shows only `daybreak-v0.1.0`),
+so the delegate-when-it-lands check has nothing to run against. Add
+`git remote add upstream …` + `git fetch upstream --tags` to
+[`CUSTOMIZATION.md` §9](../../CUSTOMIZATION.md) / `building-on-daybreak.md` as a
+prerequisite step, and make the check concrete: for each open row,
+`gh issue view <n> -R human-centric-engineering/sunrise --json state`.
+
+**Done when:** every row's status matches upstream reality, and the sync guide
+tells the next person how to keep it that way.
+
+---
+
+## Phase 1 — Delegate the landed seams
+
+_Five small PRs, each a deletion. No new behaviour, no migration. Run them in any
+order; `t-1.1` is the one with a runtime win._
+
+| Task      | Delete                                                                                                         | Replace with                                                                                                                                              | Notes                                                                                                                                                                                                                |
+| --------- | -------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **t-1.1** | `loadExposureConfig`'s `prisma.aiAgentCapability.findFirst` (`data-slots/capabilities/exposure.ts:59`)         | `context.customConfig`                                                                                                                                    | Keep the Zod parse + fail-closed + `facetAllows`. **Fix the header comment** — it still asserts "`CapabilityContext` carries no `customConfig`", now false. Removes one indexed lookup per capture.                  |
+| **t-1.2** | `namespaceModuleCapability` + its dummy `schema` + the `redactProvenance` re-assertion (`namespace.ts`)        | `capabilityDispatcher.register(inner, { slug: namespacedSlug, guard: scopeGuard })` in `capabilities/register.ts`; `isInModuleScope` moves into the guard | The dispatcher's own comment now says this seam "is exactly what lets a fork avoid wrapping a capability". **Keep** the `slug === functionDefinition.name` invariant test. Sets up t-4.1.                            |
+| **t-1.3** | the two shadow stream routes' reimplementation                                                                 | thin `scope`-populating wrappers over the core consumer route                                                                                             | `app/api/v1/framework/facilitation/[role]/chat/stream/route.ts`, `…/modules/[slug]/chat/stream/route.ts`. **Re-validate `scope` server-side** — the schema's own SECURITY note: it arrives from an untrusted client. |
+| **t-1.4** | the hand-rolled `aiConversation.findFirst` in `guidance/surface.ts:69` and `facilitation/agents/surface.ts:83` | `findResumableConversation`                                                                                                                               | Two call sites, identical shape.                                                                                                                                                                                     |
+| **t-1.5** | nothing                                                                                                        | pass `phase: 'slot-extraction'` to `runStructuredCompletion` in `data-slots/capabilities/extract.ts`                                                      | Completes #410. `tryParseJson` legitimately stays at `evaluations/parse-structured` — that is its upstream home.                                                                                                     |
+
+**Done when:** `upstream-asks.md` has five fewer open rows, `framework:boundary`
+and the full suite are green, and no framework file re-implements a core seam.
+
+---
+
+## Phase 2 — The run-scoped slot spine (#156 · #162 · #167)
+
+_The correctness phase. #162 describes a live data-loss bug in the leaf: a
+completed audit's shared, tokenised public summary silently hollows out when the
+user starts a second run. Nothing errors, nothing logs._
+
+### t-2.1 · `runId` provenance + **batched** history read (#156 + #162, one task)
+
+Land these together and **skip the intermediate signature**. #156 proposes
+`getSlotHistory(userId, slotSlug)`; #162 — filed a day later, after the bug —
+shows why that shape is a trap: it is per-slug, so the only correct reader for a
+run is unaffordable, and every caller reaches for
+`getSlotHeads({ slotSlugs })` + a `provenance.runId` filter instead. That is
+correct only until a user's second run supersedes the first run's heads. **Daybreak
+never shipped `getSlotHistory`, so there is no back-compat cost to landing the
+batched form directly** — the leaf carries its own copy today.
+
+In `lib/framework/data-slots/values.ts`:
+
+```ts
+export interface SlotValueProvenance {
+  // …existing fields…
+  /** The run this reading belongs to. Stored, never interpreted, by the engine. */
+  runId?: string;
+}
+
+export interface GetSlotHistoryOptions {
+  slotSlugs?: string[]; // omitted → every slug for the user
+  runId?: string; // JSON-path filter on provenance.runId
+}
+
+/**
+ * Every version — head AND superseded — oldest first (`version` ascending).
+ * No `supersededAt` filter: the superseded rows are the point.
+ */
+export async function getSlotHistory(
+  userId: string,
+  options?: GetSlotHistoryOptions
+): Promise<SlotValue[]>;
+```
+
+`provenance` is already `Json` → **no migration**. `canRead` wraps this exactly as
+it wraps `getSlotHeads`.
+
+Guard the trap the issue identifies rather than only fixing the symptom: a
+doc-comment on `getSlotHeads` stating in one line that it is head-only and is
+**not** how you read a run, pointing at `getSlotHistory`.
+
+- Tests: superseded rows returned; `runId` filter selects across supersession;
+  `slotSlugs` narrowing; ascending-version ordering (last write in a run wins);
+  `canRead` parity with `getSlotHeads`.
+
+**Done when:** the leaf deletes `readRunAnswers`' direct `prisma.slotValue` query
+— a leaf reaching into a `framework_*` table is what the module exists to prevent.
+
+### t-2.2 · Run context reaches capability writes (#167)
+
+`fill_slot` builds provenance from `conversationId`/`moduleSlug`/`nodeKey` only,
+so an agent-captured value structurally belongs to no run — invisible to every
+run-scoped read from t-2.1.
+
+**Resolution (the issue offers three; take 2 + a guarded 1, not 3):**
+
+- **Server-resolved, primary:** in `fill-slot.ts`, resolve the conversation's
+  active `UserJourney` and stamp its `contextKey` as `runId`. The framework
+  already knows the conversation; the journey natural key is
+  `@@unique([userId, graphSlug, contextKey])`.
+- **Caller-supplied, secondary:** accept `scope.runId` — the opaque `scope` map
+  that Phase 1 t-1.3 now threads through the core consumer route — **only when it
+  matches an active journey for that user**. It arrives from an untrusted client;
+  the schema's own SECURITY note says re-validate before making it load-bearing.
+- **No run resolvable → no `runId`**, and say so in the capability's doc comment.
+  Option 3 (document the exclusion and stop) is rejected: it makes agent capture
+  permanently second-class in exactly the apps `runId` exists for.
+
+**Done when:** a chat correction mid-run lands in that run's picture, and a
+capture with no active journey still writes cleanly with no `runId`.
+
+---
+
+## Phase 3 — Journey and seeding seams (#159 · #168 · #158 · #157)
+
+_The "declared but unreachable" phase: three framework concepts a leaf cannot
+touch without writing `framework_*` rows itself._
+
+### t-3.1 · `createJourney` (#159)
+
+`applyEvent` is documented as the sole writer of journey state and requires an
+existing `journeyId`; `assembleJourneyContext` returns `null` without one; and
+**no `userJourney.create` exists anywhere in `lib/`** — only in two smoke scripts.
+Add `createJourney(userId, graphSlug, contextKey)` to
+`lib/framework/facilitation/journey/` (barrel-exported), idempotent on the natural
+key, as the counterpart to `applyJourneyTransition`.
+
+### t-3.2 · `recordNodeProgress` (#168)
+
+`UserNodeState.progress` is `Json?` and documented as "module-defined … opaque to
+the engine" — and has no setter. Add
+`recordNodeProgress(journeyId, nodeKey, patch)` plus an optional `progress` field
+on `TransitionRequest` (`guidance.ts:118`) for the case where the beat coincides
+with a transition. The engine does not interpret it; the field is already opaque.
+
+Use case is once-per-node beats ("show this person their week for the first
+time") that must survive a reload. The leaf added a bespoke scalar-list column for
+a concept the framework already models.
+
+### t-3.3 · ESLint exemption for non-build framework consumers (#157)
+
+The core→framework import ban (`lib/framework/eslint.config.mjs:72-78`) exempts
+`lib/framework/**`, `lib/app/**`, `tests/**/lib/framework/**`, `scripts/smoke/**`.
+Its stated rationale is build-time resolution — so the exemption should track
+"does this ship in `next build`", and seeds do not.
+
+**Resolve the issue's two halves differently:**
+
+- **Seeds — accept as filed.** Add `prisma/seeds/app-*/**` and
+  `prisma/seeds/_framework/**` (see t-3.4). Run via `tsx` from `prisma/seed.ts`,
+  never in a build — the identical profile to the already-exempt `scripts/smoke/**`.
+- **The comment's request for `app/(protected)/programme/**` etc. — decline as
+  filed, satisfy generically.** `programme` is leaf vocabulary and must not enter
+  a Daybreak-owned config; the next leaf has different words. Two answers instead:
+  1. exempt the **reserved leaf route namespaces**, mirroring how `lib/app/**`
+     is reserved: `app/api/v1/app/**`, `app/(protected)/app/**`, `app/admin/app/**`;
+  2. document in `building-on-daybreak.md` that a leaf using its own vocabulary
+     overrides via its own `lib/app/eslint.config.mjs` (spread **last**, so it
+     wins) — which is what RYW already does, and is the supported mechanism, not
+     a workaround.
+
+  Mind the flat-config footgun the file's own header calls out: every block
+  **restates** `aliasBan`, because `no-restricted-imports` replaces rather than
+  merges.
+
+### t-3.4 · Framework boot before leaf seeds (#158)
+
+`db:seed` / `db:reset` / CI never boot the app, so `initFramework() →
+initLeafApp() → syncFramework()` never runs and the `Module` row, its slot
+definitions, and the framework capability rows do not exist. A leaf seeding
+framework _configuration_ must call the three boot functions itself.
+
+**Resolution — no core edit, and it exploits the runner's existing ordering.**
+`prisma/runner.ts` runs seeds in lexicographic order of path-relative-to-`seeds/`,
+and ASCII puts digits `<` `_` `<` letters. So:
+
+- add **`prisma/seeds/_framework/000-framework-boot.ts`**, which calls the boot
+  sequence via the Daybreak-owned bridge `initApp()` (`lib/app/bootstrap.ts`).
+  It sorts **after** every core `NNN-*.ts` seed (so `001-system-owner`'s service
+  account exists) and **before** `app-*/` leaf seeds. `db:reset` and CI just work
+  with no leaf action at all.
+- also export **`syncFrameworkForSeed()`** from `lib/framework` — the same
+  sequence, idempotent, named — for `scripts/smoke/*` and any leaf that wants it
+  explicitly.
+
+Note the existing `prisma/seeds/framework/001-framework-rubric-judge.ts` sorts
+_after_ `app-*/`; that is fine (it depends on core only), but the new directory
+must be `_framework/`, not `framework/`, or the ordering fails silently.
+
+Depends on **t-3.3** (the new seed imports `@/lib/framework`).
+
+---
+
+## Phase 4 — Enforcement and authoring (#169 · #161)
+
+_Both are "the surface promises something it does not deliver". #169 is the more
+serious: it is a security-shaped invariant that was never enforced._
+
+### t-4.1 · Facet enforcement + slug-level facets (#169)
+
+**Half 1 — module capabilities inherit nothing.** `facetAllows` is called by the
+framework's own `fill_slot` and `get_state` and **by nothing else**;
+`BaseCapability` does nothing with `context.customConfig`. A leaf that declares a
+capability on its `ModuleDefinition` and grants it an `ExposureConfig` gets a
+grant that **silently enforces nothing**, indistinguishable from one that works.
+RYW believed for a year that its write allowlist was enforced twice; it was
+enforced once, and its guard test asserted against a hand-written **mirror** of
+`facetAllows` rather than the function — green while proving nothing.
+
+**This is why Phase 1 t-1.2 comes first.** With the #398 seam, enforcement is a
+`guard` on registration, not a new base class:
+
+```ts
+capabilityDispatcher.register(inner, {
+  slug: namespacedSlug,
+  guard: composeGuards(scopeGuard, exposureGuard), // exposureGuard reads context.customConfig (t-1.1)
+});
+```
+
+Every module capability then inherits enforcement by construction. Also add the
+sentence `BaseCapability` is missing: binding config is inert unless something
+applies it.
+
+**Half 2 — `facetSchema` cannot express a slug rule.** It is `.strict()` on
+`{ groups, scopes }`. A group that mixes machine-computed lanes with user
+self-reports cannot state its real permission as data, so the leaf permits the
+whole group on the grant and shuts the computed lanes in code — two layers
+deliberately non-identical, which reads as a bug. Add `slots?: string[]` and
+`denySlots?: string[]` to the facet (deny wins), widen `facetAllows`, and
+**replace the leaf's mirror-test pattern** with tests that call the real function.
+
+Tests must include the both-halves case: a grant whose facets deny a slug, on a
+module-declared capability, actually refuses.
+
+### t-4.2 · Array-of-objects config descriptors (#161)
+
+`modules/config/schema-descriptors.ts` renders string/number/boolean/enum and
+falls back to a raw-JSON textarea for everything else (`:164`). That is sound for
+a settings-shaped config and wrong for the common facilitation case, where **the
+module's config _is_ its content**: nine authored bucket definitions and the
+diagnostic prose under each. The page advertises "edit this module's
+configuration without a deploy" and, for that class of module, does not — and one
+unbalanced brace loses the lot.
+
+- Add a bounded `type: 'array'` descriptor: an `items` descriptor list describing
+  the element shape (flat primitives only) plus an index path
+  (`buckets.0.title`) the client renders rows from. Keep the raw-JSON fallback for
+  genuinely exotic schemas (nested arrays, unions, arrays of arrays).
+- Client: repeatable labelled rows with add/remove/reorder.
+- The walker stays **total** — never throws; worst case is still a JSON textarea.
+  The server still re-validates against the real Zod schema, so a descriptor
+  remains a rendering hint, never a trust boundary.
+
+Note what this does _not_ close: RYW keeps its own form for content-provenance
+markers (does each field still match the source document?), which no generic form
+can know. That split is the right factoring — the leaf owns the form and `PUT`s to
+the framework's own config endpoint, so validation, the `ModuleVersion` snapshot,
+the change summary and the audit entry all stay upstream.
+
+---
+
+## Phase 5 — The Sunrise backlog: carry, watch, or document
+
+_33 open upstream issues. Daybreak's question for each is not "is it real" but
+"does Daybreak act now, or wait". Three buckets._
+
+### Carry now — Daybreak-side, cheap, and it bites this tree
+
+| Issue    | Why now                                                                                                                                                                                                                                                                                                                    | Daybreak action                                                                                                                                                              |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **#537** | `engine/executors/tool-call.ts:101` dispatches without `registerBuiltInCapabilities()` — the one dispatch path of five that doesn't. #462 made the registry cross-realm; the lazy **trigger** is still a module-scoped boolean. Framework module workflow bindings and the scheduled sweeps run from the route/tick realm. | One-line core edit, no-op once anything else has registered. Minimal `keep-mine`, follow-up logged.                                                                          |
+| **#510** | No local command catches Prisma schema drift — `format:check` is Prettier, which has no `.prisma` parser. Daybreak owns `framework-*.prisma` and **already paid this** (commit `8edb5797`, a reformat of a file nobody edited).                                                                                            | Add a `db:format:check` script and hang it off the fork-owned **`app:ci-checks`** seam (already `framework:boundary && framework:changelog`) — **no core edit needed**.      |
+| **#539** | A squash-merged sync PR silently resets the fork's merge base; the next sync replays the whole preceding range. Daybreak's v0.8.0 sync was a true merge (`9f585081`), so ancestry is intact — but nothing prevents the next one, and the clone has no upstream tags to check against.                                      | Add `git merge-base --is-ancestor <latest sunrise tag> HEAD` to `app:ci-checks`. Pairs with t-0.2's remote setup. Cheap insurance on a failure that is invisible for months. |
+| **#543** | `CI_NODE_HEAP_MB` reaches the runner (`ci.yml:49`) but not the image — `Dockerfile:63` hardcodes `--max-old-space-size=4096`. Daybreak's tree is materially larger than Sunrise's.                                                                                                                                         | **Verify first** (is the Docker build near the ceiling today?). If yes, plumb the build arg; if no, watch. Don't pre-emptively edit the Dockerfile.                          |
+
+### Watch — real, but not biting Daybreak yet
+
+Keep as `upstream-asks` watch rows with the trigger that would promote them:
+
+- **#541** (grader registry is module-scoped; batch worker is route-realm) — the
+  f-governance-plus sweep uses a **seeded agent judge**, not a registered grader,
+  so it is unaffected. **Trigger:** the first framework-owned `registerGrader`.
+- **#540** (MCP `HANDLERS` map is module-local, not extensible) — Daybreak
+  registers no MCP resources. **Trigger:** the first `framework://` resource.
+- **#542** (`AiApiKey.scopes` closed enum → least privilege unavailable to forks)
+  — **Trigger:** the first framework-owned API surface wanting its own scope.
+- **#528** (`CAPABILITY_BINDING_MODE=strict` breaks every workflow `tool_call`;
+  the FK rejects a synthetic `workflow:<id>` agent id) — **Trigger:** wanting
+  strict mode. Worth knowing now: strict is currently unusable with workflows.
+- **#526** (`ChatInterface` hardcodes the admin stream endpoint) — Daybreak's
+  framework chat surfaces are API-only today. **Trigger:** the first framework
+  chat page. RYW likely needs this before Daybreak does.
+- **#532** (per-user schedules have no owner after #502), **#545** (capability
+  seeds never re-sync `functionDefinition`) — note that the framework's **own**
+  capability sync (`modules/capabilities/sync.ts:125`) already diffs and updates
+  `functionDefinition`, so Daybreak does not have #545's bug; only the core seeds
+  do.
+- **#507 / #508 / #509 / #553** — core security hardening (token domain
+  separation, `deletePrefix` root guard, `name`/`slug` divergence, escalation
+  webhook SSRF). All inherited, none reachable from a Daybreak surface, all fixed
+  in the wrong tier if fixed here. Wait; re-check on each sync.
+- **#366 / #367 / #533** — already ledgered. Unchanged.
+
+### Document — bites the **leaf**, not Daybreak
+
+These fire when RYW (or the next leaf) fills a seam the supported way. Daybreak is
+the tier that should warn them: add a **"known leaf-sync gotchas"** section to
+[`building-on-daybreak.md`](../building-on-daybreak.md).
+
+- **#525** — `registry.test.ts:158` asserts a hardcoded built-in count through
+  `lib/app/capabilities.ts`. Daybreak leaves that seam empty (it registers via
+  `initFramework()`), so Daybreak is green — **a leaf that fills it goes red**.
+- **#530** — three more places hardcode a seam's default (auth-landing route and
+  friends). Same shape: filling a seam correctly turns the suite red, and the fix
+  is to pin the new value, never to delete the assertion.
+- **#535** — `lib/app/env.ts` cannot honour §4's dynamic-import rule (it is read
+  during a synchronous module-load parse in `lib/env.ts`). Daybreak's is empty
+  today; the framework's only `process.env` read is
+  `facilitation/overlays/nudge-channel.ts:36`, which takes env by parameter. Say
+  so before someone adds a framework env var.
+- **#536** — a scoped `update`'s `P2025` inside `$transaction` rolls back the
+  whole batch. Worth a line in the framework's own DB conventions.
+
+---
+
+## Sequencing at a glance
+
+```
+Phase 0  ──▶ t-0.1 #160 registry realm      (leaf-blocking; independent)
+             t-0.2 ledger reconciliation    (docs; makes Phase 1 obvious)
+
+Phase 1  ──▶ t-1.1 #411 · t-1.2 #398 · t-1.3 #415 · t-1.4 #416 · t-1.5 #410
+             (5 deletions, parallelisable — t-1.1 and t-1.2 gate Phase 4)
+
+Phase 2  ──▶ t-2.1 #156+#162  ──▶  t-2.2 #167        (strict chain)
+
+Phase 3  ──▶ t-3.1 #159 · t-3.2 #168 (independent)
+             t-3.3 #157  ──▶  t-3.4 #158              (strict chain)
+
+Phase 4  ──▶ t-4.1 #169  (needs t-1.1 + t-1.2)
+             t-4.2 #161  (independent)
+
+Phase 5  ──▶ carry-now items, then watch-rows into the ledger + the leaf gotchas doc
+```
+
+**Schema impact:** none. No migration in any phase — `provenance` and `progress`
+are existing `Json` columns, and every other change is code, config or docs.
+
+**If only one thing gets done:** t-0.1. It costs ten lines and currently kills the
+entire generic config-editing surface for every leaf module.
+
+**Issue → task index:** #156 → t-2.1 · #157 → t-3.3 · #158 → t-3.4 · #159 → t-3.1
+· #160 → t-0.1 · #161 → t-4.2 · #162 → t-2.1 · #167 → t-2.2 · #168 → t-3.2 ·
+#169 → t-4.1.
