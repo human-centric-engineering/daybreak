@@ -2,8 +2,9 @@
  * In-memory module-capability registration (f-module-bindings t-2).
  *
  * Mocks the global dispatcher and asserts `registerRegisteredModuleCapabilities()`
- * registers each registered module's capabilities under their namespaced slug. The
- * module registry is real (`registerModule`).
+ * registers each registered module's capabilities **as themselves** under their
+ * namespaced slug, with a module-scope guard (the core `register(cap, { slug, guard })`
+ * seam — v1.3 Phase 1 t-1.2). The module registry is real (`registerModule`).
  *
  * @see lib/framework/modules/capabilities/register.ts
  */
@@ -63,12 +64,38 @@ describe('registerRegisteredModuleCapabilities', () => {
 
     registerRegisteredModuleCapabilities();
 
-    const registeredSlugs = dispatcher.register.mock.calls.map((c) => c[0].slug).sort();
+    const registeredSlugs = dispatcher.register.mock.calls.map((c) => c[1].slug).sort();
     expect(registeredSlugs).toEqual([
       'reading__read_progress',
       'reading__save_worksheet',
       'writing__save_worksheet',
     ]);
+  });
+
+  it("hands the dispatcher the author's own capability instance, not a wrapper", () => {
+    // Load-bearing: the dispatcher's PII guard is an own-property check on the
+    // instance's prototype, which any delegating wrapper would pass unconditionally.
+    const tool = new Tool('save_worksheet');
+    registerModuleWithCaps('reading', [tool]);
+
+    registerRegisteredModuleCapabilities();
+
+    const [capability, options] = dispatcher.register.mock.calls[0];
+    expect(capability).toBe(tool);
+    expect(capability.slug).toBe('save_worksheet'); // the author's slug is not rewritten
+    expect(options.slug).toBe('reading__save_worksheet');
+  });
+
+  it('attaches a guard that refuses a call pinned to another module', async () => {
+    registerModuleWithCaps('reading', [new Tool('save_worksheet')]);
+
+    registerRegisteredModuleCapabilities();
+
+    const guard = dispatcher.register.mock.calls[0][1].guard;
+    const context = { userId: 'u1', agentId: 'a1' };
+    expect(await guard({ ...context, scope: { moduleSlug: 'reading' } })).toEqual({ allow: true });
+    expect(await guard(context)).toEqual({ allow: true }); // nothing pinned
+    expect((await guard({ ...context, scope: { moduleSlug: 'writing' } })).allow).toBe(false);
   });
 
   it('is a no-op when a module declares an empty capabilities list', () => {

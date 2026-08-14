@@ -78,6 +78,35 @@ process.
   tree of a violation it could not observe. On a machine that already has the tags
   and full history it is a no-op and touches no git config. (Sunrise #539.)
 
+### Changed
+
+- **Module-declared capabilities are registered as themselves, through the core seam,
+  instead of being wrapped** — `lib/framework/modules/capabilities/namespace.ts` no longer
+  exports `namespaceModuleCapability` (and the `NamespacedModuleCapability` class is gone).
+  It exports two pure derivations instead: `moduleCapabilityIdentity(moduleSlug,
+  capability)` → `{ slug, functionDefinition }`, and `moduleScopeGuard(moduleSlug)` → a
+  `CapabilityGuard`. `register.ts` passes them to
+  `capabilityDispatcher.register(capability, { slug, guard })` (Sunrise #398, landed in
+  0.7.0); `sync.ts` reuses the identity for the `ai_capability` row, so the handler key and
+  the row's slug still come from one derivation.
+
+  **Module authors are unaffected** — you still write an ordinary `BaseCapability` with a
+  bare snake_case slug, and it is still registered as `<module_slug>__<tool_slug>` with a
+  matching `functionDefinition.name`.
+
+  **Two visible changes if you assert on refusals.** An out-of-module call is now refused
+  by the dispatcher *before* the rate limiter (so it consumes no token) and comes back as
+  core's `capability_guard_denied` rather than the framework's `out_of_module_scope`; the
+  message names the module the same way. And the framework's own `redactProvenance`
+  re-assertion is gone — core's PII guard now inspects your capability's real prototype
+  instead of a wrapper that defeated it, so the contract is enforced in one place rather
+  than two. A `processesPii` module capability that does not override `redactProvenance()`
+  still throws at boot.
+
+  **If you imported `namespaceModuleCapability`** (it was exported from
+  `lib/framework/modules/capabilities`), switch to `moduleCapabilityIdentity` +
+  `moduleScopeGuard`, or better, let `registerRegisteredModuleCapabilities()` do it.
+
 ## [0.1.0] — 2026-08-05
 
 > **First tagged Daybreak release.** The framework has been in use for some time

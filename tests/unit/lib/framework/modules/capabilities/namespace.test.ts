@@ -2,8 +2,10 @@
  * Module capability namespacing + scope refusal (f-module-bindings t-2).
  *
  * Pure unit tests: the namespaced slug / provider-legal function name derivations,
- * the scope-refusal predicate, and the wrapper (delegation, scope enforcement in
- * `execute`, snake_case validation, and the PII re-assertion). No DB, no dispatcher.
+ * the scope-refusal predicate, the identity derivation (including snake_case
+ * validation), and the guard handed to the core `register()` seam. No DB, no
+ * dispatcher — and, since v1.3 Phase 1 t-1.2, no wrapper to test either: delegation
+ * and the PII re-assertion are the dispatcher's job now.
  *
  * @see lib/framework/modules/capabilities/namespace.ts
  */
@@ -20,7 +22,8 @@ import type {
 import {
   moduleCapabilitySlug,
   isInModuleScope,
-  namespaceModuleCapability,
+  moduleCapabilityIdentity,
+  moduleScopeGuard,
 } from '@/lib/framework/modules/capabilities/namespace';
 
 /** A minimal well-formed module capability. */
@@ -38,21 +41,6 @@ class SaveWorksheet extends BaseCapability<{ text: string }, { saved: boolean }>
   }
   async execute(args: { text: string }): Promise<CapabilityResult<{ saved: boolean }>> {
     return this.success({ saved: args.text.length > 0 });
-  }
-}
-
-/** A PII capability that (wrongly) does not override redactProvenance. */
-class PiiNoRedact extends BaseCapability<{ email: string }> {
-  readonly slug = 'grab_email';
-  readonly functionDefinition: CapabilityFunctionDefinition = {
-    name: 'grab_email',
-    description: 'x',
-    parameters: {},
-  };
-  protected readonly schema: CapabilitySchema<{ email: string }> = z.object({ email: z.string() });
-  readonly processesPii = true;
-  async execute(): Promise<CapabilityResult> {
-    return this.success({});
   }
 }
 
@@ -95,77 +83,54 @@ describe('isInModuleScope', () => {
   });
 });
 
-describe('namespaceModuleCapability', () => {
-  it('presents the namespaced slug, and functionDefinition.name EQUALS the slug', () => {
-    const wrapped = namespaceModuleCapability('reading', new SaveWorksheet());
-    expect(wrapped.slug).toBe('reading__save_worksheet');
+describe('moduleCapabilityIdentity', () => {
+  it('derives the namespaced slug, and functionDefinition.name EQUALS the slug', () => {
+    const identity = moduleCapabilityIdentity('reading', new SaveWorksheet());
+    expect(identity.slug).toBe('reading__save_worksheet');
     // The dispatcher looks a handler up by the tool name the LLM calls, and only
     // surfaces a capability whose ai_capability.slug is a registered handler — so
     // slug and functionDefinition.name MUST be identical or the tool never dispatches.
-    expect(wrapped.functionDefinition.name).toBe(wrapped.slug);
-    expect(wrapped.functionDefinition.description).toBe('Persist the current worksheet');
+    expect(identity.functionDefinition.name).toBe(identity.slug);
+    expect(identity.functionDefinition.description).toBe('Persist the current worksheet');
   });
 
-  it('delegates validate to the inner capability', () => {
-    const wrapped = namespaceModuleCapability('reading', new SaveWorksheet());
-    expect(wrapped.validate({ text: 'hi' })).toEqual({ text: 'hi' });
-    expect(() => wrapped.validate({ text: 123 })).toThrow();
-  });
-
-  it('delegates execute when in scope', async () => {
-    const wrapped = namespaceModuleCapability('reading', new SaveWorksheet());
-    const res = await wrapped.execute({ text: 'hi' }, ctx({ moduleSlug: 'reading' }));
-    expect(res).toMatchObject({ success: true, data: { saved: true } });
-  });
-
-  it('refuses out-of-scope with a structured error, without calling inner', async () => {
-    const inner = new SaveWorksheet();
-    let ran = false;
-    inner.execute = async () => {
-      ran = true;
-      return { success: true };
-    };
-    const wrapped = namespaceModuleCapability('reading', inner);
-    const res = await wrapped.execute({ text: 'hi' }, ctx({ moduleSlug: 'writing' }));
-    expect(res).toMatchObject({ success: false, error: { code: 'out_of_module_scope' } });
-    expect(ran).toBe(false);
-  });
-
-  it('runs when no scope is pinned (interim posture)', async () => {
-    const wrapped = namespaceModuleCapability('reading', new SaveWorksheet());
-    const res = await wrapped.execute({ text: 'x' }, ctx());
-    expect(res.success).toBe(true);
+  it("leaves the author's capability untouched (the definition is copied, not renamed)", () => {
+    const capability = new SaveWorksheet();
+    moduleCapabilityIdentity('reading', capability);
+    expect(capability.functionDefinition.name).toBe('save_worksheet');
+    expect(capability.slug).toBe('save_worksheet');
   });
 
   it('rejects a non-snake_case tool slug', () => {
-    expect(() => namespaceModuleCapability('reading', new SaveWorksheet('save-worksheet'))).toThrow(
+    expect(() => moduleCapabilityIdentity('reading', new SaveWorksheet('save-worksheet'))).toThrow(
       /snake_case/
     );
+    expect(() => moduleCapabilityIdentity('reading', new SaveWorksheet('saveWorksheet'))).toThrow();
     expect(() =>
-      namespaceModuleCapability('reading', new SaveWorksheet('saveWorksheet'))
+      moduleCapabilityIdentity('reading', new SaveWorksheet('save.worksheet'))
     ).toThrow();
-    expect(() =>
-      namespaceModuleCapability('reading', new SaveWorksheet('save.worksheet'))
-    ).toThrow();
-    expect(() => namespaceModuleCapability('reading', new SaveWorksheet('_save'))).toThrow();
+    expect(() => moduleCapabilityIdentity('reading', new SaveWorksheet('_save'))).toThrow();
+  });
+});
+
+describe('moduleScopeGuard', () => {
+  it('allows a call pinned to the same module', async () => {
+    expect(await moduleScopeGuard('reading')(ctx({ moduleSlug: 'reading' }))).toEqual({
+      allow: true,
+    });
   });
 
-  it('rejects a PII capability that does not override redactProvenance', () => {
-    expect(() => namespaceModuleCapability('reading', new PiiNoRedact())).toThrow(
-      /redactProvenance/
-    );
+  it('allows a call with no module pinned (interim posture)', async () => {
+    expect(await moduleScopeGuard('reading')(ctx())).toEqual({ allow: true });
   });
 
-  it('propagates the inner processesPii flag', () => {
-    const wrapped = namespaceModuleCapability('reading', new SaveWorksheet());
-    expect(wrapped.processesPii).toBe(false);
-  });
-
-  it('delegates redactProvenance to the inner capability', () => {
-    const inner = new SaveWorksheet();
-    const redaction = { args: { text: '***' }, resultPreview: 'redacted' };
-    inner.redactProvenance = () => redaction;
-    const wrapped = namespaceModuleCapability('reading', inner);
-    expect(wrapped.redactProvenance({ text: 'secret' }, { success: true })).toBe(redaction);
+  it('denies a call pinned to a different module, with a client-safe reason', async () => {
+    const decision = await moduleScopeGuard('reading')(ctx({ moduleSlug: 'writing' }));
+    expect(decision.allow).toBe(false);
+    // The dispatcher folds `reason` verbatim into a client-visible message, so it may
+    // name the module (already public in the tool's slug) and nothing else.
+    expect(decision.reason).toContain('reading');
+    expect(decision.reason).not.toContain('a1'); // no agent id
+    expect(decision.reason).not.toContain('u1'); // no user id
   });
 });

@@ -33,7 +33,7 @@ import { logger } from '@/lib/logging';
 import { getRegisteredModules } from '@/lib/framework/modules/registry';
 import type { CapabilityFunctionDefinition } from '@/lib/orchestration/capabilities/types';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
-import { namespaceModuleCapability } from '@/lib/framework/modules/capabilities/namespace';
+import { moduleCapabilityIdentity } from '@/lib/framework/modules/capabilities/namespace';
 
 /** Timeout (ms) for the sync transaction — a ceiling above Prisma's 5s default (#368). */
 const SYNC_TX_TIMEOUT_MS = 20_000;
@@ -83,28 +83,31 @@ interface ModuleCapabilityRow {
 /**
  * Project every registered module's capabilities to their `ai_capability` rows.
  * Namespaces each (validating the tool slug) and derives the row's code-owned
- * fields. Deduped by namespaced slug — unique by construction, so a collision is an
- * authoring error (last wins, logged). Exported for unit testing.
+ * fields from the same `moduleCapabilityIdentity` the handler registration uses.
+ * Deduped by namespaced slug — unique by construction, so a collision is an authoring
+ * error (last wins, logged). Exported for unit testing.
  */
 export function collectRegisteredModuleCapabilities(): ModuleCapabilityRow[] {
   const bySlug = new Map<string, ModuleCapabilityRow>();
 
   for (const mod of getRegisteredModules()) {
     for (const capability of mod.capabilities ?? []) {
-      const wrapped = namespaceModuleCapability(mod.slug, capability);
-      if (bySlug.has(wrapped.slug)) {
+      // The SAME derivation `register.ts` uses for the handler key — the row's slug and
+      // the handler key must be one string or the tool never dispatches.
+      const { slug, functionDefinition } = moduleCapabilityIdentity(mod.slug, capability);
+      if (bySlug.has(slug)) {
         logger.warn(
           'collectRegisteredModuleCapabilities: duplicate capability slug — last registration wins',
-          { slug: wrapped.slug, moduleSlug: mod.slug }
+          { slug, moduleSlug: mod.slug }
         );
       }
-      bySlug.set(wrapped.slug, {
-        slug: wrapped.slug,
+      bySlug.set(slug, {
+        slug,
         // No human display name on BaseCapability — the namespaced slug is the row's
         // name (admin sees `reading__save_worksheet`); the LLM sees functionDefinition.name.
-        name: wrapped.slug,
-        description: wrapped.functionDefinition.description,
-        functionDefinition: wrapped.functionDefinition,
+        name: slug,
+        description: functionDefinition.description,
+        functionDefinition,
         // A STABLE identifier of the owning module + tool. NOT `constructor.name` —
         // minified server bundles mangle class names (and it feeds the diff below).
         executionHandler: `framework-module:${mod.slug}/${capability.slug}`,
