@@ -1025,6 +1025,43 @@ For the full version contract and how Sunrise releases are produced, see
 
 ## 9. Staying in sync with upstream Sunrise
 
+### Before your first sync — wire up the remote
+
+A fork cloned from your own origin has **no `upstream` remote and none of
+Sunrise's tags**, so `git merge vX.Y.Z` fails with "unknown revision" and every
+"has this landed upstream yet?" check has nothing to run against. Do this once
+per clone — it is a prerequisite for everything else in this section:
+
+```bash
+git remote add upstream git@github.com:human-centric-engineering/sunrise.git
+git fetch upstream --tags
+git tag -l 'v*'                      # the Sunrise releases you can merge
+```
+
+Then adopt a release with an ordinary merge:
+
+```bash
+git merge v0.8.1
+```
+
+With the remote in place, two checks become runnable — use both on every sync:
+
+```bash
+# Which release am I actually on? (lib/sunrise-version.ts is the claim;
+# this is the evidence)
+git merge-base --is-ancestor v0.8.1 HEAD && echo "v0.8.1 is in my history"
+
+# Has an upstream ask I'm shimming landed yet?
+gh issue view <n> -R human-centric-engineering/sunrise --json state,title
+```
+
+The second is the standing **delegate-when-it-lands** trigger for every open row
+in [`.context/framework/upstream-asks.md`](./.context/framework/upstream-asks.md);
+that file's "Running the check" section spells out the full recipe, including the
+trap that a **closed issue whose fix landed after your tag is not in your tree**.
+
+### Migrations are the biggest moving part
+
 When you pull a new Sunrise release into your fork, the biggest moving part is
 the database migration history — your app's migrations and Sunrise's share one
 directory.
