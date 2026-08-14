@@ -70,10 +70,50 @@ class GrabEmail extends BaseCapability {
   }
 }
 
-/** The same tool, redacting as the contract requires. */
+/** The same tool, redacting as the contract requires: a method on its OWN prototype. */
 class GrabEmailRedacting extends GrabEmail {
   override redactProvenance(): ReturnType<InstanceType<typeof BaseCapability>['redactProvenance']> {
     return { args: {}, resultPreview: '[redacted]' };
+  }
+}
+
+/** A shared module base that redacts on behalf of its subclasses. */
+abstract class RedactingModuleBase extends BaseCapability {
+  override readonly processesPii = true;
+  override redactProvenance(): ReturnType<InstanceType<typeof BaseCapability>['redactProvenance']> {
+    return { args: {}, resultPreview: '[redacted]' };
+  }
+}
+
+/** Redactor INHERITED from an intermediate base — not on this class's own prototype. */
+class GrabEmailInherited extends RedactingModuleBase {
+  readonly slug = 'grab_email_inherited';
+  readonly functionDefinition: CapabilityFunctionDefinition = {
+    name: 'grab_email_inherited',
+    description: 'x',
+    parameters: {},
+  };
+  protected readonly schema: CapabilitySchema<unknown> = z.object({});
+  async execute(): Promise<CapabilityResult> {
+    return this.success({});
+  }
+}
+
+/** Redactor as a class-property arrow — an own INSTANCE property, not on the prototype. */
+class GrabEmailArrow extends BaseCapability {
+  readonly slug = 'grab_email_arrow';
+  readonly functionDefinition: CapabilityFunctionDefinition = {
+    name: 'grab_email_arrow',
+    description: 'x',
+    parameters: {},
+  };
+  protected readonly schema: CapabilitySchema<unknown> = z.object({});
+  readonly processesPii = true;
+  override redactProvenance = (): ReturnType<
+    InstanceType<typeof BaseCapability>['redactProvenance']
+  > => ({ args: {}, resultPreview: '[redacted]' });
+  async execute(): Promise<CapabilityResult> {
+    return this.success({});
   }
 }
 
@@ -104,18 +144,43 @@ describe('registerRegisteredModuleCapabilities (real dispatcher)', () => {
   });
 
   it('throws at boot for a processesPii capability that does not redact', () => {
-    registerModuleWithCaps('reading', [new GrabEmail()]);
+    // A distinct module slug per case: the dispatcher is a process-global with no
+    // unregister, so sharing one would make these assertions order-dependent.
+    registerModuleWithCaps('noredact', [new GrabEmail()]);
 
     // Core's own guard, run against the author's real prototype — the check the fork
     // used to duplicate because a wrapper defeated it.
     expect(() => registerRegisteredModuleCapabilities()).toThrow(/redactProvenance/);
-    expect(capabilityDispatcher.has('reading__grab_email')).toBe(false);
+    expect(capabilityDispatcher.has('noredact__grab_email')).toBe(false);
   });
 
-  it('accepts the same PII capability once it overrides redactProvenance', () => {
-    registerModuleWithCaps('reading', [new GrabEmailRedacting()]);
+  it('accepts a PII capability that overrides redactProvenance on its own prototype', () => {
+    registerModuleWithCaps('redacting', [new GrabEmailRedacting()]);
 
     expect(() => registerRegisteredModuleCapabilities()).not.toThrow();
-    expect(capabilityDispatcher.has('reading__grab_email')).toBe(true);
+    expect(capabilityDispatcher.has('redacting__grab_email')).toBe(true);
+  });
+
+  // ── The tightening this delegation brings (documented in the CHANGELOG) ──────────
+  //
+  // The fork's deleted re-assertion compared `redactProvenance` by identity against
+  // `BaseCapability.prototype.redactProvenance`, so ANY override — inherited from an
+  // intermediate base, or an own instance property — satisfied it. Core's
+  // `isRedactorOverridden` is an own-property check on the instance's DIRECT prototype,
+  // so both shapes now throw. These two tests pin that, so the day core relaxes the
+  // check (filed in upstream-asks) the change is visible rather than silent.
+
+  it('rejects a redactor inherited from an intermediate base class (core is stricter)', () => {
+    registerModuleWithCaps('inherited', [new GrabEmailInherited()]);
+
+    expect(() => registerRegisteredModuleCapabilities()).toThrow(/redactProvenance/);
+    expect(capabilityDispatcher.has('inherited__grab_email_inherited')).toBe(false);
+  });
+
+  it('rejects a redactor declared as a class-property arrow (own instance property)', () => {
+    registerModuleWithCaps('arrow', [new GrabEmailArrow()]);
+
+    expect(() => registerRegisteredModuleCapabilities()).toThrow(/redactProvenance/);
+    expect(capabilityDispatcher.has('arrow__grab_email_arrow')).toBe(false);
   });
 });

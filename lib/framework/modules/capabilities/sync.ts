@@ -86,6 +86,15 @@ interface ModuleCapabilityRow {
  * fields from the same `moduleCapabilityIdentity` the handler registration uses.
  * Deduped by namespaced slug — unique by construction, so a collision is an authoring
  * error (last wins, logged). Exported for unit testing.
+ *
+ * **Run the handler registration first.** Since v1.3 Phase 1 t-1.2 the PII contract
+ * (`processesPii` ⇒ `redactProvenance()`) is enforced by core inside
+ * `capabilityDispatcher.register()`, i.e. by `registerRegisteredModuleCapabilities()` —
+ * not here. `syncFramework()` calls that first and a violation throws, so the sync never
+ * runs on a non-compliant capability. A caller that invokes this half **alone** (a repair
+ * script, a future "re-sync" route) would write a row for a capability with no redactor;
+ * the row is not dispatchable — nothing registered a handler for it — but it would be
+ * admin-grantable and misleading. Keep the two halves in that order.
  */
 export function collectRegisteredModuleCapabilities(): ModuleCapabilityRow[] {
   const bySlug = new Map<string, ModuleCapabilityRow>();

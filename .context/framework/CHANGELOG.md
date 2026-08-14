@@ -90,9 +90,41 @@ process.
   0.7.0); `sync.ts` reuses the identity for the `ai_capability` row, so the handler key and
   the row's slug still come from one derivation.
 
-  **Module authors are unaffected** — you still write an ordinary `BaseCapability` with a
-  bare snake_case slug, and it is still registered as `<module_slug>__<tool_slug>` with a
-  matching `functionDefinition.name`.
+  **Module authors: one authoring constraint is now stricter.** You still write an ordinary
+  `BaseCapability` with a bare snake_case slug, still registered as
+  `<module_slug>__<tool_slug>` with a matching `functionDefinition.name`. But if your
+  capability sets `processesPii = true`, its `redactProvenance()` must be a **method on that
+  class's own prototype**. Core's check is an own-property lookup on the instance's direct
+  prototype, where the framework's deleted re-assertion compared by identity against the base
+  method and so accepted anything. Two shapes that used to boot now **throw at boot**:
+
+  ```ts
+  // ❌ inherited from an intermediate base class
+  abstract class ModuleToolBase extends BaseCapability {
+    override redactProvenance() { … }
+  }
+  class GrabEmail extends ModuleToolBase { processesPii = true }
+
+  // ❌ class-property arrow — an own *instance* property, not on the prototype
+  class GrabEmail extends BaseCapability {
+    processesPii = true;
+    override redactProvenance = () => ({ … });
+  }
+
+  // ✅ a method on the capability's own class
+  class GrabEmail extends BaseCapability {
+    processesPii = true;
+    override redactProvenance() { … }
+  }
+  ```
+
+  **Check your module capabilities before upgrading.** The throw escapes
+  `registerRegisteredModuleCapabilities()` inside `syncFramework()`, which `lib/app/bootstrap.ts`
+  catches and logs — so every later boot step (framework capability handlers, module / slot /
+  capability sync) is skipped for that boot, with only a `logger.error` to show for it. Both
+  shapes are pinned by tests, and core's over-strict check is filed in
+  [`upstream-asks.md`](./upstream-asks.md); if Sunrise relaxes it, this constraint relaxes with
+  it.
 
   **Two visible changes if you assert on refusals.** An out-of-module call is now refused
   by the dispatcher *before* the rate limiter (so it consumes no token) and comes back as
