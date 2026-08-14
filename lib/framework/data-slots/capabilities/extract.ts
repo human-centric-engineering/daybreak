@@ -33,7 +33,7 @@ import {
   validateTypedValue,
 } from '@/lib/framework/data-slots/capabilities/typed-value';
 
-/** Span/cost phase tag for these completions (`gen_ai.operation.name` +
+/** Span phase tag for these completions (`gen_ai.operation.name` +
  *  `sunrise.evaluation.phase`) — this is slot capture, not evaluation. */
 const EXTRACTION_PHASE = 'slot-extraction';
 
@@ -102,9 +102,10 @@ export async function extractTypedValue(
       retryUserMessage: `Respond ONLY with a JSON object {"value": <the ${dataType}>}. No prose, no code fences.`,
       maxTokens: EXTRACTION_MAX_TOKENS,
       timeoutMs: EXTRACTION_TIMEOUT_MS,
-      // Tag the span/cost log as slot capture, not evaluation. The runner's `phase` is an
-      // open string (Sunrise #410) and defaults to `'evaluation'` when omitted, which
-      // mislabelled every extraction as eval work in the OTEL trace and the cost breakdown.
+      // Tag the span as slot capture, not evaluation. The runner's `phase` is an open
+      // string (Sunrise #410) and defaults to `'evaluation'` when omitted, which
+      // mislabelled every extraction as eval work in the OTEL trace. Spans only — the
+      // runner persists nothing, and this call's `costUsd` is logged, never recorded.
       phase: EXTRACTION_PHASE,
     });
 

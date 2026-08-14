@@ -105,11 +105,11 @@ process.
   The admin binding routes and the config import both validate the field as an object, so
   this only bites a leaf that writes the column by hand — write `{}`, not `[]`.
 
-- **Slot prose→typed extraction is tagged `slot-extraction` in traces and cost logs**
+- **Slot prose→typed extraction is tagged `slot-extraction` in traces**
   (`lib/framework/data-slots/capabilities/extract.ts`) — it inherited the structured
   runner's default `evaluation` phase, so every extraction was filed under evaluation
-  work in the OTEL span tree and the per-phase cost breakdown. Sunrise 0.7.0 widened
-  `phase` to an open string (#410). Reporting-only; no behaviour change.
+  work in the OTEL span tree. Sunrise 0.7.0 widened `phase` to an open string (#410).
+  Spans only: the runner persists nothing by contract, so this changes no cost record.
 
 ## [0.1.0] — 2026-08-05
 
