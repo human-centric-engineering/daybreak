@@ -14,13 +14,33 @@
  *
  * Pure (no DB): the list + the dispatcher handoff. The `ai_capability` row sync lives in
  * `sync.ts` (B12 — pure/DB split).
+ *
+ * # Why the store is on `globalThis` (#160)
+ *
+ * Same instrumentation/route realm split as the module registry — see the header of
+ * `lib/framework/modules/registry.ts` for the full explanation. The blast radius here is
+ * smaller but the asymmetry is a trap: `registerFrameworkCapabilityHandlers()` flushes
+ * every handler into the dispatcher, which #462 already made `globalThis`-backed, so
+ * runtime **dispatch** survives the split either way. What does not survive is
+ * `getRegisteredFrameworkCapabilities()` — empty at request time, so anything that
+ * enumerates the framework's own tools (rather than dispatching one) silently sees none.
+ * Backing this map costs one line and removes the "dispatch works, listing doesn't"
+ * discrepancy that would otherwise have to be re-derived by whoever hits it.
  */
 
 import type { BaseCapability } from '@/lib/orchestration/capabilities/base-capability';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import { logger } from '@/lib/logging';
 
-const frameworkCapabilities = new Map<string, BaseCapability>();
+const globalForFrameworkCapabilities = globalThis as unknown as {
+  daybreakFrameworkCapabilityRegistry?: Map<string, BaseCapability>;
+};
+
+const frameworkCapabilities: Map<string, BaseCapability> =
+  (globalForFrameworkCapabilities.daybreakFrameworkCapabilityRegistry ??= new Map<
+    string,
+    BaseCapability
+  >());
 
 /**
  * Register a framework built-in capability. Deduped by slug (last wins, logged) and
