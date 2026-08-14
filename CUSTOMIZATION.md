@@ -1044,6 +1044,26 @@ Then adopt a release with an ordinary merge:
 git merge v0.8.1
 ```
 
+> **Merge the sync PR with a merge commit — never squash it.** That merge commit
+> is the only record of where your fork and upstream last agreed. Squash it and
+> the second parent is gone: the tree still has every upstream change and
+> `lib/sunrise-version.ts` still names the new release, but git's merge base
+> silently reverts to the release before it. Nothing errors and nothing logs. The
+> bill arrives at the _next_ sync, which replays the whole preceding range and
+> conflicts on changes that are already present — by which time the cause is
+> months of history away. Daybreak paid exactly this on its v0.8.1 sync (PR #196).
+>
+> `npm run app:ci-checks` now includes `framework:sync-ancestry`, which fails the
+> build if the version this tree claims is not in its history. If it fires, repair
+> with a tree-less merge — but confirm the content is genuinely present first,
+> because `-s ours` will silently swallow anything that is missing:
+>
+> ```bash
+> git diff --name-only v0.8.0 v0.8.1        # what the release actually touched
+> git diff v0.8.1 HEAD -- <those files>     # confirm each landed
+> git merge -s ours v0.8.1                  # record ancestry, tree untouched
+> ```
+
 With the remote in place, two checks become runnable — use both on every sync:
 
 ```bash

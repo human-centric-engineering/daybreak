@@ -25,6 +25,35 @@ process.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Module registrations now survive the request realm** — `registerModule()` /
+  `getRegisteredModule()` (`lib/framework/modules/registry.ts`) and
+  `registerFrameworkCapability()` / `getRegisteredFrameworkCapabilities()`
+  (`lib/framework/capabilities/registry.ts`) are backed by `globalThis`.
+
+  **Leaf-visible fix, no action required.** Next 16 + Turbopack loads
+  `instrumentation.ts` in a different module graph from route handlers and RSC, so
+  a registry populated at boot was empty on every request. A correctly registered,
+  active, DB-synced module rendered _"This module's code is no longer registered,
+  so its config can't be edited"_ — the whole generic module-config surface was
+  dead for any leaf module. If your leaf carries a local `keep-mine` copy of either
+  registry to work around this, you can drop it on merging this release.
+  (Daybreak #160; same class as Sunrise #462, which swept core's own registries.)
+
+### Added
+
+- **`npm run framework:sync-ancestry`, wired into the fork-owned `app:ci-checks`
+  seam** — fails the build when `lib/sunrise-version.ts` claims a Sunrise release
+  that is not in the tree's git history, the signature of a squash-merged sync PR
+  that silently resets the fork's merge base.
+
+  **Leaves inherit this check.** It compares the *claimed* version against history
+  — never against the newest upstream release — so being deliberately behind
+  upstream stays silent. A clone without the Sunrise tags (no `upstream` remote, or
+  a shallow CI checkout) is reported as a loud skip rather than a failure.
+  (Sunrise #539.)
+
 ## [0.1.0] — 2026-08-05
 
 > **First tagged Daybreak release.** The framework has been in use for some time
