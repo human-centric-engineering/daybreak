@@ -1,4 +1,4 @@
-# Issue backlog — phased plan (2026-08-08)
+# Issue backlog — phased plan (2026-08-08, amended 2026-08-14)
 
 The first real leaf (`reclaim-your-week`) has been building on Daybreak since the
 Sunrise v0.8.0 sync, and has filed **ten issues** against this repo. In parallel,
@@ -12,6 +12,25 @@ picked up, add its row to [`plan.md`](./plan.md) per
 
 **Proposed epic:** _Framework v1.3 — leaf-consumer hardening_ (v1.2 made Daybreak
 distributable; v1.3 makes it usable by the app that took the distribution).
+
+> ### Amended 2026-08-14
+>
+> Re-checked against the tree and both trackers. **Phases 0–4 stand unchanged** —
+> all ten Daybreak issues are still open, nothing is claimed on
+> [`plan.md`](./plan.md), and every code claim re-verified (both registries still
+> bare `Map`s; all five Phase 1 shims still carried against seams that are all
+> present; no `getSlotHistory`, `createJourney`, `recordNodeProgress`, `slots`
+> facet or `array` descriptor). Three things moved, all in and around Phase 5:
+>
+> 1. **Nine upstream issues Phase 5 tracked have closed** — but every fix landed
+>    on `upstream/main` _after_ the `v0.8.1` tag, so none are in this tree. The
+>    carry-now bucket collapses to one row. Phase 5 is rewritten below.
+> 2. **#539's failure mode already happened here.** The v0.8.1 sync (#196) was
+>    squash-merged, so Daybreak's merge base with `upstream` is still v0.8.0. New
+>    task **t-0.3** repairs it, and it must land _before_ the #539 CI guard.
+> 3. **t-0.2's premise is half-obsolete** — the clone now has the `upstream`
+>    remote and the Sunrise tags. The ledger reconciliation itself is still
+>    entirely needed: all six stale rows still read "filed — awaiting the seam".
 
 ---
 
@@ -88,16 +107,54 @@ Rewrite the six stale rows against the table above: #403 → **Landed** section;
 #398/#410/#411/#415/#416 → status `landed — shim still carried, delegate in
 Phase 1`, each row naming its Phase 1 task. Keep #366/#367/#533 open.
 
-Also close the loop the ledger cannot currently check: **the clone has no
-`upstream` remote and no Sunrise tags** (`git tag` shows only `daybreak-v0.1.0`),
-so the delegate-when-it-lands check has nothing to run against. Add
-`git remote add upstream …` + `git fetch upstream --tags` to
-[`CUSTOMIZATION.md` §9](../../CUSTOMIZATION.md) / `building-on-daybreak.md` as a
+Also close the loop the ledger cannot currently check. **Amended:** the clone now
+_has_ the `upstream` remote and the Sunrise tags (`v0.0.1`…`v0.8.1`) — that half
+resolved itself between filing and amendment. What did **not** change is that
+neither [`CUSTOMIZATION.md` §9](../../CUSTOMIZATION.md) nor
+[`building-on-daybreak.md`](../building-on-daybreak.md) tells anyone to set them
+up, so the next clone starts blind again. Add
+`git remote add upstream …` + `git fetch upstream --tags` to both as a
 prerequisite step, and make the check concrete: for each open row,
 `gh issue view <n> -R human-centric-engineering/sunrise --json state`.
 
 **Done when:** every row's status matches upstream reality, and the sync guide
 tells the next person how to keep it that way.
+
+### t-0.3 · Repair the merge base the v0.8.1 sync broke (#539) — **before the guard**
+
+_Added 2026-08-14. Phase 5 filed #539 as insurance against a failure that had not
+happened yet. It happened six days later._
+
+PR **#196** ("chore: merge Sunrise v0.8.1 into Daybreak", 2026-08-14) was
+**squash-merged**: `66ba4513` has the single parent `3eeaf9ce`, not two. So
+`git merge-base HEAD upstream/main` is still **`45e704d9` (Sunrise 0.8.0)**, and
+`git merge-base --is-ancestor v0.8.1 HEAD` returns false while
+`lib/sunrise-version.ts` says `0.8.1`. The next sync will therefore replay the
+whole `v0.8.0..` range — conflicting on files that already carry the change.
+
+**Only ancestry broke; the content is all here.** v0.8.1's entire delta is four
+files (`CHANGELOG.md`, `lib/sunrise-version.ts`, `package.json`,
+`package-lock.json`). `CHANGELOG.md` and `lib/sunrise-version.ts` are
+byte-identical to the tag, both the `[0.8.1]` and `[0.8.0]` headings are present,
+and `ws` is at `8.21.3` — ahead of the tag's `8.21.2`, via dependabot #197. That
+is what makes the repair safe and cheap **now**, and it only gets dearer.
+
+- Record the ancestry without touching the tree: `git merge -s ours v0.8.1` on a
+  branch — a two-parent commit whose tree is HEAD's, asserting "v0.8.1 is
+  accounted for". **Re-verify that four-file delta first**; `-s ours` would
+  silently swallow anything genuinely missing.
+- **Then** add the #539 guard — an `--is-ancestor` check of the latest Sunrise tag
+  against `HEAD` — on the fork-owned `app:ci-checks` seam (already
+  `framework:boundary && framework:changelog`, so no core edit). Mind the
+  ordering: added today it goes **red on `main`**, because the condition it
+  asserts is currently false.
+- Add one line to [`CUSTOMIZATION.md` §9](../../CUSTOMIZATION.md) and the sync
+  guide: **a sync PR is merged with a merge commit, never squashed.** The guard
+  catches the mistake; the doc prevents it. Pairs with t-0.2's remote setup —
+  the guard needs the tags to compare against.
+
+**Done when:** `git merge-base --is-ancestor v0.8.1 HEAD` succeeds, CI fails a
+squashed sync, and the next `git merge vX.Y.Z` replays only genuinely new commits.
 
 ---
 
@@ -349,21 +406,70 @@ the change summary and the audit entry all stay upstream.
 
 ## Phase 5 — The Sunrise backlog: carry, watch, or document
 
-_33 open upstream issues. Daybreak's question for each is not "is it real" but
-"does Daybreak act now, or wait". Three buckets._
+_Rewritten 2026-08-14. The original triaged 33 open upstream issues into carry /
+watch / document. **Nine have since closed**, and the shape of the answer changed
+with them._
 
-### Carry now — Daybreak-side, cheap, and it bites this tree
+### The finding that reorders this phase
 
-| Issue    | Why now                                                                                                                                                                                                                                                                                                                    | Daybreak action                                                                                                                                                              |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **#537** | `engine/executors/tool-call.ts:101` dispatches without `registerBuiltInCapabilities()` — the one dispatch path of five that doesn't. #462 made the registry cross-realm; the lazy **trigger** is still a module-scoped boolean. Framework module workflow bindings and the scheduled sweeps run from the route/tick realm. | One-line core edit, no-op once anything else has registered. Minimal `keep-mine`, follow-up logged.                                                                          |
-| **#510** | No local command catches Prisma schema drift — `format:check` is Prettier, which has no `.prisma` parser. Daybreak owns `framework-*.prisma` and **already paid this** (commit `8edb5797`, a reformat of a file nobody edited).                                                                                            | Add a `db:format:check` script and hang it off the fork-owned **`app:ci-checks`** seam (already `framework:boundary && framework:changelog`) — **no core edit needed**.      |
-| **#539** | A squash-merged sync PR silently resets the fork's merge base; the next sync replays the whole preceding range. Daybreak's v0.8.0 sync was a true merge (`9f585081`), so ancestry is intact — but nothing prevents the next one, and the clone has no upstream tags to check against.                                      | Add `git merge-base --is-ancestor <latest sunrise tag> HEAD` to `app:ci-checks`. Pairs with t-0.2's remote setup. Cheap insurance on a failure that is invisible for months. |
-| **#543** | `CI_NODE_HEAP_MB` reaches the runner (`ci.yml:49`) but not the image — `Dockerfile:63` hardcodes `--max-old-space-size=4096`. Daybreak's tree is materially larger than Sunrise's.                                                                                                                                         | **Verify first** (is the Docker build near the ceiling today?). If yes, plumb the build arg; if no, watch. Don't pre-emptively edit the Dockerfile.                          |
+Every one of those nine fixes landed on `upstream/main` **after the `v0.8.1`
+tag**, and Daybreak syncs at tag boundaries. The fixes are real, public, and
+**not in this tree** — verified: `Dockerfile:63` still hardcodes
+`--max-old-space-size=4096`, and `package.json` still has no `db:format:check`.
+
+| Was                           | Fixed upstream by                                        | Phase 5 said         | Now                                                  |
+| ----------------------------- | -------------------------------------------------------- | -------------------- | ---------------------------------------------------- |
+| **#537** + **#528**           | #599 register capabilities before a workflow `tool_call` | carry / watch        | drop both — arrives with the next release            |
+| **#510** Prisma format check  | #566 make the Prisma format check runnable locally       | carry                | drop — adopt upstream's, not a fork-local script     |
+| **#543** `CI_NODE_HEAP_MB`    | #589 forward `CI_NODE_HEAP_MB` into the Docker build     | carry (verify first) | drop — the "don't pre-emptively edit" call was right |
+| **#545** capability seeds     | #596 re-apply code-owned fields when re-seeding          | watch                | drop                                                 |
+| **#507 / #508 / #509 / #553** | #557 · #558 · #555                                       | wait                 | still wait — now with a landing date                 |
+
+Two of those security fixes (#507/#508 in `88dbb32a`, #553 in `7fda7821`) landed
+**hours before this plan was filed** and were nonetheless written up as "wait;
+re-check on each sync" — the same staleness failure the plan's own opening
+section diagnoses in `upstream-asks.md`. The lesson is t-0.2's: **state-check
+every referenced issue at the moment of writing**, then again on each sync.
+
+### Carry now
+
+One row, and it is no longer insurance against a hypothetical.
+
+| Issue    | Why now                                                                                                                             | Daybreak action                                                                                                                                                                 |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **#539** | Still open upstream — and **it already bit this repo**: the v0.8.1 sync was squash-merged, so the merge base is stranded at v0.8.0. | Promoted to **[t-0.3](#t-03--repair-the-merge-base-the-v081-sync-broke-539--before-the-guard)** in Phase 0: repair the ancestry first, _then_ add the guard to `app:ci-checks`. |
+
+### Adopt on the next sync — do not build
+
+Nothing to do but pull. Add each as an `upstream-asks` row with status **landed
+upstream, awaiting the next Sunrise release**, so the sync that brings it knows
+which local mitigation to drop.
+
+- **#537 / #528** (#599) — the `tool-call.ts` registration gap, plus a workflow
+  exemption from strict binding mode. **Note the interaction with t-1.2:** Phase 1
+  moves the framework's namespaced capabilities onto the dispatcher's own
+  `register(…, { guard })` seam, and #599 changes when registration runs relative
+  to a workflow `tool_call`. Land t-1.2 first, then re-test framework module
+  capability dispatch on the sync that brings #599.
+- **#510** (#566) — a locally-runnable Prisma format check. **Prefer upstream's to
+  the original suggestion** of a fork-local `db:format:check` on `app:ci-checks`:
+  same outcome, zero fork surface. Daybreak already paid this once (`8edb5797`);
+  it is cheap to keep waiting.
+- **#543** (#589) — `CI_NODE_HEAP_MB` reaching the Docker build. The original row
+  said "verify first, don't pre-emptively edit the Dockerfile". That judgement
+  held; the edit is now upstream's.
+- **#545** (#596) — capability seed re-sync. Daybreak never had the bug — the
+  framework's own `modules/capabilities/sync.ts:125` already diffs
+  `functionDefinition` — so this only repairs the core seeds.
+- **#507 / #508 / #509 / #553** (#557 · #558 · #555) — core security hardening
+  (token domain separation, `deletePrefix` root guard, `name`/`slug` divergence,
+  escalation webhook SSRF). None reachable from a Daybreak surface; the original
+  "fixed in the wrong tier if fixed here" call was correct.
 
 ### Watch — real, but not biting Daybreak yet
 
-Keep as `upstream-asks` watch rows with the trigger that would promote them:
+All still open upstream (re-checked 2026-08-14). Keep as `upstream-asks` watch
+rows with the trigger that would promote them:
 
 - **#541** (grader registry is module-scoped; batch worker is route-realm) — the
   f-governance-plus sweep uses a **seeded agent judge**, not a registered grader,
@@ -372,27 +478,20 @@ Keep as `upstream-asks` watch rows with the trigger that would promote them:
   registers no MCP resources. **Trigger:** the first `framework://` resource.
 - **#542** (`AiApiKey.scopes` closed enum → least privilege unavailable to forks)
   — **Trigger:** the first framework-owned API surface wanting its own scope.
-- **#528** (`CAPABILITY_BINDING_MODE=strict` breaks every workflow `tool_call`;
-  the FK rejects a synthetic `workflow:<id>` agent id) — **Trigger:** wanting
-  strict mode. Worth knowing now: strict is currently unusable with workflows.
 - **#526** (`ChatInterface` hardcodes the admin stream endpoint) — Daybreak's
   framework chat surfaces are API-only today. **Trigger:** the first framework
   chat page. RYW likely needs this before Daybreak does.
-- **#532** (per-user schedules have no owner after #502), **#545** (capability
-  seeds never re-sync `functionDefinition`) — note that the framework's **own**
-  capability sync (`modules/capabilities/sync.ts:125`) already diffs and updates
-  `functionDefinition`, so Daybreak does not have #545's bug; only the core seeds
-  do.
-- **#507 / #508 / #509 / #553** — core security hardening (token domain
-  separation, `deletePrefix` root guard, `name`/`slug` divergence, escalation
-  webhook SSRF). All inherited, none reachable from a Daybreak surface, all fixed
-  in the wrong tier if fixed here. Wait; re-check on each sync.
+- **#532** (per-user schedules have no owner after #502).
 - **#366 / #367 / #533** — already ledgered. Unchanged.
+
+**#528 leaves this bucket.** "Strict mode is currently unusable with workflows"
+is fixed upstream, so it now has a landing date rather than an open trigger.
 
 ### Document — bites the **leaf**, not Daybreak
 
-These fire when RYW (or the next leaf) fills a seam the supported way. Daybreak is
-the tier that should warn them: add a **"known leaf-sync gotchas"** section to
+Unchanged; #525, #530, #535 and #536 are all still open. These fire when RYW (or
+the next leaf) fills a seam the supported way. Daybreak is the tier that should
+warn them: add a **"known leaf-sync gotchas"** section to
 [`building-on-daybreak.md`](../building-on-daybreak.md).
 
 - **#525** — `registry.test.ts:158` asserts a hardcoded built-in count through
@@ -416,6 +515,7 @@ the tier that should warn them: add a **"known leaf-sync gotchas"** section to
 ```
 Phase 0  ──▶ t-0.1 #160 registry realm      (leaf-blocking; independent)
              t-0.2 ledger reconciliation    (docs; makes Phase 1 obvious)
+             t-0.3 #539 merge-base repair   (independent; MUST precede the CI guard)
 
 Phase 1  ──▶ t-1.1 #411 · t-1.2 #398 · t-1.3 #415 · t-1.4 #416 · t-1.5 #410
              (5 deletions, parallelisable — t-1.1 and t-1.2 gate Phase 4)
@@ -428,7 +528,8 @@ Phase 3  ──▶ t-3.1 #159 · t-3.2 #168 (independent)
 Phase 4  ──▶ t-4.1 #169  (needs t-1.1 + t-1.2)
              t-4.2 #161  (independent)
 
-Phase 5  ──▶ carry-now items, then watch-rows into the ledger + the leaf gotchas doc
+Phase 5  ──▶ its one carry-now row IS t-0.3; the rest is ledger hygiene —
+             adopt-on-next-sync rows + watch rows + the leaf gotchas doc
 ```
 
 **Schema impact:** none. No migration in any phase — `provenance` and `progress`
@@ -437,6 +538,10 @@ are existing `Json` columns, and every other change is code, config or docs.
 **If only one thing gets done:** t-0.1. It costs ten lines and currently kills the
 entire generic config-editing surface for every leaf module.
 
+**If only one _more_ thing gets done:** t-0.3. The merge base is stranded at
+v0.8.0 today and the repair is a single `-s ours` commit; every sync that lands
+before it makes the replay larger and the repair harder to reason about.
+
 **Issue → task index:** #156 → t-2.1 · #157 → t-3.3 · #158 → t-3.4 · #159 → t-3.1
 · #160 → t-0.1 · #161 → t-4.2 · #162 → t-2.1 · #167 → t-2.2 · #168 → t-3.2 ·
-#169 → t-4.1.
+#169 → t-4.1. Upstream: Sunrise #539 → t-0.3.
