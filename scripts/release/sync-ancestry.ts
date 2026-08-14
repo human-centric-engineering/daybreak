@@ -66,6 +66,26 @@ export function sunriseTagFor(version: string): string {
 }
 
 /**
+ * Whether a thrown `git merge-base --is-ancestor` error means **"not an
+ * ancestor"** rather than a genuine git failure.
+ *
+ * That command signals its answer through the exit code — 0 yes, 1 no — so the
+ * "no" arrives as a thrown error from `execFileSync`, which throws on any
+ * non-zero status. Treating every throw as "no" would make a real git failure
+ * (128: not a git repository, bad object, corrupt index) indistinguishable from
+ * a clean negative, and the guard would fail the build claiming a broken merge
+ * base when git simply could not run. Only status 1 is an answer; everything
+ * else must propagate.
+ *
+ * Lives here rather than in the CLI so the distinction is testable without
+ * mocking `execFileSync` — the subtlety is in the classification, not the I/O.
+ */
+export function isNotAncestorExit(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  return (error as { status?: unknown }).status === 1;
+}
+
+/**
  * The verdict for a set of observed facts.
  *
  * Three outcomes, deliberately distinct: `ok` (the claim is backed by history),

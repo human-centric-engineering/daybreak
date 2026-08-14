@@ -13,6 +13,7 @@ import { describe, it, expect } from 'vitest';
 import {
   checkSyncAncestry,
   formatSyncAncestryVerdict,
+  isNotAncestorExit,
   sunriseTagFor,
   type SyncAncestryFacts,
 } from '@/scripts/release/sync-ancestry';
@@ -108,5 +109,36 @@ describe('formatSyncAncestryVerdict', () => {
 
     expect(message).toContain('Sunrise 0.9.0');
     expect(message).toContain('git merge -s ours v0.9.0');
+  });
+});
+
+describe('isNotAncestorExit', () => {
+  it('treats exit status 1 as the answer "not an ancestor"', () => {
+    // git merge-base --is-ancestor reports its verdict through the exit code,
+    // so the negative answer necessarily arrives as a thrown error.
+    expect(isNotAncestorExit({ status: 1 })).toBe(true);
+  });
+
+  it('does NOT swallow a real git failure as a clean negative', () => {
+    // 128 is "not a git repository" / "bad object". Reading that as "not an
+    // ancestor" would fail the build claiming a broken merge base when git
+    // simply could not run — a wrong diagnosis is worse than no check.
+    expect(isNotAncestorExit({ status: 128 })).toBe(false);
+  });
+
+  it('does not treat a status-less error as an answer', () => {
+    expect(isNotAncestorExit(new Error('spawn ENOENT'))).toBe(false);
+    expect(isNotAncestorExit({ status: undefined })).toBe(false);
+  });
+
+  it('does not confuse a string status with the numeric exit code', () => {
+    expect(isNotAncestorExit({ status: '1' })).toBe(false);
+  });
+
+  it('handles non-object throws without exploding', () => {
+    // A thrown string/null would crash a bare `(error as {...}).status` read.
+    expect(isNotAncestorExit(null)).toBe(false);
+    expect(isNotAncestorExit('boom')).toBe(false);
+    expect(isNotAncestorExit(undefined)).toBe(false);
   });
 });

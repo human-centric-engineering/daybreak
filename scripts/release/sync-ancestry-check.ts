@@ -19,6 +19,7 @@ import { SUNRISE_VERSION } from '@/lib/sunrise-version';
 import {
   checkSyncAncestry,
   formatSyncAncestryVerdict,
+  isNotAncestorExit,
   sunriseTagFor,
   type SyncAncestryFacts,
 } from '@/scripts/release/sync-ancestry';
@@ -38,10 +39,9 @@ function refExists(ref: string): boolean {
 /**
  * True when `ref` is an ancestor of HEAD.
  *
- * `--is-ancestor` signals its answer through the exit code: 0 yes, 1 no, and
- * anything else is a real error. `execFileSync` throws on all non-zero, so a
- * genuine git failure would otherwise read as a clean "no" and fail the build for
- * the wrong reason — hence the explicit status check before returning `false`.
+ * `--is-ancestor` signals its answer through the exit code, so the "no" arrives
+ * as a thrown error. `isNotAncestorExit` decides which throws are answers and
+ * which are genuine git failures worth propagating — see its doc comment.
  */
 function isAncestorOfHead(ref: string): boolean {
   try {
@@ -50,8 +50,7 @@ function isAncestorOfHead(ref: string): boolean {
     });
     return true;
   } catch (error) {
-    const status = (error as { status?: number }).status;
-    if (status === 1) return false;
+    if (isNotAncestorExit(error)) return false;
     throw error;
   }
 }
