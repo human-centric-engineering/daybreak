@@ -78,6 +78,33 @@ process.
   tree of a violation it could not observe. On a machine that already has the tags
   and full history it is a no-op and touches no git config. (Sunrise #539.)
 
+### Changed
+
+- **The slot capabilities read their per-agent exposure allowlist from the execution
+  context instead of re-querying the grant** — `loadExposureConfig(agentId, slug)` in
+  `lib/framework/data-slots/capabilities/exposure.ts` is replaced by the pure
+  `resolveExposureConfig(context, slug)`. `get_state` and `fill_slot` behave the same
+  for every existing grant; one indexed `AiAgentCapability` lookup disappears from every
+  slot capture and every state read.
+
+  Sunrise 0.7.0 surfaced the resolved binding's `customConfig` onto `CapabilityContext`
+  (#411), which is the value this shim was fetching for itself a few milliseconds after
+  the dispatcher had already fetched it.
+
+  **Two consequences worth knowing if you edit allowlists at runtime.** The config now
+  shares the dispatcher's 5-minute per-agent binding cache, so an allowlist edit lands on
+  the same boundary as an `isEnabled` or `customRateLimit` edit already did — one
+  staleness window instead of two. And a capability executed **outside** the dispatcher
+  (no resolved binding on the context) now fails closed with `invalid_exposure` rather
+  than treating the missing allowlist as permissive; nothing in Daybreak or Sunrise
+  executes a capability that way, but a leaf calling `execute()` directly would see it.
+
+- **Slot prose→typed extraction is tagged `slot-extraction` in traces and cost logs**
+  (`lib/framework/data-slots/capabilities/extract.ts`) — it inherited the structured
+  runner's default `evaluation` phase, so every extraction was filed under evaluation
+  work in the OTEL span tree and the per-phase cost breakdown. Sunrise 0.7.0 widened
+  `phase` to an open string (#410). Reporting-only; no behaviour change.
+
 ## [0.1.0] — 2026-08-05
 
 > **First tagged Daybreak release.** The framework has been in use for some time

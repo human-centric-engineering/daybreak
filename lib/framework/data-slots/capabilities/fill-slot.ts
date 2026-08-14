@@ -41,7 +41,10 @@ import {
 import { validateTypedValue } from '@/lib/framework/data-slots/capabilities/typed-value';
 import { extractTypedValue } from '@/lib/framework/data-slots/capabilities/extract';
 import { slotMaskingPolicy } from '@/lib/framework/data-slots/capabilities/masking';
-import { loadExposureConfig, facetAllows } from '@/lib/framework/data-slots/capabilities/exposure';
+import {
+  resolveExposureConfig,
+  facetAllows,
+} from '@/lib/framework/data-slots/capabilities/exposure';
 import { decodeScope } from '@/lib/framework/shared/scope';
 
 const fillSlotSchema = z.object({
@@ -165,12 +168,12 @@ export class FillSlotCapability extends BaseCapability<FillSlotArgs, FillSlotDat
         'slot_inactive'
       );
     }
-    // Per-agent write exposure (t-4): a grant's `customConfig` may allowlist which slot
-    // groups/scopes this agent may write. Enforced BEFORE any write. A malformed config
-    // fails closed; an absent one is permissive. A mint (no definition ⇒ null group/scope)
+    // Per-agent write exposure (t-4): the binding config the dispatcher resolved for this
+    // capability may allowlist which slot groups/scopes this agent may write. Enforced
+    // BEFORE any write. A malformed config fails closed; an absent one is permissive. A mint (no definition ⇒ null group/scope)
     // is refused under any active write restriction — an agent limited to named
     // groups/scopes may not invent a slot outside them.
-    const exposure = await loadExposureConfig(context.agentId, this.slug);
+    const exposure = resolveExposureConfig(context, this.slug);
     if (!exposure.ok) {
       return this.error("This agent's slot-access configuration is invalid.", 'invalid_exposure');
     }
