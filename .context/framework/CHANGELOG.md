@@ -48,6 +48,16 @@ process.
   routes, so `autoEmbedAfterPublish` never ran after a real publish and overlay
   embeddings went stale with no error and no log.
 
+  > **Scope — this fixes Daybreak's own registries, not the whole class.** Four
+  > **Sunrise-owned** registries have the same split and the framework registers
+  > into all of them at boot: the workflow `executor-registry`, and the
+  > agent-access, guard-floor and guard-event contributors. Until those are backed
+  > upstream, framework workflow step types throw _unknown step type_, and module
+  > knowledge scope, facilitation guard minimums and escalation silently no-op on
+  > the request path. They cannot be fixed from a fork without editing core; each
+  > is tracked in
+  > [`upstream-asks.md`](./upstream-asks.md) as a Sunrise #462 follow-on.
+
 ### Added
 
 - **`npm run framework:sync-ancestry`, wired into the fork-owned `app:ci-checks`
