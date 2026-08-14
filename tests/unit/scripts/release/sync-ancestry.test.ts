@@ -14,7 +14,10 @@ import {
   checkSyncAncestry,
   formatSyncAncestryVerdict,
   isNotAncestorExit,
+  planIsNoop,
+  planRefBootstrap,
   sunriseTagFor,
+  type RepoRefState,
   type SyncAncestryFacts,
 } from '@/scripts/release/sync-ancestry';
 
@@ -154,5 +157,58 @@ describe('isNotAncestorExit', () => {
     expect(isNotAncestorExit(null)).toBe(false);
     expect(isNotAncestorExit('boom')).toBe(false);
     expect(isNotAncestorExit(undefined)).toBe(false);
+  });
+});
+
+describe('planRefBootstrap', () => {
+  const state = (o: Partial<RepoRefState> = {}): RepoRefState => ({
+    tagResolvable: true,
+    isShallow: false,
+    hasUpstreamRemote: true,
+    ...o,
+  });
+
+  it('does nothing when the tag resolves and the clone is complete', () => {
+    // The maintainer's laptop: no network access, no git config touched.
+    const plan = planRefBootstrap(state());
+
+    expect(planIsNoop(plan)).toBe(true);
+  });
+
+  it('fetches tags and adds the remote in a bare CI clone', () => {
+    // Daybreak's origin carries no Sunrise vX.Y.Z tags, so without this the
+    // guard skipped on every CI run and a squash-merged sync PR merged green.
+    const plan = planRefBootstrap(
+      state({ tagResolvable: false, hasUpstreamRemote: false, isShallow: true })
+    );
+
+    expect(plan).toEqual({ unshallow: true, addRemote: true, fetchTags: true });
+  });
+
+  it('fetches tags WITHOUT re-adding a remote that already exists', () => {
+    const plan = planRefBootstrap(state({ tagResolvable: false, hasUpstreamRemote: true }));
+
+    expect(plan.fetchTags).toBe(true);
+    expect(plan.addRemote).toBe(false);
+  });
+
+  it('deepens a shallow clone EVEN WHEN the tag already resolves', () => {
+    // The subtle one. On a depth-1 clone HEAD has no parents, so
+    // `merge-base --is-ancestor` answers "not an ancestor" for everything —
+    // the guard would fail every build with a confident false accusation.
+    // Deepening is required before a negative answer can be trusted, so it
+    // must not be folded into the tag-missing branch.
+    const plan = planRefBootstrap(state({ tagResolvable: true, isShallow: true }));
+
+    expect(plan.unshallow).toBe(true);
+    expect(plan.fetchTags).toBe(false);
+    expect(planIsNoop(plan)).toBe(false);
+  });
+
+  it('never adds a remote when the tag is already resolvable', () => {
+    const plan = planRefBootstrap(state({ tagResolvable: true, hasUpstreamRemote: false }));
+
+    expect(plan.addRemote).toBe(false);
+    expect(plan.fetchTags).toBe(false);
   });
 });

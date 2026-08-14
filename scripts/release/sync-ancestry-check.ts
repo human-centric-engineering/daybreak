@@ -20,7 +20,11 @@ import {
   checkSyncAncestry,
   formatSyncAncestryVerdict,
   isNotAncestorExit,
+  planIsNoop,
+  planRefBootstrap,
   sunriseTagFor,
+  SUNRISE_CLONE_URL,
+  UPSTREAM_REMOTE,
   type SyncAncestryFacts,
 } from '@/scripts/release/sync-ancestry';
 
@@ -55,10 +59,85 @@ function isAncestorOfHead(ref: string): boolean {
   }
 }
 
+/** `git` with output discarded; throws on non-zero like every other call here. */
+function git(...args: string[]): void {
+  execFileSync('git', args, { stdio: ['ignore', 'ignore', 'ignore'] });
+}
+
+/** True when this clone was fetched with a truncated history (CI's default). */
+function isShallowClone(): boolean {
+  try {
+    const out = execFileSync('git', ['rev-parse', '--is-shallow-repository'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return out.trim() === 'true';
+  } catch {
+    return false;
+  }
+}
+
+/** True when a remote of that name is configured. */
+function hasRemote(name: string): boolean {
+  try {
+    execFileSync('git', ['remote', 'get-url', name], {
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Fetch the refs the check needs, if they are not already here.
+ *
+ * Returns `false` when the refs could not be obtained (offline runner, blocked
+ * egress, no such remote) so the caller can skip loudly rather than accuse the
+ * tree of a violation it could not actually observe. Network failure is an
+ * environment problem, exactly like a missing tag.
+ *
+ * A no-op on a maintainer's machine that already has the tags and full history,
+ * so the usual local run costs nothing and touches no git config.
+ */
+function ensureRefs(tag: string): boolean {
+  const plan = planRefBootstrap({
+    tagResolvable: refExists(tag),
+    isShallow: isShallowClone(),
+    hasUpstreamRemote: hasRemote(UPSTREAM_REMOTE),
+  });
+
+  if (planIsNoop(plan)) return true;
+
+  try {
+    if (plan.unshallow) {
+      // Depth-1 HEAD has no parents, so --is-ancestor would answer "no" to
+      // everything. Deepen before any negative can be believed.
+      logger.info('  ...  shallow clone — deepening history so ancestry is answerable');
+      git('fetch', '--unshallow', '--quiet');
+    }
+    if (plan.addRemote) {
+      logger.info(`  ...  adding the ${UPSTREAM_REMOTE} remote (${SUNRISE_CLONE_URL})`);
+      git('remote', 'add', UPSTREAM_REMOTE, SUNRISE_CLONE_URL);
+    }
+    if (plan.fetchTags) {
+      logger.info(`  ...  fetching Sunrise tags from ${UPSTREAM_REMOTE}`);
+      git('fetch', UPSTREAM_REMOTE, '--tags', '--quiet');
+    }
+    return true;
+  } catch (error) {
+    logger.warn('  ...  could not fetch the Sunrise refs — the guard will skip', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
 function main(): void {
   logger.info('Daybreak sync-ancestry guard (Sunrise #539)...');
 
   const tag = sunriseTagFor(SUNRISE_VERSION);
+  ensureRefs(tag);
   const tagExists = refExists(tag);
 
   const facts: SyncAncestryFacts = {

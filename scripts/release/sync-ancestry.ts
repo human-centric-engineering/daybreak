@@ -40,6 +40,69 @@
  * for a clean run. Same posture as the changelog guard's shallow-clone branch.
  */
 
+/**
+ * Sunrise's public clone URL, used to bootstrap the refs the check needs.
+ *
+ * HTTPS rather than SSH deliberately: the repo is public, so an unauthenticated
+ * CI runner can fetch from it, whereas the SSH form
+ * (`git@github.com:…`) would need a deploy key.
+ */
+export const SUNRISE_CLONE_URL = 'https://github.com/human-centric-engineering/sunrise.git';
+
+/** The remote name the check adds when none is configured. */
+export const UPSTREAM_REMOTE = 'upstream';
+
+/** What the clone looks like before the check can run. */
+export interface RepoRefState {
+  /** Whether the Sunrise tag already resolves here. */
+  tagResolvable: boolean;
+  /** Whether this is a shallow clone (CI's default checkout is depth 1). */
+  isShallow: boolean;
+  /** Whether a remote named `upstream` is already configured. */
+  hasUpstreamRemote: boolean;
+}
+
+/** The setup steps needed before the ancestry question can be answered honestly. */
+export interface RefBootstrapPlan {
+  unshallow: boolean;
+  addRemote: boolean;
+  fetchTags: boolean;
+}
+
+/**
+ * What the check must do to itself before it can answer.
+ *
+ * # Why this exists at all
+ *
+ * The guard was originally written assuming the Sunrise tags were present, which
+ * is true on a maintainer's laptop and false everywhere that matters. Daybreak's
+ * origin carries only `daybreak-v0.1.0` — the `vX.Y.Z` tags live on the Sunrise
+ * remote — and CI checks out at depth 1. So in CI the tag never resolved, the
+ * verdict was always `skipped`, and the guard passed a squash-merged sync PR
+ * green: a check that cannot fail is not a check.
+ *
+ * # Why `unshallow` is unconditional on a shallow clone
+ *
+ * This is the subtle half. `merge-base --is-ancestor` on a depth-1 clone is not
+ * merely uninformed, it is **actively wrong**: HEAD has no parents, so any tag
+ * reports as "not an ancestor" and the guard would fail every build with a
+ * confident, false accusation of a broken merge base. Deepening is therefore
+ * required before a negative answer can be trusted — including when the tag
+ * already resolves, which is why it is not folded into the `tagResolvable` branch.
+ */
+export function planRefBootstrap(state: RepoRefState): RefBootstrapPlan {
+  return {
+    unshallow: state.isShallow,
+    fetchTags: !state.tagResolvable,
+    addRemote: !state.tagResolvable && !state.hasUpstreamRemote,
+  };
+}
+
+/** Whether the plan requires any work (and so any network access). */
+export function planIsNoop(plan: RefBootstrapPlan): boolean {
+  return !plan.unshallow && !plan.addRemote && !plan.fetchTags;
+}
+
 /** What the CLI observed from git and the version constant. */
 export interface SyncAncestryFacts {
   /** The version `lib/sunrise-version.ts` claims (e.g. `'0.8.1'`). */

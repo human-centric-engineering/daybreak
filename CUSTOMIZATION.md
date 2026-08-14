@@ -1054,7 +1054,10 @@ git merge v0.8.1
 > months of history away. Daybreak paid exactly this on its v0.8.1 sync (PR #196).
 >
 > `npm run app:ci-checks` now includes `framework:sync-ancestry`, which fails the
-> build if the version this tree claims is not in its history. If it fires, repair
+> build if the version this tree claims is not in its history. It fetches the
+> Sunrise tags and deepens a shallow clone itself, so it works on a bare CI
+> checkout as well as on your machine — the setup above is for your merges and
+> issue checks, not for the guard. If it fires, repair
 > with a tree-less merge — but confirm the content is genuinely present first,
 > because `-s ours` will silently swallow anything that is missing:
 >

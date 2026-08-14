@@ -67,9 +67,16 @@ process.
 
   **Leaves inherit this check.** It compares the *claimed* version against history
   — never against the newest upstream release — so being deliberately behind
-  upstream stays silent. A clone without the Sunrise tags (no `upstream` remote, or
-  a shallow CI checkout) is reported as a loud skip rather than a failure.
-  (Sunrise #539.)
+  upstream stays silent.
+
+  The check **bootstraps its own refs**: a CI runner (or a leaf clone) has none of
+  Sunrise's `vX.Y.Z` tags and checks out at depth 1, so it adds the `upstream`
+  remote, fetches the tags, and deepens a shallow clone before answering.
+  Deepening matters most — on a depth-1 clone `HEAD` has no parents, so an
+  un-deepened check would call *every* release a violation. If those refs cannot be
+  fetched (offline runner, blocked egress) it skips loudly rather than accusing the
+  tree of a violation it could not observe. On a machine that already has the tags
+  and full history it is a no-op and touches no git config. (Sunrise #539.)
 
 ## [0.1.0] — 2026-08-05
 
