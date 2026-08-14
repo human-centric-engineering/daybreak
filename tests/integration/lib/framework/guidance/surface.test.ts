@@ -1,7 +1,13 @@
 /**
- * Module surface resolution (f-guidance t-5, X5). Mocks the binding query + the conversation
- * lookup. Proves the primary-agent pick (filtering inactive/tombstoned agents), the
- * resume-vs-new decision, the scope.moduleSlug write, and the null / not-found paths.
+ * Module surface resolution (f-guidance t-5, X5). Mocks the binding query + Prisma. Proves
+ * the primary-agent pick (filtering inactive/tombstoned agents), the resume-vs-new decision,
+ * the scope.moduleSlug write, and the null / not-found paths.
+ *
+ * The resume query is core's `findResumableConversation` since v1.3 Phase 1 t-1.4, and it is
+ * deliberately NOT mocked: the real helper runs against the mocked client, so the
+ * `findFirst` assertion below still proves the surface resumes on the full
+ * `(userId, agentId, contextType, contextId, isActive)` tuple — the delegation cannot
+ * silently drop the `userId` scoping.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';

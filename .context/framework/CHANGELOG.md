@@ -78,6 +78,29 @@ process.
   tree of a violation it could not observe. On a machine that already has the tags
   and full history it is a no-op and touches no git config. (Sunrise #539.)
 
+### Changed
+
+- **Both framework chat surfaces resume through core's `findResumableConversation`**
+  (`lib/framework/guidance/surface.ts`, `lib/framework/facilitation/agents/surface.ts`) —
+  each hand-rolled the same `aiConversation.findFirst` on
+  `(userId, agentId, contextType, contextId, isActive)`. Same query, same result; the
+  `userId` scoping that keeps one user's surface conversation out of another's is now
+  derived in one place (Sunrise #416, landed in 0.7.0). No API change — `ModuleSurface` /
+  `FacilitationSurface` still carry `conversationId?: string`.
+
+### Documentation
+
+- **The two framework surface stream routes now say why they exist.** Their headers
+  attributed the shadow to "the core consumer route/schema can't carry `scope`" — true when
+  written, stale since Sunrise #415 added `scope` to `consumerChatRequestSchema`. The real
+  reasons never involved `scope`: the agent is **server-resolved** from the module binding
+  or role (and visibility-gated), the conversation is tagged
+  `contextType`/`contextId` — which the core consumer route deliberately refuses as an
+  admin-only concept, and which resume looks up — and the module route emits
+  `module.entered`. **A leaf should not read those routes as scaffolding to delete.** The
+  remaining upstream ask is now filed honestly: a consumer entry point that accepts a
+  server-resolved context tuple. See [`upstream-asks.md`](./upstream-asks.md).
+
 ## [0.1.0] — 2026-08-05
 
 > **First tagged Daybreak release.** The framework has been in use for some time

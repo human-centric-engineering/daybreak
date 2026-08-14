@@ -8,10 +8,28 @@
  * `contextId: <slug>`, and — the point of X5 — threads `scope.moduleSlug` into the dispatch
  * so a module's capabilities actually refuse out-of-module calls (`isInModuleScope`).
  *
- * A framework-owned route (under the `framework` API segment) so the scope write stays on the
- * framework side of the tier boundary and the core `streamChat` handler is reused unchanged —
- * the core consumer route/schema can't carry `scope` (decision 6). Auth + baseline rate limit
- * mirror the consumer chat route; the agent is resolved from the module, not supplied.
+ * A framework-owned route (under the `framework` API segment) so the surface resolution stays
+ * on the framework side of the tier boundary and the core `streamChat` handler is reused
+ * unchanged. Auth + baseline rate limit mirror the consumer chat route; the agent is resolved
+ * from the module, not supplied.
+ *
+ * **Why this route still exists** (decision 6's original reason — "the core consumer
+ * route/schema can't carry `scope`" — expired with Sunrise #415, which added `scope` to
+ * `consumerChatRequestSchema`; v1.3 Phase 1 t-1.3 rechecked it). Three reasons that have
+ * nothing to do with `scope`:
+ *
+ * 1. **The agent is server-resolved** from the module's primary binding, and gated on
+ *    `visibility === 'public'`. The consumer route takes an agent id/slug from the caller.
+ * 2. **The context tuple.** This route tags the conversation `contextType: 'module'` /
+ *    `contextId: <slug>` — which the core consumer route deliberately refuses ("no
+ *    contextType/contextId/entityContext — admin-only concepts"). Delegating to it would
+ *    leave every new surface conversation untagged, and **resume would break**, because
+ *    resume is a lookup on exactly that tuple.
+ * 3. **`module.entered`** is emitted here, on the surface's own entry point.
+ *
+ * And `scope` argues the same way round: here it is **server-derived**
+ * (`encodeScope({ moduleSlug })` in `resolveModuleSurface`). Threading it through the core
+ * consumer route would move a capability-refusal input onto a client-supplied field.
  */
 
 import { z } from 'zod';

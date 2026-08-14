@@ -3,6 +3,11 @@
  * the conversation lookup. Proves the role → bound-agent resolve (filtering inactive/tombstoned/
  * missing agents), the `public`-visibility gate, the resume-vs-new decision, the rate-override
  * carry-through, and — the point of decision 4 — that NO `scope` is populated.
+ *
+ * The resume query is core's `findResumableConversation` since v1.3 Phase 1 t-1.4, and it is
+ * deliberately NOT mocked: the real helper runs against the mocked client, so the `findFirst`
+ * assertion below still proves the surface resumes on the full
+ * `(userId, agentId, contextType, contextId, isActive)` tuple.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
