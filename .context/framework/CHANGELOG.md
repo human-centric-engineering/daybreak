@@ -99,6 +99,12 @@ process.
   than treating the missing allowlist as permissive; nothing in Daybreak or Sunrise
   executes a capability that way, but a leaf calling `execute()` directly would see it.
 
+  One narrowing in the other direction: a `customConfig` that is not a JSON **object**
+  (an array or a scalar) is collapsed to `null` by the dispatcher before the capability
+  sees it, so it now reads as "no allowlist" where the direct column read rejected it.
+  The admin binding routes and the config import both validate the field as an object, so
+  this only bites a leaf that writes the column by hand — write `{}`, not `[]`.
+
 - **Slot prose→typed extraction is tagged `slot-extraction` in traces and cost logs**
   (`lib/framework/data-slots/capabilities/extract.ts`) — it inherited the structured
   runner's default `evaluation` phase, so every extraction was filed under evaluation

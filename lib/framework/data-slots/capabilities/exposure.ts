@@ -8,7 +8,7 @@
  * landed in 0.7.0), so this module **reads the context** rather than re-querying
  * `AiAgentCapability` — one indexed lookup less per capture and per `get_state`.
  *
- * Two consequences of reading the dispatcher's value, both deliberate:
+ * Three consequences of reading the dispatcher's value, all deliberate:
  * - The dispatcher caches an agent's bindings for 5 minutes, so an operator's allowlist
  *   edit takes effect on the same cache boundary as `isEnabled` and `customRateLimit`
  *   already do — one coherent staleness window instead of two.
@@ -17,6 +17,11 @@
  *   therefore means the capability was executed outside the dispatch path — where the
  *   guard, the enablement check and the rate limiter were skipped too — so it **fails
  *   closed** rather than silently degrading an allowlist to permissive.
+ * - The dispatcher collapses a **non-object** `customConfig` (a JSON array or scalar) to
+ *   `null` before we see it, so such a value now reads as "no config" (permissive) where
+ *   the direct column read used to reject it. Every supported writer — the admin binding
+ *   routes and the config import — validates the field as an object, so this is only
+ *   reachable by writing the column by hand.
  *
  * Tri-state, by design:
  * - **no binding / `customConfig` null** → permissive (backward-compatible with every
