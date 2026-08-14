@@ -76,3 +76,57 @@ describe('map publish hooks', () => {
     expect(() => notifyMapPublished('g', 'u')).not.toThrow();
   });
 });
+
+/**
+ * #160 — the realm split.
+ *
+ * This seam registers at boot (`initFramework()`) but fires from the request path
+ * (`version-service.ts`, via the admin publish/rollback routes), so it sits across
+ * the instrumentation/route module-graph boundary. `vi.resetModules()` + re-import
+ * reproduces the second graph: it rebinds every module-scoped `const`, so only
+ * state on `globalThis` survives.
+ *
+ * Fails against a module-scoped `const listeners = []`, where the request realm
+ * sees an empty list and `autoEmbedAfterPublish` silently never runs.
+ */
+describe('cross-realm survival (#160)', () => {
+  it('a listener registered at boot still fires from a fresh realm', async () => {
+    const listener = vi.fn();
+    registerMapPublishListener(listener);
+
+    vi.resetModules();
+    const fresh = await import('@/lib/framework/facilitation/map/publish-hooks');
+    fresh.notifyMapPublished('weekly-reset', 'user_1');
+
+    expect(listener).toHaveBeenCalledWith('weekly-reset', 'user_1');
+  });
+
+  it('both realms share one listener list, not two copies', async () => {
+    const bootListener = vi.fn();
+    registerMapPublishListener(bootListener);
+
+    vi.resetModules();
+    const fresh = await import('@/lib/framework/facilitation/map/publish-hooks');
+    const requestListener = vi.fn();
+    fresh.registerMapPublishListener(requestListener);
+
+    notifyMapPublished('weekly-reset', null);
+
+    expect(bootListener).toHaveBeenCalledTimes(1);
+    expect(requestListener).toHaveBeenCalledTimes(1);
+  });
+
+  it('the test reset clears the shared list, not just the local binding', async () => {
+    registerMapPublishListener(vi.fn());
+
+    vi.resetModules();
+    const fresh = await import('@/lib/framework/facilitation/map/publish-hooks');
+    fresh.__resetMapPublishListenersForTests();
+
+    const probe = vi.fn();
+    registerMapPublishListener(probe);
+    notifyMapPublished('weekly-reset', null);
+
+    expect(probe).toHaveBeenCalledTimes(1);
+  });
+});

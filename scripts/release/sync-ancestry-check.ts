@@ -84,4 +84,24 @@ function main(): void {
   process.exit(1);
 }
 
-main();
+/**
+ * A git failure is a SKIP, not a violation.
+ *
+ * `isAncestorOfHead` deliberately rethrows anything that is not a clean "no"
+ * (status 128: not a git repository, bad object, missing binary). Without this
+ * handler that would leave the CI step with a raw stack trace and exit 1 — the
+ * same signal as a real merge-base violation, but with no diagnosis and the wrong
+ * cause. That contradicts the missing-tag posture a few lines above: an
+ * environment the guard cannot evaluate must be reported loudly and passed, never
+ * reported as the defect it was unable to look for.
+ */
+try {
+  main();
+} catch (error) {
+  logger.warn(
+    '  SKIP  sync ancestry: git could not be queried — guard not evaluated. ' +
+      'This is an environment problem, not a merge-base violation.',
+    { error: error instanceof Error ? error.message : String(error) }
+  );
+  process.exit(0);
+}

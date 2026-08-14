@@ -41,6 +41,13 @@ process.
   registry to work around this, you can drop it on merging this release.
   (Daybreak #160; same class as Sunrise #462, which swept core's own registries.)
 
+- **Map publish listeners now fire on the request path**
+  (`registerMapPublishListener()` / `notifyMapPublished()`,
+  `lib/framework/facilitation/map/publish-hooks.ts`) — same `globalThis` fix, same
+  root cause. The seam registers at boot but fires from the admin publish/rollback
+  routes, so `autoEmbedAfterPublish` never ran after a real publish and overlay
+  embeddings went stale with no error and no log.
+
 ### Added
 
 - **`npm run framework:sync-ancestry`, wired into the fork-owned `app:ci-checks`

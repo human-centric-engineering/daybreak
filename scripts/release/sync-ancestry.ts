@@ -130,7 +130,7 @@ export function formatSyncAncestryVerdict(facts: SyncAncestryFacts): string {
     '',
     `          git fetch upstream --tags`,
     `          git diff --name-only <previous-tag> ${facts.tag}   # what the release touched`,
-    `          git diff <previous-tag> HEAD -- <those files>      # confirm it is all present`,
+    `          git diff ${facts.tag} HEAD -- <those files>        # confirm each one landed`,
     `          git merge -s ours ${facts.tag}                     # record ancestry, tree untouched`,
     '',
     '        To prevent — merge sync PRs with a MERGE COMMIT, never squash.',

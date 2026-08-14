@@ -99,7 +99,21 @@ describe('formatSyncAncestryVerdict', () => {
     const message = formatSyncAncestryVerdict(facts({ isAncestor: false }));
 
     expect(message).toContain('verify first');
-    expect(message).toContain('confirm it is all present');
+    expect(message).toContain('confirm each one landed');
+  });
+
+  it('verifies content by diffing FROM THE TAG, not from the previous tag', () => {
+    // The check must answer "did THIS release's content land". A
+    // <previous-tag>..HEAD diff is dominated by the fork's own commits, so it
+    // looks plausible while upstream content is missing — and the very next
+    // line tells you to run `merge -s ours`, permanently recording ancestry for
+    // content that is not there. The tag must be the left-hand side.
+    const message = formatSyncAncestryVerdict(
+      facts({ claimedVersion: '0.9.0', tag: 'v0.9.0', isAncestor: false })
+    );
+
+    expect(message).toContain('git diff v0.9.0 HEAD -- <those files>');
+    expect(message).not.toContain('git diff <previous-tag> HEAD');
   });
 
   it('carries the actual claimed version, not a hardcoded one', () => {
