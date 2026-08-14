@@ -25,6 +25,59 @@ process.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Module registrations now survive the request realm** — `registerModule()` /
+  `getRegisteredModule()` (`lib/framework/modules/registry.ts`) and
+  `registerFrameworkCapability()` / `getRegisteredFrameworkCapabilities()`
+  (`lib/framework/capabilities/registry.ts`) are backed by `globalThis`.
+
+  **Leaf-visible fix, no action required.** Next 16 + Turbopack loads
+  `instrumentation.ts` in a different module graph from route handlers and RSC, so
+  a registry populated at boot was empty on every request. A correctly registered,
+  active, DB-synced module rendered _"This module's code is no longer registered,
+  so its config can't be edited"_ — the whole generic module-config surface was
+  dead for any leaf module. If your leaf carries a local `keep-mine` copy of either
+  registry to work around this, you can drop it on merging this release.
+  (Daybreak #160; same class as Sunrise #462, which swept core's own registries.)
+
+- **Map publish listeners now fire on the request path**
+  (`registerMapPublishListener()` / `notifyMapPublished()`,
+  `lib/framework/facilitation/map/publish-hooks.ts`) — same `globalThis` fix, same
+  root cause. The seam registers at boot but fires from the admin publish/rollback
+  routes, so `autoEmbedAfterPublish` never ran after a real publish and overlay
+  embeddings went stale with no error and no log.
+
+  > **Scope — this fixes Daybreak's own registries, not the whole class.** Four
+  > **Sunrise-owned** registries have the same split and the framework registers
+  > into all of them at boot: the workflow `executor-registry`, and the
+  > agent-access, guard-floor and guard-event contributors. Until those are backed
+  > upstream, framework workflow step types throw _unknown step type_, and module
+  > knowledge scope, facilitation guard minimums and escalation silently no-op on
+  > the request path. They cannot be fixed from a fork without editing core; each
+  > is tracked in
+  > [`upstream-asks.md`](./upstream-asks.md) as a Sunrise #462 follow-on.
+
+### Added
+
+- **`npm run framework:sync-ancestry`, wired into the fork-owned `app:ci-checks`
+  seam** — fails the build when `lib/sunrise-version.ts` claims a Sunrise release
+  that is not in the tree's git history, the signature of a squash-merged sync PR
+  that silently resets the fork's merge base.
+
+  **Leaves inherit this check.** It compares the *claimed* version against history
+  — never against the newest upstream release — so being deliberately behind
+  upstream stays silent.
+
+  The check **bootstraps its own refs**: a CI runner (or a leaf clone) has none of
+  Sunrise's `vX.Y.Z` tags and checks out at depth 1, so it adds the `upstream`
+  remote, fetches the tags, and deepens a shallow clone before answering.
+  Deepening matters most — on a depth-1 clone `HEAD` has no parents, so an
+  un-deepened check would call *every* release a violation. If those refs cannot be
+  fetched (offline runner, blocked egress) it skips loudly rather than accusing the
+  tree of a violation it could not observe. On a machine that already has the tags
+  and full history it is a no-op and touches no git config. (Sunrise #539.)
+
 ## [0.1.0] — 2026-08-05
 
 > **First tagged Daybreak release.** The framework has been in use for some time

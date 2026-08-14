@@ -17,11 +17,37 @@
  * — so repeated imports under HMR or multiple entrypoints are safe. Mirrors the
  * per-slug `Map` used by the capability schema registry
  * (`lib/orchestration/schemas/registry.ts`) and the capability dispatcher.
+ *
+ * # Why the store is on `globalThis` (#160)
+ *
+ * Next 16 + Turbopack loads `instrumentation.ts` in a SEPARATE module graph from
+ * route handlers and RSC, so a plain module-scoped `Map` is a different object in
+ * each graph. Registration happens only at boot — `instrumentation.ts` →
+ * `initApp()` → `initFramework()` / `initLeafApp()` → `registerModule()` — so a
+ * module-scoped map is populated in the instrumentation graph and **empty on
+ * every request**. It fails silently and looks like a data problem: a correctly
+ * registered, active, DB-synced module renders "This module's code is no longer
+ * registered, so its config can't be edited", because `getRegisteredModule()`
+ * returned `undefined` rather than throwing.
+ *
+ * Backing the store with `globalThis` makes one registry visible to every graph,
+ * exactly as `lib/db/client.ts` does for the Prisma client and as Sunrise's own
+ * #462 sweep did for the chat context contributors (`chat/context-builder.ts`)
+ * and the capability dispatcher. That sweep predates this registry, which is why
+ * it was missed. It also means registrations survive a dev hot-reload.
+ *
+ * Unlike `lib/db/client.ts`, this is NOT gated on `NODE_ENV !== 'production'`:
+ * the realm split is a production code-path, not a dev-reload convenience.
  */
 
 import type { ModuleDefinition } from '@/lib/framework/modules/definition';
 
-const modules = new Map<string, ModuleDefinition>();
+const globalForModuleRegistry = globalThis as unknown as {
+  daybreakFrameworkModuleRegistry?: Map<string, ModuleDefinition>;
+};
+
+const modules: Map<string, ModuleDefinition> =
+  (globalForModuleRegistry.daybreakFrameworkModuleRegistry ??= new Map<string, ModuleDefinition>());
 
 /**
  * Register a module definition. Idempotent by slug: a later registration of the

@@ -1025,6 +1025,66 @@ For the full version contract and how Sunrise releases are produced, see
 
 ## 9. Staying in sync with upstream Sunrise
 
+### Before your first sync — wire up the remote
+
+A fork cloned from your own origin has **no `upstream` remote and none of
+Sunrise's tags**, so `git merge vX.Y.Z` fails with "unknown revision" and every
+"has this landed upstream yet?" check has nothing to run against. Do this once
+per clone — it is a prerequisite for everything else in this section:
+
+```bash
+git remote add upstream git@github.com:human-centric-engineering/sunrise.git
+git fetch upstream --tags
+git tag -l 'v*'                      # the Sunrise releases you can merge
+```
+
+Then adopt a release with an ordinary merge:
+
+```bash
+git merge v0.8.1
+```
+
+> **Merge the sync PR with a merge commit — never squash it.** That merge commit
+> is the only record of where your fork and upstream last agreed. Squash it and
+> the second parent is gone: the tree still has every upstream change and
+> `lib/sunrise-version.ts` still names the new release, but git's merge base
+> silently reverts to the release before it. Nothing errors and nothing logs. The
+> bill arrives at the _next_ sync, which replays the whole preceding range and
+> conflicts on changes that are already present — by which time the cause is
+> months of history away. Daybreak paid exactly this on its v0.8.1 sync (PR #196).
+>
+> `npm run app:ci-checks` now includes `framework:sync-ancestry`, which fails the
+> build if the version this tree claims is not in its history. It fetches the
+> Sunrise tags and deepens a shallow clone itself, so it works on a bare CI
+> checkout as well as on your machine — the setup above is for your merges and
+> issue checks, not for the guard. If it fires, repair
+> with a tree-less merge — but confirm the content is genuinely present first,
+> because `-s ours` will silently swallow anything that is missing:
+>
+> ```bash
+> git diff --name-only v0.8.0 v0.8.1        # what the release actually touched
+> git diff v0.8.1 HEAD -- <those files>     # confirm each landed
+> git merge -s ours v0.8.1                  # record ancestry, tree untouched
+> ```
+
+With the remote in place, two checks become runnable — use both on every sync:
+
+```bash
+# Which release am I actually on? (lib/sunrise-version.ts is the claim;
+# this is the evidence)
+git merge-base --is-ancestor v0.8.1 HEAD && echo "v0.8.1 is in my history"
+
+# Has an upstream ask I'm shimming landed yet?
+gh issue view <n> -R human-centric-engineering/sunrise --json state,title
+```
+
+The second is the standing **delegate-when-it-lands** trigger for every open row
+in [`.context/framework/upstream-asks.md`](./.context/framework/upstream-asks.md);
+that file's "Running the check" section spells out the full recipe, including the
+trap that a **closed issue whose fix landed after your tag is not in your tree**.
+
+### Migrations are the biggest moving part
+
 When you pull a new Sunrise release into your fork, the biggest moving part is
 the database migration history — your app's migrations and Sunrise's share one
 directory.

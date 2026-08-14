@@ -21,7 +21,25 @@ import { logger } from '@/lib/logging';
 /** Called after a map publish commits. `actorUserId` is null for a system/auto-approved publish. */
 export type MapPublishListener = (slug: string, actorUserId: string | null) => void;
 
-const listeners: MapPublishListener[] = [];
+/**
+ * The listener list, parked on `globalThis` for the same reason as the module and
+ * framework-capability registries (#160) — see the header of
+ * `lib/framework/modules/registry.ts` for the full explanation.
+ *
+ * This one is registered at boot (`initFramework()` → `registerMapPublishListener`)
+ * but fired from the REQUEST path (`version-service.ts`, reached by the admin
+ * publish/rollback routes), so it sits exactly across the instrumentation/route
+ * realm boundary. Module-scoped, the array the routes see is always empty and
+ * `autoEmbedAfterPublish` never runs after a real publish — overlay embeddings go
+ * stale silently, with no error and no log, which is the same failure signature
+ * the module registry had.
+ */
+const globalForMapPublishListeners = globalThis as unknown as {
+  daybreakFrameworkMapPublishListeners?: MapPublishListener[];
+};
+
+const listeners: MapPublishListener[] =
+  (globalForMapPublishListeners.daybreakFrameworkMapPublishListeners ??= []);
 
 /** Register a post-publish listener (at `initFramework()`). Idempotent per distinct function ref. */
 export function registerMapPublishListener(listener: MapPublishListener): void {
