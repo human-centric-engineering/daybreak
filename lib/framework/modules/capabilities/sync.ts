@@ -146,7 +146,32 @@ export async function syncRegisteredModuleCapabilities(): Promise<void> {
     return;
   }
 
-  const rows = collectRegisteredModuleCapabilities();
+  const declared = collectRegisteredModuleCapabilities();
+
+  // Only capabilities whose handler actually registered get a row. Two cases produce a
+  // declared-but-unregistered capability, and a row for either would advertise a tool that
+  // can never dispatch: `registerRegisteredModuleCapabilities()` skipped it (core refused
+  // it — e.g. the `processesPii` ⇒ `redactProvenance()` contract, which is enforced there
+  // and NOT here), or this half was called without the register half. Both deserve the
+  // same answer: no row, and its existing row deactivates through the pass below.
+  const rows = declared.filter((row) => capabilityDispatcher.has(row.slug));
+  if (rows.length < declared.length) {
+    logger.error(
+      'syncRegisteredModuleCapabilities: declared capabilities have no registered handler — deactivating their rows',
+      { slugs: declared.filter((r) => !capabilityDispatcher.has(r.slug)).map((r) => r.slug) }
+    );
+  }
+
+  // The "did registration run?" guard, one level down from the module check above: if
+  // EVERY declared capability is missing its handler, that is an absent or failed
+  // registration pass, not an author deleting every tool — skip, never mass-deactivate.
+  if (declared.length > 0 && rows.length === 0) {
+    logger.error(
+      'syncRegisteredModuleCapabilities: no declared capability has a registered handler — skipping (did registration run?)'
+    );
+    return;
+  }
+
   const slugs = rows.map((r) => r.slug);
 
   const counts = await executeTransaction(

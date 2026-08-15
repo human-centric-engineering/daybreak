@@ -118,13 +118,10 @@ process.
   }
   ```
 
-  **Check your module capabilities before upgrading.** The throw escapes
-  `registerRegisteredModuleCapabilities()` inside `syncFramework()`, which `lib/app/bootstrap.ts`
-  catches and logs — so every later boot step (framework capability handlers, module / slot /
-  capability sync) is skipped for that boot, with only a `logger.error` to show for it. Both
-  shapes are pinned by tests, and core's over-strict check is filed in
-  [`upstream-asks.md`](./upstream-asks.md); if Sunrise relaxes it, this constraint relaxes with
-  it.
+  **Check your module capabilities before upgrading** — a refused capability is absent from
+  every agent's toolset, and the only signal is a `logger.error`. Both shapes are pinned by
+  tests, and core's over-strict check is filed in [`upstream-asks.md`](./upstream-asks.md);
+  if Sunrise relaxes it, this constraint relaxes with it.
 
   **Two visible changes if you assert on refusals.** An out-of-module call is now refused
   by the dispatcher *before* the rate limiter (so it consumes no token) and comes back as
@@ -134,6 +131,23 @@ process.
   instead of a wrapper that defeated it, so the contract is enforced in one place rather
   than two. A `processesPii` module capability that does not override `redactProvenance()`
   still throws at boot.
+
+- **A rejected module capability no longer takes the whole framework down with it.**
+  `registerRegisteredModuleCapabilities()` is now fail-soft per capability: one that core
+  refuses is logged at `error` and skipped, and its siblings still register.
+
+  Previously the throw escaped into `syncFramework()`, whose caller (`lib/app/bootstrap.ts`)
+  catches and logs — so a single bad capability skipped **every later boot step**: framework
+  capability handlers never registered, and the module, slot and capability syncs never ran.
+  The app served traffic looking healthy with no framework capabilities at all, on the
+  strength of one log line. One author's broken tool is not a reason to unregister everyone
+  else's.
+
+  `syncRegisteredModuleCapabilities()` follows through: it writes rows only for capabilities
+  that actually have a registered handler, so a refused capability's `ai_capability` row is
+  deactivated rather than left advertising — and admin-grantable as — a tool that can never
+  dispatch. If **no** declared capability has a handler, the sync skips entirely rather than
+  mass-deactivating, the same reasoning as the existing zero-modules guard.
 
   **If you imported `namespaceModuleCapability`** (it was exported from
   `lib/framework/modules/capabilities`), switch to `moduleCapabilityIdentity` +

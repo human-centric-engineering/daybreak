@@ -6,11 +6,12 @@
  * `capabilityDispatcher` to prove the contracts that used to be re-asserted by the
  * fork's own wrapper and are now core's job:
  *
- * - a `processesPii` module capability that does not override `redactProvenance()`
- *   still fails **at boot** (`register()` throws) — deleting
- *   `namespaceModuleCapability`'s re-assertion did not open the hole its
- *   "LOAD-BEARING" comment warned about, because core inspects the real instance
- *   rather than a delegating wrapper;
+ * - a `processesPii` module capability that does not override `redactProvenance()` is
+ *   still **refused** — deleting `namespaceModuleCapability`'s re-assertion did not open
+ *   the hole its "LOAD-BEARING" comment warned about, because core inspects the real
+ *   instance rather than a delegating wrapper. It is refused per-capability (logged and
+ *   skipped) rather than by failing the whole boot; what matters for the contract is that
+ *   NO handler is registered for it;
  * - the handler lands under the **namespaced** slug, not the author's bare one.
  *
  * Prisma is mocked (no live DB); nothing here dispatches.
@@ -143,15 +144,17 @@ describe('registerRegisteredModuleCapabilities (real dispatcher)', () => {
     );
   });
 
-  it('throws at boot for a processesPii capability that does not redact', () => {
+  it('refuses a processesPii capability that does not redact, without darking its siblings', () => {
     // A distinct module slug per case: the dispatcher is a process-global with no
     // unregister, so sharing one would make these assertions order-dependent.
-    registerModuleWithCaps('noredact', [new GrabEmail()]);
+    registerModuleWithCaps('noredact', [new GrabEmail(), new SaveWorksheet()]);
 
     // Core's own guard, run against the author's real prototype — the check the fork
-    // used to duplicate because a wrapper defeated it.
-    expect(() => registerRegisteredModuleCapabilities()).toThrow(/redactProvenance/);
+    // used to duplicate because a wrapper defeated it. Fail-soft: no handler for the
+    // offender, boot continues, siblings register.
+    expect(() => registerRegisteredModuleCapabilities()).not.toThrow();
     expect(capabilityDispatcher.has('noredact__grab_email')).toBe(false);
+    expect(capabilityDispatcher.has('noredact__save_worksheet')).toBe(true);
   });
 
   it('accepts a PII capability that overrides redactProvenance on its own prototype', () => {
@@ -163,6 +166,10 @@ describe('registerRegisteredModuleCapabilities (real dispatcher)', () => {
 
   // ── The tightening this delegation brings (documented in the CHANGELOG) ──────────
   //
+  // Both shapes are REFUSED (no handler registered), which is what the PII contract
+  // requires. Since the refusal is now per-capability, `registerRegisteredModuleCapabilities()`
+  // itself does not throw — assert on `has()`, which is the property that matters.
+  //
   // The fork's deleted re-assertion compared `redactProvenance` by identity against
   // `BaseCapability.prototype.redactProvenance`, so ANY override — inherited from an
   // intermediate base, or an own instance property — satisfied it. Core's
@@ -173,14 +180,16 @@ describe('registerRegisteredModuleCapabilities (real dispatcher)', () => {
   it('rejects a redactor inherited from an intermediate base class (core is stricter)', () => {
     registerModuleWithCaps('inherited', [new GrabEmailInherited()]);
 
-    expect(() => registerRegisteredModuleCapabilities()).toThrow(/redactProvenance/);
+    registerRegisteredModuleCapabilities();
+
     expect(capabilityDispatcher.has('inherited__grab_email_inherited')).toBe(false);
   });
 
   it('rejects a redactor declared as a class-property arrow (own instance property)', () => {
     registerModuleWithCaps('arrow', [new GrabEmailArrow()]);
 
-    expect(() => registerRegisteredModuleCapabilities()).toThrow(/redactProvenance/);
+    registerRegisteredModuleCapabilities();
+
     expect(capabilityDispatcher.has('arrow__grab_email_arrow')).toBe(false);
   });
 });

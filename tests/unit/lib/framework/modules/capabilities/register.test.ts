@@ -22,9 +22,13 @@ const dispatcher = vi.hoisted(() => ({ register: vi.fn() }));
 vi.mock('@/lib/orchestration/capabilities/dispatcher', () => ({
   capabilityDispatcher: dispatcher,
 }));
+vi.mock('@/lib/logging', () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
 
 const { registerRegisteredModuleCapabilities } =
   await import('@/lib/framework/modules/capabilities/register');
+const { logger } = await import('@/lib/logging');
 const { registerModule, __resetModuleRegistryForTests } =
   await import('@/lib/framework/modules/registry');
 
@@ -116,8 +120,29 @@ describe('registerRegisteredModuleCapabilities', () => {
     expect(dispatcher.register).not.toHaveBeenCalled();
   });
 
-  it('throws (fail-fast at boot) on a non-snake_case tool slug', () => {
+  it('skips a non-snake_case tool slug, logs it, and keeps registering its siblings', () => {
+    // Fail-soft per capability: the throw used to escape into `syncFramework()`, whose
+    // caller logs and continues — so one bad tool skipped every later boot step and left
+    // the app with no framework capabilities at all.
+    registerModuleWithCaps('reading', [new Tool('save-worksheet'), new Tool('read_progress')]);
+
+    expect(() => registerRegisteredModuleCapabilities()).not.toThrow();
+
+    expect(dispatcher.register.mock.calls.map((c) => c[1].slug)).toEqual([
+      'reading__read_progress',
+    ]);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('rejected'),
+      expect.objectContaining({ moduleSlug: 'reading', capabilitySlug: 'save-worksheet' })
+    );
+  });
+
+  it('a rejected capability in one module does not stop another module registering', () => {
     registerModuleWithCaps('reading', [new Tool('save-worksheet')]);
-    expect(() => registerRegisteredModuleCapabilities()).toThrow(/snake_case/);
+    registerModuleWithCaps('writing', [new Tool('save_draft')]);
+
+    registerRegisteredModuleCapabilities();
+
+    expect(dispatcher.register.mock.calls.map((c) => c[1].slug)).toEqual(['writing__save_draft']);
   });
 });

@@ -102,9 +102,18 @@ export function moduleCapabilityIdentity(
 
 /**
  * The pre-execute guard attached to a module capability's registration: refuse a
- * dispatch pinned to a different module. The dispatcher runs it after the binding
- * gate and **before** the rate limiter, so a refused call consumes no rate token, and
- * a throw fails closed — both stronger than the in-`execute()` refusal this replaced.
+ * dispatch pinned to a different module. The dispatcher runs it after the binding gate
+ * and **before** the rate limiter, and a throw inside it fails closed — the latter is
+ * strictly stronger than the in-`execute()` refusal this replaced, which returned a
+ * normal error result.
+ *
+ * Running before the limiter is a **trade, not a pure win**. A refused call consumes no
+ * rate token, which is the behaviour core designed for (a denial shouldn't spend the
+ * caller's budget) — but it also means out-of-scope calls are no longer throttled, where
+ * the old in-`execute()` refusal sat behind the limiter. A mis-scoped agent looping on a
+ * module tool now emits an unthrottled `logger.warn` per attempt. Acceptable here because
+ * the loop is bounded upstream: an agent only calls a tool the LLM was offered, and both
+ * the chat and MCP entry points are themselves rate-limited per user/agent.
  *
  * The `reason` is folded verbatim into a client-visible message, so it names the
  * module (already public in the tool's own slug) and nothing internal.
