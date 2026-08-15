@@ -86,7 +86,8 @@ process.
   `(userId, agentId, contextType, contextId, isActive)`. Same query, same result; the
   `userId` scoping that keeps one user's surface conversation out of another's is now
   derived in one place (Sunrise #416, landed in 0.7.0). No API change — `ModuleSurface` /
-  `FacilitationSurface` still carry `conversationId?: string`.
+  `FacilitationSurface` still declare `conversationId: string | undefined` (a required
+  property that may be undefined, not an optional one).
 
 ### Documentation
 
