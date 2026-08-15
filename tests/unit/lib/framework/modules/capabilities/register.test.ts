@@ -155,6 +155,23 @@ describe('registerRegisteredModuleCapabilities', () => {
     );
   });
 
+  it('reports what it registered and what it refused', () => {
+    // The report is what `syncRegisteredModuleCapabilities()` reconciles rows against —
+    // the handler map cannot tell "refused this boot" from "registered on a previous one".
+    registerModuleWithCaps('reading', [new Tool('save-worksheet'), new Tool('read_progress')]);
+
+    const result = registerRegisteredModuleCapabilities();
+
+    expect(result.registered).toEqual(['reading__read_progress']);
+    expect(result.refused).toEqual([
+      {
+        moduleSlug: 'reading',
+        capabilitySlug: 'save-worksheet',
+        reason: expect.stringContaining('snake_case'),
+      },
+    ]);
+  });
+
   it('a rejected capability in one module does not stop another module registering', () => {
     registerModuleWithCaps('reading', [new Tool('save-worksheet')]);
     registerModuleWithCaps('writing', [new Tool('save_draft')]);

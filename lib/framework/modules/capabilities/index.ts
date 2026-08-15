@@ -16,6 +16,7 @@ export {
 } from '@/lib/framework/modules/capabilities/namespace';
 export type { ModuleCapabilityIdentity } from '@/lib/framework/modules/capabilities/namespace';
 export { registerRegisteredModuleCapabilities } from '@/lib/framework/modules/capabilities/register';
+export type { ModuleCapabilityRegistration } from '@/lib/framework/modules/capabilities/register';
 export {
   syncRegisteredModuleCapabilities,
   collectRegisteredModuleCapabilities,

@@ -29,6 +29,11 @@
  * is not a reason to unregister everyone else's. The capability is absent and loudly
  * logged; `sync.ts` then declines to write its `ai_capability` row, so nothing advertises
  * a tool that cannot dispatch.
+ *
+ * The two halves agree by construction: this pass **returns what it registered and what it
+ * refused**, and `syncRegisteredModuleCapabilities()` takes that result. Inferring it from
+ * `capabilityDispatcher.has()` instead cannot tell "the register pass never ran" from
+ * "every capability was refused" — and those need opposite answers (skip vs deactivate).
  */
 
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
@@ -39,10 +44,24 @@ import {
   moduleScopeGuard,
 } from '@/lib/framework/modules/capabilities/namespace';
 
+/** What one registration pass did, by namespaced slug. Handed to
+ *  `syncRegisteredModuleCapabilities()` so the row reconcile matches the handlers exactly.
+ *  A refused capability has no `slug` when the identity derivation itself threw, so it is
+ *  identified by its module and bare slug. */
+export interface ModuleCapabilityRegistration {
+  /** Namespaced slugs now registered as dispatcher handlers. */
+  registered: string[];
+  /** Capabilities core or the derivation refused; absent from `registered`. */
+  refused: { moduleSlug: string; capabilitySlug: string; reason: string }[];
+}
+
 /** Register every registered module's capabilities into the dispatcher, namespaced.
  *  A capability the identity derivation or the dispatcher rejects is skipped and logged,
  *  not thrown (see the header). */
-export function registerRegisteredModuleCapabilities(): void {
+export function registerRegisteredModuleCapabilities(): ModuleCapabilityRegistration {
+  const registered: string[] = [];
+  const refused: ModuleCapabilityRegistration['refused'] = [];
+
   for (const mod of getRegisteredModules()) {
     for (const capability of mod.capabilities ?? []) {
       try {
@@ -51,15 +70,20 @@ export function registerRegisteredModuleCapabilities(): void {
         // the author's prototype (see the namespace.ts header) and an out-of-module call
         // is refused before the rate limiter rather than inside `execute()`.
         capabilityDispatcher.register(capability, { slug, guard: moduleScopeGuard(mod.slug) });
+        registered.push(slug);
       } catch (err) {
         // `error`, not `warn`: the capability is gone for this boot and an operator has to
         // act. The message is the author's own contract violation, safe to surface.
+        const reason = err instanceof Error ? err.message : String(err);
         logger.error('registerRegisteredModuleCapabilities: capability rejected — skipping', {
           moduleSlug: mod.slug,
           capabilitySlug: capability.slug,
-          error: err instanceof Error ? err.message : String(err),
+          error: reason,
         });
+        refused.push({ moduleSlug: mod.slug, capabilitySlug: capability.slug, reason });
       }
     }
   }
+
+  return { registered, refused };
 }

@@ -96,7 +96,9 @@ process.
   capability sets `processesPii = true`, its `redactProvenance()` must be a **method on that
   class's own prototype**. Core's check is an own-property lookup on the instance's direct
   prototype, where the framework's deleted re-assertion compared by identity against the base
-  method and so accepted anything. Two shapes that used to boot now **throw at boot**:
+  method and so accepted anything. Two shapes that used to register are now **refused** — the
+  boot still succeeds (registration is fail-soft; see the next entry), but the capability is
+  absent from every agent's toolset and its `ai_capability` row is deactivated:
 
   ```ts
   // ❌ inherited from an intermediate base class
@@ -118,8 +120,10 @@ process.
   }
   ```
 
-  **Check your module capabilities before upgrading** — a refused capability is absent from
-  every agent's toolset, and the only signal is a `logger.error`. Both shapes are pinned by
+  **Check your module capabilities before upgrading.** Nothing crashes: the boot is healthy,
+  the app serves traffic, and the only signal is a `logger.error` line reading
+  `capability rejected — skipping`. Grep for it after upgrading rather than waiting for
+  someone to notice a tool that stopped answering. Both shapes are pinned by
   tests, and core's over-strict check is filed in [`upstream-asks.md`](./upstream-asks.md);
   if Sunrise relaxes it, this constraint relaxes with it.
 
@@ -130,7 +134,7 @@ process.
   re-assertion is gone — core's PII guard now inspects your capability's real prototype
   instead of a wrapper that defeated it, so the contract is enforced in one place rather
   than two. A `processesPii` module capability that does not override `redactProvenance()`
-  still throws at boot.
+  is still refused — it gets no handler, rather than taking the boot down with it.
 
 - **A rejected module capability no longer takes the whole framework down with it.**
   `registerRegisteredModuleCapabilities()` is now fail-soft per capability: one that core

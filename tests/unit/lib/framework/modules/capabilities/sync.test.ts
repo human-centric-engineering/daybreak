@@ -129,7 +129,22 @@ describe('syncRegisteredModuleCapabilities', () => {
     expect(dispatcherMock.clearCache).not.toHaveBeenCalled();
   });
 
-  it('writes no row for a declared capability whose handler was refused', async () => {
+  it('skips a capability whose slug cannot namespace, instead of failing the sync', async () => {
+    // The register half skips it (fail-soft); if `collect()` still threw on the same
+    // derivation, the sync would abandon mid-boot and every later step would be skipped —
+    // the exact failure the fail-soft change exists to prevent.
+    registerModuleWithCaps('reading', [new Tool('save-worksheet'), new Tool('read_progress')]);
+
+    await syncRegisteredModuleCapabilities({
+      registered: ['reading__read_progress'],
+      refused: [{ moduleSlug: 'reading', capabilitySlug: 'save-worksheet', reason: 'snake_case' }],
+    });
+
+    const created = txMock.aiCapability.createMany.mock.calls[0][0].data;
+    expect(created.map((r: { slug: string }) => r.slug)).toEqual(['reading__read_progress']);
+  });
+
+  it('writes no row for a declared capability whose handler was refused (no report)', async () => {
     // The PII contract (`processesPii` ⇒ `redactProvenance()`) is enforced by core inside
     // `capabilityDispatcher.register()`, which skips an offender. A row here would
     // advertise — and let an admin grant — a tool that can never dispatch.
@@ -146,6 +161,44 @@ describe('syncRegisteredModuleCapabilities', () => {
         where: expect.objectContaining({ slug: { notIn: ['reading__read_progress'] } }),
       })
     );
+  });
+
+  it('deactivates the row of a capability registration refused — even if it is the only one', async () => {
+    // The upgrade case the CHANGELOG warns about: a leaf with ONE module capability whose
+    // `redactProvenance` shape core now refuses. Inferring from the handler map would read
+    // this as "registration never ran" and skip, leaving the row active, admin-grantable
+    // and permanently non-dispatchable. The registration report says otherwise.
+    registerModuleWithCaps('reading', [new Tool('save_worksheet')]);
+
+    await syncRegisteredModuleCapabilities({
+      registered: [],
+      refused: [{ moduleSlug: 'reading', capabilitySlug: 'save_worksheet', reason: 'no redactor' }],
+    });
+
+    expect(txMock.aiCapability.createMany).not.toHaveBeenCalled();
+    // No keep-list ⇒ every framework-marked row deactivates, including this one.
+    expect(txMock.aiCapability.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.not.objectContaining({ slug: expect.anything() }),
+        data: { isActive: false },
+      })
+    );
+  });
+
+  it('reconciles against the registration report, not the dispatcher handler map', async () => {
+    // The handler map is `globalThis`-backed, so on a re-boot in one process it can still
+    // report a handler for a capability THIS boot refused. The report is authoritative.
+    registerModuleWithCaps('reading', [new Tool('save_worksheet'), new Tool('read_progress')]);
+    dispatcherMock.has.mockReturnValue(true); // stale handlers from a previous boot
+
+    await syncRegisteredModuleCapabilities({
+      registered: ['reading__read_progress'],
+      refused: [{ moduleSlug: 'reading', capabilitySlug: 'save_worksheet', reason: 'x' }],
+    });
+
+    const created = txMock.aiCapability.createMany.mock.calls[0][0].data;
+    expect(created.map((r: { slug: string }) => r.slug)).toEqual(['reading__read_progress']);
+    expect(dispatcherMock.has).not.toHaveBeenCalled();
   });
 
   it('skips entirely when NO declared capability has a handler (never mass-deactivates)', async () => {
