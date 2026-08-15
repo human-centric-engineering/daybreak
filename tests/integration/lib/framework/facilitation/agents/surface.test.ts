@@ -1,20 +1,21 @@
 /**
  * Facilitation surface resolution (f-facilitation-agents t-2). Mocks the by-role binding query +
- * the conversation lookup. Proves the role → bound-agent resolve (filtering inactive/tombstoned/
+ * the resume seam. Proves the role → bound-agent resolve (filtering inactive/tombstoned/
  * missing agents), the `public`-visibility gate, the resume-vs-new decision, the rate-override
  * carry-through, and — the point of decision 4 — that NO `scope` is populated.
  *
- * The resume query is core's `findResumableConversation` since v1.3 Phase 1 t-1.4, and it is
- * deliberately NOT mocked: the real helper runs against the mocked client, so the `findFirst`
- * assertion below still proves the surface resumes on the full
- * `(userId, agentId, contextType, contextId, isActive)` tuple.
+ * Resume is core's `findResumableConversation` since v1.3 Phase 1 t-1.4, and it is mocked at
+ * that boundary: what belongs to the framework is the **tuple it asks with**, not the query
+ * behind the seam. Same reasoning as the module surface test.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
+vi.mock('@/lib/orchestration/chat/resume-conversation', () => ({
+  findResumableConversation: vi.fn(),
+}));
 vi.mock('@/lib/db/client', () => ({
   prisma: {
-    aiConversation: { findFirst: vi.fn() },
     aiAgent: { findUnique: vi.fn() },
   },
 }));
@@ -27,6 +28,7 @@ vi.mock('@/lib/framework/facilitation/policies/gating', () => ({
 
 import { resolveFacilitationSurface } from '@/lib/framework/facilitation/agents/surface';
 import { prisma } from '@/lib/db/client';
+import { findResumableConversation } from '@/lib/orchestration/chat/resume-conversation';
 import { getFacilitationBindingByRole } from '@/lib/framework/facilitation/agents/binding-queries';
 import { isRoleAllowedAtStage } from '@/lib/framework/facilitation/policies/gating';
 
@@ -49,7 +51,7 @@ const binding = (over: Record<string, unknown> = {}) => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(prisma.aiConversation.findFirst).mockResolvedValue(null);
+  vi.mocked(findResumableConversation).mockResolvedValue(null);
   // Default: relevance gating allows (fail-open). The gating-specific test overrides this.
   vi.mocked(isRoleAllowedAtStage).mockResolvedValue(true);
   // Default: the bound agent is public + no rate override.
@@ -86,7 +88,7 @@ describe('resolveFacilitationSurface', () => {
       rateLimitRpm: null,
     } as never);
     expect(await resolveFacilitationSurface('user-1', 'onboarding')).toBeNull();
-    expect(prisma.aiConversation.findFirst).not.toHaveBeenCalled(); // gated before any conversation work
+    expect(findResumableConversation).not.toHaveBeenCalled(); // gated before any conversation work
   });
 
   it('carries the agent rate-limit override through', async () => {
@@ -100,26 +102,21 @@ describe('resolveFacilitationSurface', () => {
 
   it('resumes the most-recent active surface conversation for the (user, agent, role)', async () => {
     vi.mocked(getFacilitationBindingByRole).mockResolvedValue(binding() as never);
-    vi.mocked(prisma.aiConversation.findFirst).mockResolvedValue({ id: 'conv-9' } as never);
+    vi.mocked(findResumableConversation).mockResolvedValue('conv-9');
     const surface = await resolveFacilitationSurface('user-1', 'onboarding');
     expect(surface?.conversationId).toBe('conv-9');
-    expect(prisma.aiConversation.findFirst).toHaveBeenCalledWith({
-      where: {
-        userId: 'user-1',
-        agentId: 'agent-1',
-        contextType: 'facilitation',
-        contextId: 'onboarding',
-        isActive: true,
-      },
-      orderBy: { updatedAt: 'desc' },
-      select: { id: true },
+    expect(findResumableConversation).toHaveBeenCalledWith({
+      userId: 'user-1',
+      agentId: 'agent-1',
+      contextType: 'facilitation',
+      contextId: 'onboarding',
     });
   });
 
   it('returns null for an unknown or unbound role (no binding, no error thrown)', async () => {
     vi.mocked(getFacilitationBindingByRole).mockResolvedValue(null);
     expect(await resolveFacilitationSurface('user-1', 'made-up')).toBeNull();
-    expect(prisma.aiConversation.findFirst).not.toHaveBeenCalled();
+    expect(findResumableConversation).not.toHaveBeenCalled();
   });
 
   it('filters an inactive or tombstoned bound agent (→ null)', async () => {
@@ -132,7 +129,7 @@ describe('resolveFacilitationSurface', () => {
       binding({ agent: agent({ deletedAt: new Date('2026-01-01') }) }) as never
     );
     expect(await resolveFacilitationSurface('user-1', 'onboarding')).toBeNull();
-    expect(prisma.aiConversation.findFirst).not.toHaveBeenCalled();
+    expect(findResumableConversation).not.toHaveBeenCalled();
   });
 
   it('returns null when the binding has no stitched agent (hard-deleted between reads)', async () => {

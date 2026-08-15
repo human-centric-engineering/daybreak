@@ -3,18 +3,22 @@
  * the primary-agent pick (filtering inactive/tombstoned agents), the resume-vs-new decision,
  * the scope.moduleSlug write, and the null / not-found paths.
  *
- * The resume query is core's `findResumableConversation` since v1.3 Phase 1 t-1.4, and it is
- * deliberately NOT mocked: the real helper runs against the mocked client, so the
- * `findFirst` assertion below still proves the surface resumes on the full
- * `(userId, agentId, contextType, contextId, isActive)` tuple — the delegation cannot
- * silently drop the `userId` scoping.
+ * Resume is core's `findResumableConversation` since v1.3 Phase 1 t-1.4, and it is mocked
+ * at that boundary. What belongs to the framework is the **tuple it asks with** — get
+ * `userId` or `agentId` wrong and one user resumes into another's conversation — so that
+ * is what the assertion covers. The query behind the seam is core's contract, tested by
+ * core; asserting its `where`/`orderBy`/`select` shape from here would redden this suite
+ * on any upstream sync that legitimately changes it (a `deletedAt` filter, an `orderBy`
+ * tiebreak), with the fix living in a platform-owned file.
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
+vi.mock('@/lib/orchestration/chat/resume-conversation', () => ({
+  findResumableConversation: vi.fn(),
+}));
 vi.mock('@/lib/db/client', () => ({
   prisma: {
-    aiConversation: { findFirst: vi.fn() },
     aiAgent: { findUnique: vi.fn() },
   },
 }));
@@ -22,6 +26,7 @@ vi.mock('@/lib/framework/modules/bindings/queries', () => ({ listModuleBindings:
 
 import { resolveModuleSurface } from '@/lib/framework/guidance/surface';
 import { prisma } from '@/lib/db/client';
+import { findResumableConversation } from '@/lib/orchestration/chat/resume-conversation';
 import { listModuleBindings } from '@/lib/framework/modules/bindings/queries';
 
 const agent = (over: Record<string, unknown> = {}) => ({
@@ -40,7 +45,7 @@ const binding = (over: Record<string, unknown> = {}) => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(prisma.aiConversation.findFirst).mockResolvedValue(null);
+  vi.mocked(findResumableConversation).mockResolvedValue(null);
   // Default: the bound agent is public + no rate override.
   vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue({
     visibility: 'public',
@@ -68,7 +73,7 @@ describe('resolveModuleSurface', () => {
       rateLimitRpm: null,
     } as never);
     expect(await resolveModuleSurface('user-1', 'onboarding')).toBeNull();
-    expect(prisma.aiConversation.findFirst).not.toHaveBeenCalled(); // gated before any conversation work
+    expect(findResumableConversation).not.toHaveBeenCalled(); // gated before any conversation work
   });
 
   it('carries the agent rate-limit override through', async () => {
@@ -82,26 +87,21 @@ describe('resolveModuleSurface', () => {
 
   it('resumes the most-recent active surface conversation for the (user, agent, module)', async () => {
     vi.mocked(listModuleBindings).mockResolvedValue([binding()] as never);
-    vi.mocked(prisma.aiConversation.findFirst).mockResolvedValue({ id: 'conv-9' } as never);
+    vi.mocked(findResumableConversation).mockResolvedValue('conv-9');
     const surface = await resolveModuleSurface('user-1', 'onboarding');
     expect(surface?.conversationId).toBe('conv-9');
-    expect(prisma.aiConversation.findFirst).toHaveBeenCalledWith({
-      where: {
-        userId: 'user-1',
-        agentId: 'agent-1',
-        contextType: 'module',
-        contextId: 'onboarding',
-        isActive: true,
-      },
-      orderBy: { updatedAt: 'desc' },
-      select: { id: true },
+    expect(findResumableConversation).toHaveBeenCalledWith({
+      userId: 'user-1',
+      agentId: 'agent-1',
+      contextType: 'module',
+      contextId: 'onboarding',
     });
   });
 
   it('returns null when the module has no primary binding', async () => {
     vi.mocked(listModuleBindings).mockResolvedValue([binding({ isPrimary: false })] as never);
     expect(await resolveModuleSurface('user-1', 'onboarding')).toBeNull();
-    expect(prisma.aiConversation.findFirst).not.toHaveBeenCalled();
+    expect(findResumableConversation).not.toHaveBeenCalled();
   });
 
   it('filters an inactive or tombstoned primary agent (→ null)', async () => {
