@@ -137,6 +137,24 @@ describe('registerRegisteredModuleCapabilities', () => {
     );
   });
 
+  it('logs a non-Error throw as a string rather than crashing the loop', () => {
+    // The dispatcher's own guards throw Errors, but a capability's getter or a leaf's
+    // subclass could throw anything; the handler must not itself throw while reporting.
+    registerModuleWithCaps('reading', [new Tool('save_worksheet')]);
+    // The rule below governs what OUR code throws; the branch under test exists precisely
+    // for callers that ignore it, so simulating one is the point.
+    dispatcher.register.mockImplementationOnce(() => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberate: see above
+      throw 'not an Error';
+    });
+
+    expect(() => registerRegisteredModuleCapabilities()).not.toThrow();
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ error: 'not an Error' })
+    );
+  });
+
   it('a rejected capability in one module does not stop another module registering', () => {
     registerModuleWithCaps('reading', [new Tool('save-worksheet')]);
     registerModuleWithCaps('writing', [new Tool('save_draft')]);
