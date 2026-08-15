@@ -28,9 +28,12 @@
  * provider-legal: OpenAI tool names allow only `[A-Za-z0-9_-]`, so the spec's dotted
  * `<module>.<tool>` example (A8) can't be the literal identifier — we use
  * `<moduleSlug_underscored>__<toolSlug>`. It is collision-free by construction:
- * module slugs are strict kebab (no `_`, no `--`, so `-`→`_` yields no `__`) and tool
- * slugs strict snake (no `-`, no `__`), so the `__` joiner is the unambiguous split
- * point. (An underscored slug is also admin-unreachable — `slugSchema` forbids `_`.)
+ * module slugs carry no `_` and no `--` (so `-`→`_` yields no `__`) and tool slugs are
+ * strict snake (no `-`, no `__`), so the `__` joiner is the unambiguous split point.
+ * **Both halves are enforced here** (`MODULE_SLUG_RE` / `TOOL_SLUG_RE`) rather than
+ * assumed: `registerModule()` does not validate slugs, so "by construction" was a claim
+ * about a leaf's discipline, not a property of the code. (An underscored slug is also
+ * admin-unreachable — `slugSchema` forbids `_`.)
  *
  * Both consumers derive from here: `register.ts` (the in-memory handler) and
  * `sync.ts` (the `ai_capability` row). Same input, same identifier — which is the
@@ -48,6 +51,21 @@ import type { ModuleSlug } from '@/lib/framework/shared/scope';
 
 /** Bare tool slugs must be snake_case so they namespace to a provider-legal name. */
 const TOOL_SLUG_RE = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;
+
+/**
+ * Module slugs must be alphanumeric words joined by **single dashes**. This is exactly
+ * what the collision-freedom argument in the header needs, and no more: `-`→`_` must not
+ * be able to produce a `__`, or the joiner stops being an unambiguous split point and two
+ * different modules can namespace to the same identifier. So an underscore (`read_ing`) or
+ * a double dash (`read--ing`) is refused, as is anything outside `[A-Za-z0-9-]`, which
+ * would not be a provider-legal tool name.
+ *
+ * Uppercase is deliberately allowed even though the platform's own `slugSchema` is
+ * lowercase-only: `Reading__save_worksheet` is a perfectly legal tool name, so refusing it
+ * would break a leaf that works today and buy nothing. This regex enforces the *invariant*,
+ * not a house style.
+ */
+const MODULE_SLUG_RE = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
 
 /**
  * The namespaced identifier for a module capability — used identically as the
@@ -79,14 +97,23 @@ export interface ModuleCapabilityIdentity {
 }
 
 /**
- * Derive a module capability's namespaced identity. Throws on a non-snake_case tool
- * slug — it would not namespace to a provider-legal function name, and a boot that
- * proceeded would register a tool no provider can call.
+ * Derive a module capability's namespaced identity. Throws on a module or tool slug that
+ * cannot namespace — the result would be a tool name no provider can call, or one that
+ * collides with another module's. The caller
+ * (`registerRegisteredModuleCapabilities()` / `collectRegisteredModuleCapabilities()`)
+ * treats the throw as fail-soft: that capability is logged and skipped, the rest boot.
  */
 export function moduleCapabilityIdentity(
   moduleSlug: ModuleSlug,
   capability: BaseCapability
 ): ModuleCapabilityIdentity {
+  if (!MODULE_SLUG_RE.test(moduleSlug)) {
+    throw new Error(
+      `Module slug "${moduleSlug}" must be alphanumeric words joined by single dashes — ` +
+        `an underscore or a double dash makes the namespaced tool name ambiguous, and any ` +
+        `other character makes it illegal as a provider tool name`
+    );
+  }
   if (!TOOL_SLUG_RE.test(capability.slug)) {
     throw new Error(
       `Module "${moduleSlug}" capability slug "${capability.slug}" must be snake_case ` +

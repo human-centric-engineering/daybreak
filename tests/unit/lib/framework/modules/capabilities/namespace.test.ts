@@ -101,6 +101,35 @@ describe('moduleCapabilityIdentity', () => {
     expect(capability.slug).toBe('save_worksheet');
   });
 
+  it('rejects a module slug that would make the namespaced identifier ambiguous', () => {
+    // `-`→`_` must not be able to produce a `__`, or two different modules can namespace
+    // to the same identifier and the second registration silently replaces the first.
+    expect(() => moduleCapabilityIdentity('read_ing', new SaveWorksheet())).toThrow(
+      /single dashes/
+    );
+    expect(() => moduleCapabilityIdentity('read--ing', new SaveWorksheet())).toThrow();
+    // …and anything outside [A-Za-z0-9-] is not a legal provider tool name.
+    expect(() => moduleCapabilityIdentity('read ing', new SaveWorksheet())).toThrow();
+    expect(() => moduleCapabilityIdentity('read.ing', new SaveWorksheet())).toThrow();
+  });
+
+  it('is the collision the module-slug rule prevents', () => {
+    // The pair that motivates the rule: without it both namespace to `read_ing__save_worksheet`.
+    expect(moduleCapabilitySlug('read-ing', 'save_worksheet')).toBe(
+      moduleCapabilitySlug('read_ing', 'save_worksheet')
+    );
+    expect(() => moduleCapabilityIdentity('read-ing', new SaveWorksheet())).not.toThrow();
+    expect(() => moduleCapabilityIdentity('read_ing', new SaveWorksheet())).toThrow();
+  });
+
+  it('allows an uppercase module slug — legal as a tool name, so not our business', () => {
+    // `slugSchema` is lowercase-only elsewhere, but this regex enforces the invariant, not
+    // a house style; refusing `Reading` would break a leaf that works today for no gain.
+    expect(moduleCapabilityIdentity('Reading', new SaveWorksheet()).slug).toBe(
+      'Reading__save_worksheet'
+    );
+  });
+
   it('rejects a non-snake_case tool slug', () => {
     expect(() => moduleCapabilityIdentity('reading', new SaveWorksheet('save-worksheet'))).toThrow(
       /snake_case/

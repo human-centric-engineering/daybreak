@@ -136,6 +136,21 @@ process.
   than two. A `processesPii` module capability that does not override `redactProvenance()`
   is still refused — it gets no handler, rather than taking the boot down with it.
 
+- **Module slugs are now validated where the namespaced tool name is derived.** A module
+  slug must be alphanumeric words joined by **single dashes**; an underscore (`read_ing`),
+  a double dash (`read--ing`), or any character outside `[A-Za-z0-9-]` is refused.
+
+  `registerModule()` never validated slugs, so the namespacing rule's "collision-free by
+  construction" was a claim about a leaf's discipline rather than a property of the code.
+  Modules `read-ing` and `read_ing` both declaring a tool `x` derive the *same*
+  `read_ing__x`: the second registration silently replaces the first's handler and one
+  module's tool becomes permanently non-dispatchable, with a single `ai_capability` row
+  advertising it. A slug with a space or a dot produces a name no provider accepts.
+
+  Uppercase is deliberately still allowed — `Reading__save_worksheet` is a legal tool
+  name, so refusing it would break a working leaf for no safety gain. A violating module's
+  capabilities are logged and skipped (see the next entry), not fatal.
+
 - **A rejected module capability no longer takes the whole framework down with it.**
   `registerRegisteredModuleCapabilities()` is now fail-soft per capability: one that core
   refuses is logged at `error` and skipped, and its siblings still register.
