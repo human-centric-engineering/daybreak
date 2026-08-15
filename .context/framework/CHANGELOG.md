@@ -92,9 +92,18 @@ process.
   the dispatcher had already fetched it.
 
   **Two consequences worth knowing if you edit allowlists at runtime.** The config now
-  shares the dispatcher's 5-minute per-agent binding cache, so an allowlist edit lands on
-  the same boundary as an `isEnabled` or `customRateLimit` edit already did — one
-  staleness window instead of two. And a capability executed **outside** the dispatcher
+  shares the dispatcher's per-agent binding cache (5-minute TTL). The admin binding routes
+  call `capabilityDispatcher.clearCache()` on every write, so a **single-instance**
+  deployment applies an allowlist edit immediately. On a **multi-instance** deployment,
+  `clearCache()` only clears the process that served the request — instances that did not
+  serve it keep the previous allowlist for up to 5 minutes. The per-execute database read
+  this replaces had no such window, so if you narrow an allowlist to cut off access, budget
+  for that delay (or disable the binding, which has the same window, or restart the
+  instances). This is the window `isEnabled` and `customRateLimit` already had; the
+  fine-grained allowlist now shares it. Cross-instance invalidation is core-owned and filed
+  in [`upstream-asks.md`](./upstream-asks.md).
+
+  And a capability executed **outside** the dispatcher
   (no resolved binding on the context) now fails closed with `invalid_exposure` rather
   than treating the missing allowlist as permissive; nothing in Daybreak or Sunrise
   executes a capability that way, but a leaf calling `execute()` directly would see it.

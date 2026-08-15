@@ -9,9 +9,13 @@
  * `AiAgentCapability` — one indexed lookup less per capture and per `get_state`.
  *
  * Three consequences of reading the dispatcher's value, all deliberate:
- * - The dispatcher caches an agent's bindings for 5 minutes, so an operator's allowlist
- *   edit takes effect on the same cache boundary as `isEnabled` and `customRateLimit`
- *   already do — one coherent staleness window instead of two.
+ * - The dispatcher caches an agent's bindings for 5 minutes. The admin binding routes call
+ *   `clearCache()` on every write, so a single-instance deployment applies an allowlist
+ *   edit at once — but `clearCache()` is process-local, so on a multi-instance deployment
+ *   the instances that did not serve the write keep the previous allowlist until the TTL
+ *   expires. The per-execute read this replaces had no such window. Same window
+ *   `isEnabled`/`customRateLimit` already had; cross-instance invalidation is core-owned
+ *   and filed in `upstream-asks.md`.
  * - `customConfig` is populated **only by the dispatcher** (`null` when the binding
  *   carries no config, including the synthesized default-allow binding). `undefined`
  *   therefore means the capability was executed outside the dispatch path — where the
