@@ -53,6 +53,7 @@ const { syncRegisteredModuleCapabilities } =
 const { registerModule, __resetModuleRegistryForTests } =
   await import('@/lib/framework/modules/registry');
 const { executeTransaction } = await import('@/lib/db/utils');
+const { logger: loggerMock } = await import('@/lib/logging');
 const executeTransactionMock = executeTransaction as ReturnType<typeof vi.fn>;
 
 const MARKER_WHERE = { path: ['framework'], equals: 'module-capability' };
@@ -142,6 +143,12 @@ describe('syncRegisteredModuleCapabilities', () => {
 
     const created = txMock.aiCapability.createMany.mock.calls[0][0].data;
     expect(created.map((r: { slug: string }) => r.slug)).toEqual(['reading__read_progress']);
+    // Logged, not swallowed: on the standalone path nothing else reports it, and the row
+    // silently deactivates through the notIn pass.
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      expect.stringContaining('cannot be namespaced'),
+      expect.objectContaining({ moduleSlug: 'reading' })
+    );
   });
 
   it('writes no row for a declared capability whose handler was refused (no report)', async () => {

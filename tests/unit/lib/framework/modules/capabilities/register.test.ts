@@ -155,6 +155,29 @@ describe('registerRegisteredModuleCapabilities', () => {
     );
   });
 
+  it('survives a capability whose own slug getter throws', () => {
+    // `slug` is a property on an author-written class. If reading it threw from inside the
+    // catch block (or before the try), the handler itself would throw — escaping the
+    // per-capability guard and darking every later boot step.
+    const exploding = new Tool('ok_tool');
+    Object.defineProperty(exploding, 'slug', {
+      get() {
+        throw new Error('config not loaded');
+      },
+    });
+    registerModuleWithCaps('reading', [exploding, new Tool('read_progress')]);
+
+    expect(() => registerRegisteredModuleCapabilities()).not.toThrow();
+
+    expect(dispatcher.register.mock.calls.map((c) => c[1].slug)).toEqual([
+      'reading__read_progress',
+    ]);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ capabilitySlug: '<unreadable>', error: 'config not loaded' })
+    );
+  });
+
   it('reports what it registered and what it refused', () => {
     // The report is what `syncRegisteredModuleCapabilities()` reconciles rows against —
     // the handler map cannot tell "refused this boot" from "registered on a previous one".

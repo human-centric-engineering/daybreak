@@ -44,6 +44,9 @@ import {
   moduleScopeGuard,
 } from '@/lib/framework/modules/capabilities/namespace';
 
+/** Stand-in when a capability's own `slug` getter threw before we could read it. */
+const UNREADABLE_SLUG = '<unreadable>';
+
 /** What one registration pass did, by namespaced slug. Handed to
  *  `syncRegisteredModuleCapabilities()` so the row reconcile matches the handlers exactly.
  *  A refused capability has no `slug` when the identity derivation itself threw, so it is
@@ -64,7 +67,13 @@ export function registerRegisteredModuleCapabilities(): ModuleCapabilityRegistra
 
   for (const mod of getRegisteredModules()) {
     for (const capability of mod.capabilities ?? []) {
+      // Read the author's slug INSIDE the guard and keep it: `slug` is a property on an
+      // author-written class and can be a getter that throws. Reading it in the catch (or
+      // before the try) would throw from the handler itself, escaping the per-capability
+      // guard and darking every later boot step — the failure this loop exists to prevent.
+      let capabilitySlug = UNREADABLE_SLUG;
       try {
+        capabilitySlug = capability.slug;
         const { slug } = moduleCapabilityIdentity(mod.slug, capability);
         // The real instance, not a wrapper — so the dispatcher's own PII guard inspects
         // the author's prototype (see the namespace.ts header) and an out-of-module call
@@ -77,10 +86,10 @@ export function registerRegisteredModuleCapabilities(): ModuleCapabilityRegistra
         const reason = err instanceof Error ? err.message : String(err);
         logger.error('registerRegisteredModuleCapabilities: capability rejected — skipping', {
           moduleSlug: mod.slug,
-          capabilitySlug: capability.slug,
+          capabilitySlug,
           error: reason,
         });
-        refused.push({ moduleSlug: mod.slug, capabilitySlug: capability.slug, reason });
+        refused.push({ moduleSlug: mod.slug, capabilitySlug, reason });
       }
     }
   }

@@ -107,11 +107,24 @@ export function collectRegisteredModuleCapabilities(): ModuleCapabilityRow[] {
       // fail-soft treatment: `moduleCapabilityIdentity` throws on a slug that cannot
       // namespace, and letting that escape here would abandon the sync mid-boot and skip
       // every step after it — exactly the failure the register half was made fail-soft to
-      // avoid. Registration has already logged the reason; skip quietly.
+      // avoid.
+      //
+      // Logged, not swallowed. On the boot path the register half has already reported
+      // this capability — a second line is cheap. On the standalone path (a repair script
+      // or re-sync route calling the sync with no registration report) nothing else has,
+      // and a silent skip would deactivate the capability's existing row through the
+      // `notIn` pass with no explanation for the tool disappearing.
       let identity: ReturnType<typeof moduleCapabilityIdentity>;
       try {
         identity = moduleCapabilityIdentity(mod.slug, capability);
-      } catch {
+      } catch (err) {
+        logger.error(
+          'collectRegisteredModuleCapabilities: capability slug cannot be namespaced — no row',
+          {
+            moduleSlug: mod.slug,
+            error: err instanceof Error ? err.message : String(err),
+          }
+        );
         continue;
       }
       const { slug, functionDefinition } = identity;
