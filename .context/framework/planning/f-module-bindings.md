@@ -334,6 +334,17 @@ shape the later tasks reuse. A6 + A7.
 A8: module capabilities in the single global registry, namespaced, scope carried by the
 generic `CapabilityContext.scope` map.
 
+> **Mechanism superseded 2026-08-14 — same seam, no wrapper.** As shipped, t-2 presented
+> each capability to the dispatcher through a `NamespacedModuleCapability` wrapper, because
+> `register()` took no slug override and no guard. Sunrise **#398** added both in 0.7.0, and
+> **v1.3 Phase 1 t-1.2** deletes the wrapper: `namespace.ts` is now pure derivations
+> (`moduleCapabilityIdentity` + `moduleScopeGuard`) handed to
+> `register(capability, { slug, guard })`. Everything this section specifies still holds —
+> the `__` identifier, the invariant, the interim allow-when-unpinned posture. Two visible
+> changes: an out-of-scope call is refused **before** the rate limiter and returns core's
+> `capability_guard_denied` rather than `out_of_module_scope`, and the PII re-assertion is
+> gone because core now inspects the author's real prototype. See [[issue-backlog]] Phase 1.
+
 - **`lib/framework/modules/definition.ts`** — add **`capabilities?: BaseCapability[]`** (or
   a light factory list) to `ModuleDefinition` (header already reserves it). Each is an
   ordinary `BaseCapability`; the framework owns the namespacing, so a module author writes a

@@ -1,12 +1,14 @@
 /**
  * In-memory registration of module-declared capabilities into the global
- * dispatcher (f-module-bindings t-2, decision A8).
+ * dispatcher (f-module-bindings t-2, decision A8; v1.3 Phase 1 t-1.2).
  *
- * For every registered module, each declared capability is wrapped
- * (`namespaceModuleCapability`) and registered under its namespaced slug
- * `<module-slug>.<tool>`. This is the *handler* half — the dispatcher needs an
- * in-memory `BaseCapability` to actually run a tool; the `ai_capability` DB row
- * (`sync.ts`) is the metadata half that lets an agent be granted it.
+ * For every registered module, each declared capability is registered **as itself**
+ * through the core seam (Sunrise #398): `register(capability, { slug, guard })` takes
+ * the namespaced handler key and the module-scope guard, so no wrapper stands between
+ * the dispatcher and the author's class. This is the *handler* half — the dispatcher
+ * needs an in-memory `BaseCapability` to actually run a tool; the `ai_capability` DB
+ * row (`sync.ts`) is the metadata half that lets an agent be granted it. Both derive
+ * the same identity from `namespace.ts`.
  *
  * **Runs from `syncFramework()`, not `initFramework()`.** Boot order is
  * `initFramework() → initLeafApp() → syncFramework()`, and the leaf's modules are
@@ -15,17 +17,82 @@
  *
  * Idempotent: the dispatcher keys handlers by slug, so a repeat (HMR, double boot)
  * replaces rather than duplicates.
+ *
+ * **One bad capability cannot dark the framework.** Registration is per-capability
+ * fail-soft: a capability core refuses — a non-snake_case tool slug, or `processesPii`
+ * without an own-prototype `redactProvenance()` — is logged as an error and skipped, and
+ * its siblings still register. This is deliberate, and it is not "swallow the error": the
+ * throw used to escape into `syncFramework()`, whose caller (`lib/app/bootstrap.ts`)
+ * catches and logs, so **every later boot step was skipped** — framework capability
+ * handlers, the module/slot syncs, the capability sync — leaving an app that serves
+ * traffic looking healthy with no framework capabilities at all. One author's broken tool
+ * is not a reason to unregister everyone else's. The capability is absent and loudly
+ * logged; `sync.ts` then declines to write its `ai_capability` row, so nothing advertises
+ * a tool that cannot dispatch.
+ *
+ * The two halves agree by construction: this pass **returns what it registered and what it
+ * refused**, and `syncRegisteredModuleCapabilities()` takes that result. Inferring it from
+ * `capabilityDispatcher.has()` instead cannot tell "the register pass never ran" from
+ * "every capability was refused" — and those need opposite answers (skip vs deactivate).
  */
 
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
+import { logger } from '@/lib/logging';
 import { getRegisteredModules } from '@/lib/framework/modules/registry';
-import { namespaceModuleCapability } from '@/lib/framework/modules/capabilities/namespace';
+import {
+  moduleCapabilityIdentity,
+  moduleScopeGuard,
+} from '@/lib/framework/modules/capabilities/namespace';
 
-/** Register every registered module's capabilities into the dispatcher, namespaced. */
-export function registerRegisteredModuleCapabilities(): void {
+/** Stand-in when a capability's own `slug` getter threw before we could read it. */
+const UNREADABLE_SLUG = '<unreadable>';
+
+/** What one registration pass did, by namespaced slug. Handed to
+ *  `syncRegisteredModuleCapabilities()` so the row reconcile matches the handlers exactly.
+ *  A refused capability has no `slug` when the identity derivation itself threw, so it is
+ *  identified by its module and bare slug. */
+export interface ModuleCapabilityRegistration {
+  /** Namespaced slugs now registered as dispatcher handlers. */
+  registered: string[];
+  /** Capabilities core or the derivation refused; absent from `registered`. */
+  refused: { moduleSlug: string; capabilitySlug: string; reason: string }[];
+}
+
+/** Register every registered module's capabilities into the dispatcher, namespaced.
+ *  A capability the identity derivation or the dispatcher rejects is skipped and logged,
+ *  not thrown (see the header). */
+export function registerRegisteredModuleCapabilities(): ModuleCapabilityRegistration {
+  const registered: string[] = [];
+  const refused: ModuleCapabilityRegistration['refused'] = [];
+
   for (const mod of getRegisteredModules()) {
     for (const capability of mod.capabilities ?? []) {
-      capabilityDispatcher.register(namespaceModuleCapability(mod.slug, capability));
+      // Read the author's slug INSIDE the guard and keep it: `slug` is a property on an
+      // author-written class and can be a getter that throws. Reading it in the catch (or
+      // before the try) would throw from the handler itself, escaping the per-capability
+      // guard and darking every later boot step — the failure this loop exists to prevent.
+      let capabilitySlug = UNREADABLE_SLUG;
+      try {
+        capabilitySlug = capability.slug;
+        const { slug } = moduleCapabilityIdentity(mod.slug, capability);
+        // The real instance, not a wrapper — so the dispatcher's own PII guard inspects
+        // the author's prototype (see the namespace.ts header) and an out-of-module call
+        // is refused before the rate limiter rather than inside `execute()`.
+        capabilityDispatcher.register(capability, { slug, guard: moduleScopeGuard(mod.slug) });
+        registered.push(slug);
+      } catch (err) {
+        // `error`, not `warn`: the capability is gone for this boot and an operator has to
+        // act. The message is the author's own contract violation, safe to surface.
+        const reason = err instanceof Error ? err.message : String(err);
+        logger.error('registerRegisteredModuleCapabilities: capability rejected — skipping', {
+          moduleSlug: mod.slug,
+          capabilitySlug,
+          error: reason,
+        });
+        refused.push({ moduleSlug: mod.slug, capabilitySlug, reason });
+      }
     }
   }
+
+  return { registered, refused };
 }

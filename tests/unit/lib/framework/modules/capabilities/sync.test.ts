@@ -9,6 +9,10 @@
  * deactivate pass is scoped to the admin-unreachable `category='module' + isSystem`
  * marker, and the "did registration run?" guard keys on MODULES.
  *
+ * Since v1.3 Phase 1 t-1.2 the sync also refuses to run ahead of the handler
+ * registration, which is where core enforces the PII contract — hence the
+ * `has()` on the dispatcher mock, defaulted to "registered".
+ *
  * @see lib/framework/modules/capabilities/sync.ts
  */
 
@@ -30,7 +34,7 @@ const txMock = {
     updateMany: vi.fn(),
   },
 };
-const dispatcherMock = { clearCache: vi.fn() };
+const dispatcherMock = { clearCache: vi.fn(), has: vi.fn((_slug: string) => true) };
 
 vi.mock('@/lib/db/utils', () => ({
   executeTransaction: vi.fn(async (cb: (tx: unknown) => Promise<unknown>, _opts?: unknown) =>
@@ -49,6 +53,7 @@ const { syncRegisteredModuleCapabilities } =
 const { registerModule, __resetModuleRegistryForTests } =
   await import('@/lib/framework/modules/registry');
 const { executeTransaction } = await import('@/lib/db/utils');
+const { logger: loggerMock } = await import('@/lib/logging');
 const executeTransactionMock = executeTransaction as ReturnType<typeof vi.fn>;
 
 const MARKER_WHERE = { path: ['framework'], equals: 'module-capability' };
@@ -107,9 +112,12 @@ beforeEach(() => {
   __resetModuleRegistryForTests();
   txMock.aiCapability.findMany.mockResolvedValue([]);
   txMock.aiCapability.updateMany.mockResolvedValue({ count: 0 });
+  // `vi.clearAllMocks()` wipes the implementation too — restore the default: every
+  // collected capability already has a registered handler (the normal boot order).
+  dispatcherMock.has.mockReturnValue(true);
 });
 
-/** The functionDefinition a wrapped `Tool(slug)` produces, in canonical shape. */
+/** The functionDefinition a namespaced `Tool(slug)` produces, in canonical shape. */
 function fnDef(slug: string, description = `${slug} desc`) {
   return { name: `reading__${slug}`, description, parameters: {} };
 }
@@ -120,6 +128,96 @@ describe('syncRegisteredModuleCapabilities', () => {
     expect(executeTransactionMock).not.toHaveBeenCalled();
     expect(txMock.aiCapability.createMany).not.toHaveBeenCalled();
     expect(dispatcherMock.clearCache).not.toHaveBeenCalled();
+  });
+
+  it('skips a capability whose slug cannot namespace, instead of failing the sync', async () => {
+    // The register half skips it (fail-soft); if `collect()` still threw on the same
+    // derivation, the sync would abandon mid-boot and every later step would be skipped —
+    // the exact failure the fail-soft change exists to prevent.
+    registerModuleWithCaps('reading', [new Tool('save-worksheet'), new Tool('read_progress')]);
+
+    await syncRegisteredModuleCapabilities({
+      registered: ['reading__read_progress'],
+      refused: [{ moduleSlug: 'reading', capabilitySlug: 'save-worksheet', reason: 'snake_case' }],
+    });
+
+    const created = txMock.aiCapability.createMany.mock.calls[0][0].data;
+    expect(created.map((r: { slug: string }) => r.slug)).toEqual(['reading__read_progress']);
+    // Logged, not swallowed: on the standalone path nothing else reports it, and the row
+    // silently deactivates through the notIn pass.
+    expect(loggerMock.error).toHaveBeenCalledWith(
+      expect.stringContaining('cannot be namespaced'),
+      expect.objectContaining({ moduleSlug: 'reading' })
+    );
+  });
+
+  it('writes no row for a declared capability whose handler was refused (no report)', async () => {
+    // The PII contract (`processesPii` ⇒ `redactProvenance()`) is enforced by core inside
+    // `capabilityDispatcher.register()`, which skips an offender. A row here would
+    // advertise — and let an admin grant — a tool that can never dispatch.
+    registerModuleWithCaps('reading', [new Tool('save_worksheet'), new Tool('read_progress')]);
+    dispatcherMock.has.mockImplementation((slug: string) => slug !== 'reading__save_worksheet');
+
+    await syncRegisteredModuleCapabilities();
+
+    const created = txMock.aiCapability.createMany.mock.calls[0][0].data;
+    expect(created.map((r: { slug: string }) => r.slug)).toEqual(['reading__read_progress']);
+    // The refused one is excluded from the keep-list, so an existing row deactivates.
+    expect(txMock.aiCapability.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ slug: { notIn: ['reading__read_progress'] } }),
+      })
+    );
+  });
+
+  it('deactivates the row of a capability registration refused — even if it is the only one', async () => {
+    // The upgrade case the CHANGELOG warns about: a leaf with ONE module capability whose
+    // `redactProvenance` shape core now refuses. Inferring from the handler map would read
+    // this as "registration never ran" and skip, leaving the row active, admin-grantable
+    // and permanently non-dispatchable. The registration report says otherwise.
+    registerModuleWithCaps('reading', [new Tool('save_worksheet')]);
+
+    await syncRegisteredModuleCapabilities({
+      registered: [],
+      refused: [{ moduleSlug: 'reading', capabilitySlug: 'save_worksheet', reason: 'no redactor' }],
+    });
+
+    expect(txMock.aiCapability.createMany).not.toHaveBeenCalled();
+    // No keep-list ⇒ every framework-marked row deactivates, including this one.
+    expect(txMock.aiCapability.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.not.objectContaining({ slug: expect.anything() }),
+        data: { isActive: false },
+      })
+    );
+  });
+
+  it('reconciles against the registration report, not the dispatcher handler map', async () => {
+    // The handler map is `globalThis`-backed, so on a re-boot in one process it can still
+    // report a handler for a capability THIS boot refused. The report is authoritative.
+    registerModuleWithCaps('reading', [new Tool('save_worksheet'), new Tool('read_progress')]);
+    dispatcherMock.has.mockReturnValue(true); // stale handlers from a previous boot
+
+    await syncRegisteredModuleCapabilities({
+      registered: ['reading__read_progress'],
+      refused: [{ moduleSlug: 'reading', capabilitySlug: 'save_worksheet', reason: 'x' }],
+    });
+
+    const created = txMock.aiCapability.createMany.mock.calls[0][0].data;
+    expect(created.map((r: { slug: string }) => r.slug)).toEqual(['reading__read_progress']);
+    expect(dispatcherMock.has).not.toHaveBeenCalled();
+  });
+
+  it('skips entirely when NO declared capability has a handler (never mass-deactivates)', async () => {
+    // An absent or failed registration pass, not an author deleting every tool — the same
+    // reasoning as the zero-modules guard, one level down.
+    registerModuleWithCaps('reading', [new Tool('save_worksheet')]);
+    dispatcherMock.has.mockReturnValue(false);
+
+    await syncRegisteredModuleCapabilities();
+
+    expect(executeTransactionMock).not.toHaveBeenCalled();
+    expect(txMock.aiCapability.updateMany).not.toHaveBeenCalled();
   });
 
   it('creates a row (batched) for a newly-declared capability with the framework marker', async () => {

@@ -1,12 +1,23 @@
 /**
  * Namespacing + scope-refusal for module-declared capabilities (f-module-bindings
- * t-2, decision A8).
+ * t-2, decision A8; delegated to the core seam in v1.3 Phase 1 t-1.2).
  *
  * A module author writes an ordinary `BaseCapability` with a **bare snake_case
- * slug** (e.g. `save_worksheet`). The framework wraps it so it lives in the ONE
- * global capability registry without colliding with another module's identically
- * named tool, and so it refuses to run outside its module's scope — the author
- * writes no namespacing or scope code.
+ * slug** (e.g. `save_worksheet`). The framework presents it to the ONE global
+ * capability registry under a namespaced slug, so it cannot collide with another
+ * module's identically named tool, and attaches a guard so it refuses to run
+ * outside its module's scope — the author writes no namespacing or scope code.
+ *
+ * **Nothing is wrapped.** Sunrise #398 (landed in 0.7.0) made
+ * `capabilityDispatcher.register(cap, { slug, guard })` take a handler-key override
+ * and a pre-execute guard, which is precisely what a wrapper was faking. So this
+ * module is now three pure derivations over the author's capability — the slug, the
+ * `functionDefinition`, and the scope guard — and the real instance is what gets
+ * registered. That matters beyond tidiness: the dispatcher's PII check
+ * (`isRedactorOverridden`) is an own-property check on the instance's prototype, and
+ * a delegating wrapper passed it unconditionally. The fork used to re-assert the
+ * contract against the inner capability to compensate; core now sees the true
+ * subclass, so the re-assertion is gone with the wrapper.
  *
  * **One namespaced identifier, used everywhere** (reconciliation #2). The dispatcher
  * keys handlers by the tool name the LLM calls (`dispatch(toolCall.name)`), and
@@ -17,24 +28,44 @@
  * provider-legal: OpenAI tool names allow only `[A-Za-z0-9_-]`, so the spec's dotted
  * `<module>.<tool>` example (A8) can't be the literal identifier — we use
  * `<moduleSlug_underscored>__<toolSlug>`. It is collision-free by construction:
- * module slugs are strict kebab (no `_`, no `--`, so `-`→`_` yields no `__`) and tool
- * slugs strict snake (no `-`, no `__`), so the `__` joiner is the unambiguous split
- * point. (An underscored slug is also admin-unreachable — `slugSchema` forbids `_`.)
+ * module slugs carry no `_` and no `--` (so `-`→`_` yields no `__`) and tool slugs are
+ * strict snake (no `-`, no `__`), so the `__` joiner is the unambiguous split point.
+ * **Both halves are enforced here** (`MODULE_SLUG_RE` / `TOOL_SLUG_RE`) rather than
+ * assumed: `registerModule()` does not validate slugs, so "by construction" was a claim
+ * about a leaf's discipline, not a property of the code. (An underscored slug is also
+ * admin-unreachable — `slugSchema` forbids `_`.)
+ *
+ * Both consumers derive from here: `register.ts` (the in-memory handler) and
+ * `sync.ts` (the `ai_capability` row). Same input, same identifier — which is the
+ * invariant that keeps a module tool dispatchable at all.
  */
 
-import { z } from 'zod';
-import { BaseCapability } from '@/lib/orchestration/capabilities/base-capability';
+import type { BaseCapability } from '@/lib/orchestration/capabilities/base-capability';
 import type {
   CapabilityContext,
   CapabilityFunctionDefinition,
-  CapabilityResult,
-  CapabilitySchema,
+  CapabilityGuard,
 } from '@/lib/orchestration/capabilities/types';
 import { decodeScope } from '@/lib/framework/shared/scope';
 import type { ModuleSlug } from '@/lib/framework/shared/scope';
 
 /** Bare tool slugs must be snake_case so they namespace to a provider-legal name. */
 const TOOL_SLUG_RE = /^[a-z0-9]+(?:_[a-z0-9]+)*$/;
+
+/**
+ * Module slugs must be alphanumeric words joined by **single dashes**. This is exactly
+ * what the collision-freedom argument in the header needs, and no more: `-`→`_` must not
+ * be able to produce a `__`, or the joiner stops being an unambiguous split point and two
+ * different modules can namespace to the same identifier. So an underscore (`read_ing`) or
+ * a double dash (`read--ing`) is refused, as is anything outside `[A-Za-z0-9-]`, which
+ * would not be a provider-legal tool name.
+ *
+ * Uppercase is deliberately allowed even though the platform's own `slugSchema` is
+ * lowercase-only: `Reading__save_worksheet` is a perfectly legal tool name, so refusing it
+ * would break a leaf that works today and buy nothing. This regex enforces the *invariant*,
+ * not a house style.
+ */
+const MODULE_SLUG_RE = /^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/;
 
 /**
  * The namespaced identifier for a module capability — used identically as the
@@ -57,85 +88,69 @@ export function isInModuleScope(context: CapabilityContext, moduleSlug: ModuleSl
   return pinned === undefined || pinned === moduleSlug;
 }
 
-/**
- * A module capability presented to the dispatcher under its namespaced slug, with a
- * provider-legal function name and automatic scope refusal. Delegates validation,
- * execution, and provenance redaction to the inner capability.
- */
-class NamespacedModuleCapability extends BaseCapability {
-  readonly slug: string;
-  readonly functionDefinition: CapabilityFunctionDefinition;
-  readonly processesPii: boolean;
-  // Unused: `validate()` is overridden to delegate to the inner capability, so this
-  // placeholder never runs. Present only to satisfy the abstract member.
-  protected readonly schema: CapabilitySchema<unknown> = z.unknown();
-
-  constructor(
-    private readonly inner: BaseCapability,
-    private readonly moduleSlug: ModuleSlug
-  ) {
-    super();
-    this.slug = moduleCapabilitySlug(moduleSlug, inner.slug);
-    // The LLM function name MUST equal the handler key / DB slug (the dispatcher
-    // looks the handler up by the name the LLM calls) — so it is exactly `this.slug`.
-    this.functionDefinition = { ...inner.functionDefinition, name: this.slug };
-    this.processesPii = inner.processesPii;
-  }
-
-  validate(rawArgs: unknown): unknown {
-    return this.inner.validate(rawArgs);
-  }
-
-  async execute(args: unknown, context: CapabilityContext): Promise<CapabilityResult> {
-    if (!isInModuleScope(context, this.moduleSlug)) {
-      return this.error(
-        `Capability "${this.slug}" is scoped to module "${this.moduleSlug}" and cannot run in another module's context`,
-        'out_of_module_scope'
-      );
-    }
-    return this.inner.execute(args, context);
-  }
-
-  redactProvenance(
-    args: unknown,
-    result: CapabilityResult
-  ): ReturnType<BaseCapability['redactProvenance']> {
-    return this.inner.redactProvenance(args, result);
-  }
+/** The code-owned identity of a module capability, shared by the handler and the row. */
+export interface ModuleCapabilityIdentity {
+  /** Handler key === `ai_capability.slug` === `functionDefinition.name`. */
+  slug: string;
+  /** The author's definition, renamed to the namespaced slug. */
+  functionDefinition: CapabilityFunctionDefinition;
 }
 
 /**
- * Wrap a module-authored capability as a namespaced, scope-aware dispatcher entry.
- * Throws on a non-snake_case tool slug (it would not namespace to a provider-legal
- * function name), and re-asserts the inner capability's PII contract: the wrapper
- * always "overrides" `redactProvenance` (it delegates), which would fool the
- * dispatcher's own PII guard, so we enforce inner's contract here instead.
+ * Derive a module capability's namespaced identity. Throws on a module or tool slug that
+ * cannot namespace — the result would be a tool name no provider can call, or one that
+ * collides with another module's. The caller
+ * (`registerRegisteredModuleCapabilities()` / `collectRegisteredModuleCapabilities()`)
+ * treats the throw as fail-soft: that capability is logged and skipped, the rest boot.
  */
-export function namespaceModuleCapability(
+export function moduleCapabilityIdentity(
   moduleSlug: ModuleSlug,
-  inner: BaseCapability
-): BaseCapability {
-  if (!TOOL_SLUG_RE.test(inner.slug)) {
+  capability: BaseCapability
+): ModuleCapabilityIdentity {
+  if (!MODULE_SLUG_RE.test(moduleSlug)) {
     throw new Error(
-      `Module "${moduleSlug}" capability slug "${inner.slug}" must be snake_case ` +
+      `Module slug "${moduleSlug}" must be alphanumeric words joined by single dashes — ` +
+        `an underscore or a double dash makes the namespaced tool name ambiguous, and any ` +
+        `other character makes it illegal as a provider tool name`
+    );
+  }
+  if (!TOOL_SLUG_RE.test(capability.slug)) {
+    throw new Error(
+      `Module "${moduleSlug}" capability slug "${capability.slug}" must be snake_case ` +
         `(lowercase alphanumeric words joined by single underscores) so it namespaces ` +
         `to a provider-legal tool name`
     );
   }
-  // LOAD-BEARING — do not remove as "redundant with dispatcher.register()". The wrapper
-  // below always defines its own `redactProvenance` (it delegates), so the dispatcher's
-  // own PII guard (`isRedactorOverridden`, an own-property check on the instance's
-  // prototype) passes UNCONDITIONALLY for every wrapped module capability. This
-  // re-assertion against the *inner* capability is therefore the ONLY thing preventing a
-  // `processesPii` module tool from silently persisting un-redacted PII to durable audit
-  // rows. The clean fix is a core `register(cap, { slug, guard })` seam so no wrapper is
-  // needed — Sunrise #398 / `.context/framework/upstream-asks.md`; delete this only when
-  // delegating to that seam.
-  if (inner.processesPii && inner.redactProvenance === BaseCapability.prototype.redactProvenance) {
-    throw new Error(
-      `Module "${moduleSlug}" capability "${inner.slug}" declares processesPii=true but ` +
-        `does not override redactProvenance(). PII-handling capabilities must redact.`
-    );
-  }
-  return new NamespacedModuleCapability(inner, moduleSlug);
+  const slug = moduleCapabilitySlug(moduleSlug, capability.slug);
+  // The LLM function name MUST equal the handler key / DB slug (the dispatcher looks
+  // the handler up by the name the LLM calls) — so it is exactly the namespaced slug.
+  return { slug, functionDefinition: { ...capability.functionDefinition, name: slug } };
+}
+
+/**
+ * The pre-execute guard attached to a module capability's registration: refuse a
+ * dispatch pinned to a different module. The dispatcher runs it after the binding gate
+ * and **before** the rate limiter, and a throw inside it fails closed — the latter is
+ * strictly stronger than the in-`execute()` refusal this replaced, which returned a
+ * normal error result.
+ *
+ * Running before the limiter is a **trade, not a pure win**. A refused call consumes no
+ * rate token, which is the behaviour core designed for (a denial shouldn't spend the
+ * caller's budget) — but it also means out-of-scope calls are no longer throttled, where
+ * the old in-`execute()` refusal sat behind the limiter. A mis-scoped agent looping on a
+ * module tool now emits an unthrottled `logger.warn` per attempt. Acceptable here because
+ * the loop is bounded upstream: an agent only calls a tool the LLM was offered, and both
+ * the chat and MCP entry points are themselves rate-limited per user/agent.
+ *
+ * The `reason` is folded verbatim into a client-visible message, so it names the
+ * module (already public in the tool's own slug) and nothing internal.
+ */
+export function moduleScopeGuard(moduleSlug: ModuleSlug): CapabilityGuard {
+  return (context) =>
+    isInModuleScope(context, moduleSlug)
+      ? { allow: true }
+      : {
+          allow: false,
+          reason: `it is scoped to module "${moduleSlug}" and cannot run in another module's context`,
+        };
 }

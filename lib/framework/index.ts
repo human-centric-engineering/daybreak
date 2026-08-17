@@ -105,10 +105,10 @@ export async function syncFramework(): Promise<void> {
   // persisted from a prior boot stays dispatchable rather than vanishing for the whole
   // process (module caps, unlike built-ins, have no lazy self-heal). Requires modules
   // to be registered, which `initLeafApp()` did before `syncFramework()` ran.
-  registerRegisteredModuleCapabilities();
+  const moduleCapabilityRegistration = registerRegisteredModuleCapabilities();
   registerFrameworkCapabilityHandlers();
   await syncRegisteredModules();
   await syncRegisteredSlotDefinitions();
-  await syncRegisteredModuleCapabilities();
+  await syncRegisteredModuleCapabilities(moduleCapabilityRegistration);
   await syncFrameworkCapabilities();
 }

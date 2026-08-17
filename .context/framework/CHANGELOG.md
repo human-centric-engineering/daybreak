@@ -120,6 +120,98 @@ process.
   work in the OTEL span tree. Sunrise 0.7.0 widened `phase` to an open string (#410).
   Spans only: the runner persists nothing by contract, so this changes no cost record.
 
+- **Module-declared capabilities are registered as themselves, through the core seam,
+  instead of being wrapped** — `lib/framework/modules/capabilities/namespace.ts` no longer
+  exports `namespaceModuleCapability` (and the `NamespacedModuleCapability` class is gone).
+  It exports two pure derivations instead: `moduleCapabilityIdentity(moduleSlug,
+  capability)` → `{ slug, functionDefinition }`, and `moduleScopeGuard(moduleSlug)` → a
+  `CapabilityGuard`. `register.ts` passes them to
+  `capabilityDispatcher.register(capability, { slug, guard })` (Sunrise #398, landed in
+  0.7.0); `sync.ts` reuses the identity for the `ai_capability` row, so the handler key and
+  the row's slug still come from one derivation.
+
+  **Module authors: one authoring constraint is now stricter.** You still write an ordinary
+  `BaseCapability` with a bare snake_case slug, still registered as
+  `<module_slug>__<tool_slug>` with a matching `functionDefinition.name`. But if your
+  capability sets `processesPii = true`, its `redactProvenance()` must be a **method on that
+  class's own prototype**. Core's check is an own-property lookup on the instance's direct
+  prototype, where the framework's deleted re-assertion compared by identity against the base
+  method and so accepted anything. Two shapes that used to register are now **refused** — the
+  boot still succeeds (registration is fail-soft; see the next entry), but the capability is
+  absent from every agent's toolset and its `ai_capability` row is deactivated:
+
+  ```ts
+  // ❌ inherited from an intermediate base class
+  abstract class ModuleToolBase extends BaseCapability {
+    override redactProvenance() { … }
+  }
+  class GrabEmail extends ModuleToolBase { processesPii = true }
+
+  // ❌ class-property arrow — an own *instance* property, not on the prototype
+  class GrabEmail extends BaseCapability {
+    processesPii = true;
+    override redactProvenance = () => ({ … });
+  }
+
+  // ✅ a method on the capability's own class
+  class GrabEmail extends BaseCapability {
+    processesPii = true;
+    override redactProvenance() { … }
+  }
+  ```
+
+  **Check your module capabilities before upgrading.** Nothing crashes: the boot is healthy,
+  the app serves traffic, and the only signal is a `logger.error` line reading
+  `capability rejected — skipping`. Grep for it after upgrading rather than waiting for
+  someone to notice a tool that stopped answering. Both shapes are pinned by
+  tests, and core's over-strict check is filed in [`upstream-asks.md`](./upstream-asks.md);
+  if Sunrise relaxes it, this constraint relaxes with it.
+
+  **Two visible changes if you assert on refusals.** An out-of-module call is now refused
+  by the dispatcher *before* the rate limiter (so it consumes no token) and comes back as
+  core's `capability_guard_denied` rather than the framework's `out_of_module_scope`; the
+  message names the module the same way. And the framework's own `redactProvenance`
+  re-assertion is gone — core's PII guard now inspects your capability's real prototype
+  instead of a wrapper that defeated it, so the contract is enforced in one place rather
+  than two. A `processesPii` module capability that does not override `redactProvenance()`
+  is still refused — it gets no handler, rather than taking the boot down with it.
+
+- **Module slugs are now validated where the namespaced tool name is derived.** A module
+  slug must be alphanumeric words joined by **single dashes**; an underscore (`read_ing`),
+  a double dash (`read--ing`), or any character outside `[A-Za-z0-9-]` is refused.
+
+  `registerModule()` never validated slugs, so the namespacing rule's "collision-free by
+  construction" was a claim about a leaf's discipline rather than a property of the code.
+  Modules `read-ing` and `read_ing` both declaring a tool `x` derive the *same*
+  `read_ing__x`: the second registration silently replaces the first's handler and one
+  module's tool becomes permanently non-dispatchable, with a single `ai_capability` row
+  advertising it. A slug with a space or a dot produces a name no provider accepts.
+
+  Uppercase is deliberately still allowed — `Reading__save_worksheet` is a legal tool
+  name, so refusing it would break a working leaf for no safety gain. A violating module's
+  capabilities are logged and skipped (see the next entry), not fatal.
+
+- **A rejected module capability no longer takes the whole framework down with it.**
+  `registerRegisteredModuleCapabilities()` is now fail-soft per capability: one that core
+  refuses is logged at `error` and skipped, and its siblings still register.
+
+  Previously the throw escaped into `syncFramework()`, whose caller (`lib/app/bootstrap.ts`)
+  catches and logs — so a single bad capability skipped **every later boot step**: framework
+  capability handlers never registered, and the module, slot and capability syncs never ran.
+  The app served traffic looking healthy with no framework capabilities at all, on the
+  strength of one log line. One author's broken tool is not a reason to unregister everyone
+  else's.
+
+  `syncRegisteredModuleCapabilities()` follows through: it writes rows only for capabilities
+  that actually have a registered handler, so a refused capability's `ai_capability` row is
+  deactivated rather than left advertising — and admin-grantable as — a tool that can never
+  dispatch. If **no** declared capability has a handler, the sync skips entirely rather than
+  mass-deactivating, the same reasoning as the existing zero-modules guard.
+
+  **If you imported `namespaceModuleCapability`** (it was exported from
+  `lib/framework/modules/capabilities`), switch to `moduleCapabilityIdentity` +
+  `moduleScopeGuard`, or better, let `registerRegisteredModuleCapabilities()` do it.
+
 ## [0.1.0] — 2026-08-05
 
 > **First tagged Daybreak release.** The framework has been in use for some time

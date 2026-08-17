@@ -33,7 +33,8 @@ import { logger } from '@/lib/logging';
 import { getRegisteredModules } from '@/lib/framework/modules/registry';
 import type { CapabilityFunctionDefinition } from '@/lib/orchestration/capabilities/types';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
-import { namespaceModuleCapability } from '@/lib/framework/modules/capabilities/namespace';
+import { moduleCapabilityIdentity } from '@/lib/framework/modules/capabilities/namespace';
+import type { ModuleCapabilityRegistration } from '@/lib/framework/modules/capabilities/register';
 
 /** Timeout (ms) for the sync transaction — a ceiling above Prisma's 5s default (#368). */
 const SYNC_TX_TIMEOUT_MS = 20_000;
@@ -83,28 +84,63 @@ interface ModuleCapabilityRow {
 /**
  * Project every registered module's capabilities to their `ai_capability` rows.
  * Namespaces each (validating the tool slug) and derives the row's code-owned
- * fields. Deduped by namespaced slug — unique by construction, so a collision is an
- * authoring error (last wins, logged). Exported for unit testing.
+ * fields from the same `moduleCapabilityIdentity` the handler registration uses.
+ * Deduped by namespaced slug — unique by construction, so a collision is an authoring
+ * error (last wins, logged). Exported for unit testing.
+ *
+ * **Run the handler registration first, and pass it its result.** Since v1.3 Phase 1
+ * t-1.2 the PII contract (`processesPii` ⇒ `redactProvenance()`) is enforced by core
+ * inside `capabilityDispatcher.register()`, i.e. by `registerRegisteredModuleCapabilities()`
+ * — not here. That pass is fail-soft, so it reports which capabilities it registered and
+ * which it refused, and `syncRegisteredModuleCapabilities(registration)` reconciles rows
+ * against that report: refused capabilities get no row and their existing row is
+ * deactivated. Called without a report (a repair script, a re-sync route) the sync falls
+ * back to the dispatcher's handler map and refuses to mass-deactivate on its say-so.
  */
 export function collectRegisteredModuleCapabilities(): ModuleCapabilityRow[] {
   const bySlug = new Map<string, ModuleCapabilityRow>();
 
   for (const mod of getRegisteredModules()) {
     for (const capability of mod.capabilities ?? []) {
-      const wrapped = namespaceModuleCapability(mod.slug, capability);
-      if (bySlug.has(wrapped.slug)) {
+      // The SAME derivation `register.ts` uses for the handler key — the row's slug and
+      // the handler key must be one string or the tool never dispatches. And the SAME
+      // fail-soft treatment: `moduleCapabilityIdentity` throws on a slug that cannot
+      // namespace, and letting that escape here would abandon the sync mid-boot and skip
+      // every step after it — exactly the failure the register half was made fail-soft to
+      // avoid.
+      //
+      // Logged, not swallowed. On the boot path the register half has already reported
+      // this capability — a second line is cheap. On the standalone path (a repair script
+      // or re-sync route calling the sync with no registration report) nothing else has,
+      // and a silent skip would deactivate the capability's existing row through the
+      // `notIn` pass with no explanation for the tool disappearing.
+      let identity: ReturnType<typeof moduleCapabilityIdentity>;
+      try {
+        identity = moduleCapabilityIdentity(mod.slug, capability);
+      } catch (err) {
+        logger.error(
+          'collectRegisteredModuleCapabilities: capability slug cannot be namespaced — no row',
+          {
+            moduleSlug: mod.slug,
+            error: err instanceof Error ? err.message : String(err),
+          }
+        );
+        continue;
+      }
+      const { slug, functionDefinition } = identity;
+      if (bySlug.has(slug)) {
         logger.warn(
           'collectRegisteredModuleCapabilities: duplicate capability slug — last registration wins',
-          { slug: wrapped.slug, moduleSlug: mod.slug }
+          { slug, moduleSlug: mod.slug }
         );
       }
-      bySlug.set(wrapped.slug, {
-        slug: wrapped.slug,
+      bySlug.set(slug, {
+        slug,
         // No human display name on BaseCapability — the namespaced slug is the row's
         // name (admin sees `reading__save_worksheet`); the LLM sees functionDefinition.name.
-        name: wrapped.slug,
-        description: wrapped.functionDefinition.description,
-        functionDefinition: wrapped.functionDefinition,
+        name: slug,
+        description: functionDefinition.description,
+        functionDefinition,
         // A STABLE identifier of the owning module + tool. NOT `constructor.name` —
         // minified server bundles mangle class names (and it feeds the diff below).
         executionHandler: `framework-module:${mod.slug}/${capability.slug}`,
@@ -126,7 +162,9 @@ function moduleCapabilityNeedsUpdate(row: AiCapability, desired: ModuleCapabilit
   );
 }
 
-export async function syncRegisteredModuleCapabilities(): Promise<void> {
+export async function syncRegisteredModuleCapabilities(
+  registration?: ModuleCapabilityRegistration
+): Promise<void> {
   // "Did registration run?" — a question about MODULES: zero registered modules ⇒ a
   // fluke boot ⇒ skip, never mass-deactivate (same guard as the module/slot syncs).
   if (getRegisteredModules().length === 0) {
@@ -134,7 +172,49 @@ export async function syncRegisteredModuleCapabilities(): Promise<void> {
     return;
   }
 
-  const rows = collectRegisteredModuleCapabilities();
+  const declared = collectRegisteredModuleCapabilities();
+
+  // Only capabilities whose handler actually registered get a row: a row for a refused
+  // capability would advertise — and let an admin grant — a tool that can never dispatch.
+  //
+  // `registration` is the register pass's own report, which is why it is threaded in
+  // rather than inferred. `capabilityDispatcher.has()` cannot distinguish "the register
+  // pass never ran" from "every capability was refused", and those need OPPOSITE answers:
+  // skip (a fluke boot must never mass-deactivate) versus deactivate every refused row.
+  // It is also wrong across a re-boot in one process — the dispatcher's handler map is
+  // `globalThis`-backed, so a capability refused on THIS boot can still show `has() ===
+  // true` from the previous one.
+  let rows: ModuleCapabilityRow[];
+  if (registration) {
+    const registeredSlugs = new Set(registration.registered);
+    rows = declared.filter((row) => registeredSlugs.has(row.slug));
+    if (registration.refused.length > 0) {
+      logger.error(
+        'syncRegisteredModuleCapabilities: deactivating rows for capabilities registration refused',
+        {
+          refused: registration.refused.map((r) => `${r.moduleSlug}/${r.capabilitySlug}`),
+        }
+      );
+    }
+  } else {
+    // No report — this half was called on its own (a repair script, a re-sync route).
+    // Fall back to the handler map, and refuse to mass-deactivate on its say-so: with no
+    // report we cannot tell a refusal from a registration that never happened.
+    rows = declared.filter((row) => capabilityDispatcher.has(row.slug));
+    if (declared.length > 0 && rows.length === 0) {
+      logger.error(
+        'syncRegisteredModuleCapabilities: no declared capability has a registered handler and no registration report — skipping rather than mass-deactivating'
+      );
+      return;
+    }
+    if (rows.length < declared.length) {
+      logger.error(
+        'syncRegisteredModuleCapabilities: declared capabilities have no registered handler — deactivating their rows',
+        { slugs: declared.filter((r) => !capabilityDispatcher.has(r.slug)).map((r) => r.slug) }
+      );
+    }
+  }
+
   const slugs = rows.map((r) => r.slug);
 
   const counts = await executeTransaction(
