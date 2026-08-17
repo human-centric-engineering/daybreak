@@ -289,6 +289,18 @@ hasn't yet demanded — each default keeps the layer pure, simple, and deletable
    "open→return handles" variant precisely because it keeps the **scope write entirely framework-side** —
    the lighter variant would eventually need the **core** consumer route to forward `scope` (a forbidden
    core edit). One route, one boundary, zero core change.
+
+   > **Amended 2026-08-15 — the conclusion holds, the reason does not.** Sunrise **#415** landed in
+   > 0.7.0: `consumerChatRequestSchema` now carries `scope`, so "the core route can't forward it" is
+   > no longer true and this decision's stated justification has expired. **v1.3 Phase 1 t-1.3**
+   > rechecked the routes and kept them, for reasons that never involved `scope`: they resolve the
+   > agent **server-side** from the module binding (the consumer route takes a client-supplied
+   > `agentSlug`), they tag `contextType`/`contextId` — which the consumer route deliberately refuses
+   > as an admin-only concept, and which is the exact tuple resume looks up, so a thin wrapper would
+   > break resume — and the module route emits `module.entered`. Also note the security direction:
+   > `scope` here is **server-derived** (`encodeScope({ moduleSlug })`), and delegating would move it
+   > onto a client-supplied field. See [[issue-backlog]] Phase 1 t-1.3 and [[upstream-asks]].
+
 5. **`request_transition` confirm-first → out of scope; achieved with the existing read caps. No
    `dryRun`.** `request_transition` stays the pure write mechanism. An agent that wants to confirm first
    calls **`get_next_steps`** (which already returns the eligible moves + reasons — a natural preview),
@@ -302,6 +314,18 @@ hasn't yet demanded — each default keeps the layer pure, simple, and deletable
   Propose Sunrise let the consumer schema accept a validated opaque `scope` map, after which the
   framework route needn't shadow the core one. Ledger against the same seam as f-module-bindings' scope
   work.
+
+  > **Filed as #415, landed in 0.7.0, closed as _landed — no carry_ (v1.3 Phase 1 t-1.3).** The seam
+  > is real and a leaf can use it; Daybreak simply is not the consumer — the trailing clause above
+  > ("after which the framework route needn't shadow the core one") did **not** survive contact with
+  > the routes. See the amendment on decision 6. The honest remaining ask — a consumer entry point
+  > that accepts a **server-resolved** `(agentId, contextType, contextId)` — replaced it in
+  > [[upstream-asks]].
+
 - **Surface conversation resume by `(contextType, contextId)`.** The framework-side most-recent-active
   lookup (decision 8) exists only because core resume is `conversationId`-only. Propose a core
   find-or-resume-by-context option so surfaces needn't reimplement it.
+
+  > **Filed as #416, landed in 0.7.0, delegated (v1.3 Phase 1 t-1.4).** Both surfaces now call
+  > `findResumableConversation`; the framework-side lookup is gone and decision 8's implementation
+  > note is history.

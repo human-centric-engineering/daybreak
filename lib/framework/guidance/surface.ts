@@ -9,12 +9,15 @@
  * completes f-module-bindings' `isInModuleScope` reader (allow-on-absent until a surface
  * pins the scope) — so a module capability now actually refuses out-of-module calls.
  *
- * Conversation resume is a framework-side lookup (most-recent active surface conversation
- * for the `(user, agent, module)`), because the core conversation model has no
- * `(contextType, contextId)` uniqueness / resume path — decision 8.
+ * Conversation resume delegates to core's `findResumableConversation` (Sunrise #416, landed
+ * in 0.7.0): the surface decides *when* to resume, core owns the correctly-scoped query.
+ * Decision 8 predates that seam — it reimplemented the lookup here because core's only resume
+ * path was an explicit `conversationId`. The `userId` scoping that keeps one user's surface
+ * conversation out of another's is now derived in exactly one place (v1.3 Phase 1 t-1.4).
  */
 
 import { prisma } from '@/lib/db/client';
+import { findResumableConversation } from '@/lib/orchestration/chat/resume-conversation';
 import { encodeScope } from '@/lib/framework/shared/scope';
 import { listModuleBindings } from '@/lib/framework/modules/bindings/queries';
 
@@ -66,22 +69,17 @@ export async function resolveModuleSurface(
   // Resume the most-recent active surface conversation for this (user, agent, module), else
   // leave `conversationId` undefined so `streamChat` opens a new one (tagged with the
   // contextType/contextId the route passes).
-  const existing = await prisma.aiConversation.findFirst({
-    where: {
-      userId,
-      agentId: primary.agent.id,
-      contextType: MODULE_SURFACE_CONTEXT_TYPE,
-      contextId: moduleSlug,
-      isActive: true,
-    },
-    orderBy: { updatedAt: 'desc' },
-    select: { id: true },
+  const existing = await findResumableConversation({
+    userId,
+    agentId: primary.agent.id,
+    contextType: MODULE_SURFACE_CONTEXT_TYPE,
+    contextId: moduleSlug,
   });
 
   return {
     agentSlug: primary.agent.slug,
     agentId: primary.agent.id,
-    conversationId: existing?.id,
+    conversationId: existing ?? undefined,
     scope: encodeScope({ moduleSlug }),
     rateLimitRpm: agent.rateLimitRpm,
   };

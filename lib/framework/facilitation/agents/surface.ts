@@ -15,12 +15,14 @@
  * answers on which surface*, not capability refusal. (Forward caveat: this is safe only while
  * facilitation seats stay bound to scope-agnostic capabilities — a scope-gated capability reads
  * absent scope as allow-on-absent, so binding one to a seat would run it permissively here. Not a
- * concern for the guidance caps this feature targets.) Conversation resume is a framework-side
- * lookup on `(user, agent, contextType='facilitation', contextId=role)`, mirroring the module
- * surface (the core conversation model has no `(contextType, contextId)` resume path).
+ * concern for the guidance caps this feature targets.) Conversation resume delegates to core's
+ * `findResumableConversation` on `(user, agent, contextType='facilitation', contextId=role)`,
+ * mirroring the module surface — the seam landed in Sunrise 0.7.0 (#416), so neither surface
+ * re-derives the `userId` scoping any more (v1.3 Phase 1 t-1.4).
  */
 
 import { prisma } from '@/lib/db/client';
+import { findResumableConversation } from '@/lib/orchestration/chat/resume-conversation';
 import { getFacilitationBindingByRole } from '@/lib/framework/facilitation/agents/binding-queries';
 import { isRoleAllowedAtStage } from '@/lib/framework/facilitation/policies/gating';
 
@@ -80,22 +82,17 @@ export async function resolveFacilitationSurface(
   // Resume the most-recent active surface conversation for this (user, agent, role), else leave
   // `conversationId` undefined so `streamChat` opens a new one (tagged with the contextType/
   // contextId the route passes).
-  const existing = await prisma.aiConversation.findFirst({
-    where: {
-      userId,
-      agentId: binding.agent.id,
-      contextType: FACILITATION_SURFACE_CONTEXT_TYPE,
-      contextId: role,
-      isActive: true,
-    },
-    orderBy: { updatedAt: 'desc' },
-    select: { id: true },
+  const existing = await findResumableConversation({
+    userId,
+    agentId: binding.agent.id,
+    contextType: FACILITATION_SURFACE_CONTEXT_TYPE,
+    contextId: role,
   });
 
   return {
     agentSlug: binding.agent.slug,
     agentId: binding.agent.id,
-    conversationId: existing?.id,
+    conversationId: existing ?? undefined,
     rateLimitRpm: agent.rateLimitRpm,
   };
 }

@@ -13,6 +13,14 @@
  * route; the agent is resolved from the role, not supplied. Unlike the module surface, **no
  * `scope` is threaded** — a facilitation agent's guidance capabilities are scope-agnostic
  * (decision 4), so the surface only decides which agent answers, not capability refusal.
+ *
+ * **Not a `scope`-threading shim** (v1.3 Phase 1 t-1.3 rechecked this against Sunrise #415,
+ * which added `scope` to the core consumer schema). This route threads no `scope` at all, so
+ * #415 never applied to it. It exists because the agent is **server-resolved** from the role
+ * binding (and gated on `visibility === 'public'` plus the stage/region policy) and because it
+ * tags the conversation `contextType: 'facilitation'` / `contextId: <role>` — a tuple the core
+ * consumer route deliberately refuses as an admin-only concept, and the exact tuple resume
+ * looks up.
  */
 
 import { z } from 'zod';
