@@ -191,6 +191,14 @@ GetStateCapability())` / `FillSlotCapability()` for the in-memory handler (the c
    cleaner path (a) — Sunrise surfaces binding `customConfig` into `CapabilityContext`
    alongside the existing `scope` carrier, after which the extra query disappears. t-4's
    tests cover malformed `customConfig` (Zod-reject).
+
+   > **Superseded 2026-08-14 — path (a) landed and the fork now takes it.** Sunrise
+   > **#411** shipped in 0.7.0, so `CapabilityContext.customConfig` exists and the
+   > dispatcher populates it. **v1.3 Phase 1 t-1.1** deleted the in-capability binding
+   > read: `loadExposureConfig(agentId, slug)` is now the pure
+   > `resolveExposureConfig(context, slug)`. The allowlist semantics above are unchanged;
+   > only where the config comes from moved. See [[issue-backlog]] Phase 1.
+
 9. **Silent in conversation (D5).** Captures ride the tool loop silently — no
    user-visible follow-up turn. `estimate-cost.ts` sets `skipFollowup` on its
    `CapabilityResult`; `get_state` / `fill_slot` do the same so a capture doesn't

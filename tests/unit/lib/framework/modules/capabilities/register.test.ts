@@ -2,8 +2,9 @@
  * In-memory module-capability registration (f-module-bindings t-2).
  *
  * Mocks the global dispatcher and asserts `registerRegisteredModuleCapabilities()`
- * registers each registered module's capabilities under their namespaced slug. The
- * module registry is real (`registerModule`).
+ * registers each registered module's capabilities **as themselves** under their
+ * namespaced slug, with a module-scope guard (the core `register(cap, { slug, guard })`
+ * seam — v1.3 Phase 1 t-1.2). The module registry is real (`registerModule`).
  *
  * @see lib/framework/modules/capabilities/register.ts
  */
@@ -21,9 +22,13 @@ const dispatcher = vi.hoisted(() => ({ register: vi.fn() }));
 vi.mock('@/lib/orchestration/capabilities/dispatcher', () => ({
   capabilityDispatcher: dispatcher,
 }));
+vi.mock('@/lib/logging', () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
 
 const { registerRegisteredModuleCapabilities } =
   await import('@/lib/framework/modules/capabilities/register');
+const { logger } = await import('@/lib/logging');
 const { registerModule, __resetModuleRegistryForTests } =
   await import('@/lib/framework/modules/registry');
 
@@ -63,12 +68,38 @@ describe('registerRegisteredModuleCapabilities', () => {
 
     registerRegisteredModuleCapabilities();
 
-    const registeredSlugs = dispatcher.register.mock.calls.map((c) => c[0].slug).sort();
+    const registeredSlugs = dispatcher.register.mock.calls.map((c) => c[1].slug).sort();
     expect(registeredSlugs).toEqual([
       'reading__read_progress',
       'reading__save_worksheet',
       'writing__save_worksheet',
     ]);
+  });
+
+  it("hands the dispatcher the author's own capability instance, not a wrapper", () => {
+    // Load-bearing: the dispatcher's PII guard is an own-property check on the
+    // instance's prototype, which any delegating wrapper would pass unconditionally.
+    const tool = new Tool('save_worksheet');
+    registerModuleWithCaps('reading', [tool]);
+
+    registerRegisteredModuleCapabilities();
+
+    const [capability, options] = dispatcher.register.mock.calls[0];
+    expect(capability).toBe(tool);
+    expect(capability.slug).toBe('save_worksheet'); // the author's slug is not rewritten
+    expect(options.slug).toBe('reading__save_worksheet');
+  });
+
+  it('attaches a guard that refuses a call pinned to another module', async () => {
+    registerModuleWithCaps('reading', [new Tool('save_worksheet')]);
+
+    registerRegisteredModuleCapabilities();
+
+    const guard = dispatcher.register.mock.calls[0][1].guard;
+    const context = { userId: 'u1', agentId: 'a1' };
+    expect(await guard({ ...context, scope: { moduleSlug: 'reading' } })).toEqual({ allow: true });
+    expect(await guard(context)).toEqual({ allow: true }); // nothing pinned
+    expect((await guard({ ...context, scope: { moduleSlug: 'writing' } })).allow).toBe(false);
   });
 
   it('is a no-op when a module declares an empty capabilities list', () => {
@@ -89,8 +120,87 @@ describe('registerRegisteredModuleCapabilities', () => {
     expect(dispatcher.register).not.toHaveBeenCalled();
   });
 
-  it('throws (fail-fast at boot) on a non-snake_case tool slug', () => {
+  it('skips a non-snake_case tool slug, logs it, and keeps registering its siblings', () => {
+    // Fail-soft per capability: the throw used to escape into `syncFramework()`, whose
+    // caller logs and continues — so one bad tool skipped every later boot step and left
+    // the app with no framework capabilities at all.
+    registerModuleWithCaps('reading', [new Tool('save-worksheet'), new Tool('read_progress')]);
+
+    expect(() => registerRegisteredModuleCapabilities()).not.toThrow();
+
+    expect(dispatcher.register.mock.calls.map((c) => c[1].slug)).toEqual([
+      'reading__read_progress',
+    ]);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('rejected'),
+      expect.objectContaining({ moduleSlug: 'reading', capabilitySlug: 'save-worksheet' })
+    );
+  });
+
+  it('logs a non-Error throw as a string rather than crashing the loop', () => {
+    // The dispatcher's own guards throw Errors, but a capability's getter or a leaf's
+    // subclass could throw anything; the handler must not itself throw while reporting.
+    registerModuleWithCaps('reading', [new Tool('save_worksheet')]);
+    // The rule below governs what OUR code throws; the branch under test exists precisely
+    // for callers that ignore it, so simulating one is the point.
+    dispatcher.register.mockImplementationOnce(() => {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error -- deliberate: see above
+      throw 'not an Error';
+    });
+
+    expect(() => registerRegisteredModuleCapabilities()).not.toThrow();
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ error: 'not an Error' })
+    );
+  });
+
+  it('survives a capability whose own slug getter throws', () => {
+    // `slug` is a property on an author-written class. If reading it threw from inside the
+    // catch block (or before the try), the handler itself would throw — escaping the
+    // per-capability guard and darking every later boot step.
+    const exploding = new Tool('ok_tool');
+    Object.defineProperty(exploding, 'slug', {
+      get() {
+        throw new Error('config not loaded');
+      },
+    });
+    registerModuleWithCaps('reading', [exploding, new Tool('read_progress')]);
+
+    expect(() => registerRegisteredModuleCapabilities()).not.toThrow();
+
+    expect(dispatcher.register.mock.calls.map((c) => c[1].slug)).toEqual([
+      'reading__read_progress',
+    ]);
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ capabilitySlug: '<unreadable>', error: 'config not loaded' })
+    );
+  });
+
+  it('reports what it registered and what it refused', () => {
+    // The report is what `syncRegisteredModuleCapabilities()` reconciles rows against —
+    // the handler map cannot tell "refused this boot" from "registered on a previous one".
+    registerModuleWithCaps('reading', [new Tool('save-worksheet'), new Tool('read_progress')]);
+
+    const result = registerRegisteredModuleCapabilities();
+
+    expect(result.registered).toEqual(['reading__read_progress']);
+    expect(result.refused).toEqual([
+      {
+        moduleSlug: 'reading',
+        capabilitySlug: 'save-worksheet',
+        reason: expect.stringContaining('snake_case'),
+      },
+    ]);
+  });
+
+  it('a rejected capability in one module does not stop another module registering', () => {
     registerModuleWithCaps('reading', [new Tool('save-worksheet')]);
-    expect(() => registerRegisteredModuleCapabilities()).toThrow(/snake_case/);
+    registerModuleWithCaps('writing', [new Tool('save_draft')]);
+
+    registerRegisteredModuleCapabilities();
+
+    expect(dispatcher.register.mock.calls.map((c) => c[1].slug)).toEqual(['writing__save_draft']);
   });
 });

@@ -72,6 +72,13 @@ describe('extractTypedValue', () => {
     });
   });
 
+  it("tags the completion as the 'slot-extraction' phase, not evaluation (t-1.5)", async () => {
+    // Omitting `phase` defaults the runner to `'evaluation'`, which mislabels every slot
+    // capture in the OTEL trace and the per-phase cost breakdown.
+    await extractTypedValue('number', 'about seven', 'agent-1');
+    expect(vi.mocked(runStructuredCompletion).mock.calls[0][0].phase).toBe('slot-extraction');
+  });
+
   it('parse closure extracts and type-validates the wrapped value', async () => {
     await extractTypedValue('number', 'about seven', 'agent-1');
     const parse = vi.mocked(runStructuredCompletion).mock.calls[0][0].parse;
