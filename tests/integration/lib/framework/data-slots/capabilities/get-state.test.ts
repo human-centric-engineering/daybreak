@@ -10,21 +10,21 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 vi.mock('@/lib/framework/data-slots/values', () => ({ getSlotHeads: vi.fn() }));
 vi.mock('@/lib/framework/shared/access', () => ({ canRead: vi.fn() }));
 vi.mock('@/lib/framework/data-slots/queries', () => ({ getSlotGroupsScopes: vi.fn() }));
-// Mock only the DB-backed loader; keep the pure `facetAllows` real so the filter is exercised.
-vi.mock('@/lib/framework/data-slots/capabilities/exposure', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/framework/data-slots/capabilities/exposure')>()),
-  loadExposureConfig: vi.fn(),
-}));
 
 import { GetStateCapability } from '@/lib/framework/data-slots/capabilities/get-state';
 import { getSlotHeads } from '@/lib/framework/data-slots/values';
 import { canRead } from '@/lib/framework/shared/access';
 import { getSlotGroupsScopes } from '@/lib/framework/data-slots/queries';
-import { loadExposureConfig } from '@/lib/framework/data-slots/capabilities/exposure';
 import type { CapabilityContext } from '@/lib/orchestration/capabilities/types';
 
 const cap = new GetStateCapability();
-const ctx = (userId: string | null): CapabilityContext => ({ userId, agentId: 'agent-1' });
+// The exposure allowlist is read straight off the context the dispatcher builds (t-1.1), so
+// these tests set `customConfig` rather than mocking a loader — the real Zod parse and the
+// real `facetAllows` filter run. `null` is the dispatcher's "binding carries no config".
+const ctx = (
+  userId: string | null,
+  customConfig: CapabilityContext['customConfig'] = null
+): CapabilityContext => ({ userId, agentId: 'agent-1', customConfig, isEnabled: true });
 const head = (over: Record<string, unknown> = {}) => ({
   slotSlug: 'primary_goal',
   value: 'run a marathon',
@@ -36,8 +36,6 @@ const head = (over: Record<string, unknown> = {}) => ({
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(canRead).mockResolvedValue(true);
-  // Default: permissive exposure (no allowlist) — the t-4 tests override.
-  vi.mocked(loadExposureConfig).mockResolvedValue({ ok: true, config: {} });
 });
 
 describe('execute', () => {
@@ -100,10 +98,6 @@ describe('per-agent read exposure (t-4)', () => {
   });
 
   it('filters heads to the allowed groups when a read allowlist is set', async () => {
-    vi.mocked(loadExposureConfig).mockResolvedValue({
-      ok: true,
-      config: { read: { groups: ['goals'] } },
-    });
     vi.mocked(getSlotHeads).mockResolvedValue([
       head({ slotSlug: 'primary_goal' }),
       head({ slotSlug: 'mood' }),
@@ -112,26 +106,21 @@ describe('per-agent read exposure (t-4)', () => {
       { slug: 'primary_goal', group: 'goals', scope: 'global' },
       { slug: 'mood', group: 'wellbeing', scope: 'global' },
     ]);
-    const result = await cap.execute({}, ctx('user-1'));
+    const result = await cap.execute({}, ctx('user-1', { read: { groups: ['goals'] } }));
     const out = (result as { data: { slots: { slug: string }[] } }).data.slots;
     expect(out.map((s) => s.slug)).toEqual(['primary_goal']);
     expect(slugs()[0][0]).toEqual(['primary_goal', 'mood']);
   });
 
   it('drops a mint head (no definition ⇒ no group) under a restrictive allowlist', async () => {
-    vi.mocked(loadExposureConfig).mockResolvedValue({
-      ok: true,
-      config: { read: { groups: ['goals'] } },
-    });
     vi.mocked(getSlotHeads).mockResolvedValue([head({ slotSlug: 'minted_thing' })] as never);
     vi.mocked(getSlotGroupsScopes).mockResolvedValue([]); // minted slug has no definition row
-    const result = await cap.execute({}, ctx('user-1'));
+    const result = await cap.execute({}, ctx('user-1', { read: { groups: ['goals'] } }));
     expect((result as { data: { slots: unknown[] } }).data.slots).toHaveLength(0);
   });
 
   it('fails closed with invalid_exposure when the allowlist config is malformed', async () => {
-    vi.mocked(loadExposureConfig).mockResolvedValue({ ok: false });
-    const result = await cap.execute({}, ctx('user-1'));
+    const result = await cap.execute({}, ctx('user-1', { read: 'everything' }));
     expect(result).toMatchObject({ success: false, error: { code: 'invalid_exposure' } });
     expect(getSlotHeads).not.toHaveBeenCalled();
   });

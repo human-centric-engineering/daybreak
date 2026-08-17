@@ -3,12 +3,29 @@
  *
  * A grant (`AiAgentCapability`) may carry a `customConfig` allowlist naming which slot
  * **groups** and **scopes** (`SlotDefinition.group` / `.scope`) an agent may read
- * (`get_state`) or write (`fill_slot`). The dispatcher never reads `customConfig`
- * (`getAgentBinding` consumes only `isEnabled` + `customRateLimit`, and
- * `CapabilityContext` carries no `customConfig`), so each capability **re-reads its own
- * binding** at execute time — one indexed lookup served by `@@unique([agentId, capabilityId])`.
- * Zero core edit (mirrors `f-module-bindings`); the cleaner path — Sunrise surfacing the
- * binding config into `CapabilityContext` — is filed in `upstream-asks`.
+ * (`get_state`) or write (`fill_slot`). The dispatcher resolves that binding on every
+ * dispatch and surfaces its config as `CapabilityContext.customConfig` (Sunrise #411,
+ * landed in 0.7.0), so this module **reads the context** rather than re-querying
+ * `AiAgentCapability` — one indexed lookup less per capture and per `get_state`.
+ *
+ * Three consequences of reading the dispatcher's value, all deliberate:
+ * - The dispatcher caches an agent's bindings for 5 minutes. The admin binding routes call
+ *   `clearCache()` on every write, so a single-instance deployment applies an allowlist
+ *   edit at once — but `clearCache()` is process-local, so on a multi-instance deployment
+ *   the instances that did not serve the write keep the previous allowlist until the TTL
+ *   expires. The per-execute read this replaces had no such window. Same window
+ *   `isEnabled`/`customRateLimit` already had; cross-instance invalidation is core-owned
+ *   and filed in `upstream-asks.md`.
+ * - `customConfig` is populated **only by the dispatcher** (`null` when the binding
+ *   carries no config, including the synthesized default-allow binding). `undefined`
+ *   therefore means the capability was executed outside the dispatch path — where the
+ *   guard, the enablement check and the rate limiter were skipped too — so it **fails
+ *   closed** rather than silently degrading an allowlist to permissive.
+ * - The dispatcher collapses a **non-object** `customConfig` (a JSON array or scalar) to
+ *   `null` before we see it, so such a value now reads as "no config" (permissive) where
+ *   the direct column read used to reject it. Every supported writer — the admin binding
+ *   routes and the config import — validates the field as an object, so this is only
+ *   reachable by writing the column by hand.
  *
  * Tri-state, by design:
  * - **no binding / `customConfig` null** → permissive (backward-compatible with every
@@ -26,7 +43,8 @@
  */
 
 import { z } from 'zod';
-import { prisma } from '@/lib/db/client';
+import { logger } from '@/lib/logging';
+import type { CapabilityContext } from '@/lib/orchestration/capabilities/types';
 
 /** One facet's allowlist — restrict by slot `group` and/or `scope`. Strict: an unknown key
  *  (e.g. a `groups`/`scopes` typo) rejects, so a broken restriction fails closed. */
@@ -51,19 +69,26 @@ const PERMISSIVE: ExposureConfig = {};
 export type ExposureResult = { ok: true; config: ExposureConfig } | { ok: false };
 
 /**
- * Load and validate the agent's exposure allowlist for a capability slug. Returns a
- * permissive config when there is no binding or no `customConfig`; a validated config when
- * present; or `{ ok: false }` when `customConfig` is malformed (caller fails closed).
+ * Validate the agent's exposure allowlist from the binding config the dispatcher put on
+ * the execution context. Returns a permissive config when the binding carries none
+ * (`null`); a validated config when present; or `{ ok: false }` when the config is
+ * malformed, or when the context carries no resolved binding at all (`undefined` — an
+ * execution that bypassed the dispatcher). Callers fail closed on `{ ok: false }`.
+ *
+ * `slug` is used for the diagnostic log only — the config is already the one the
+ * dispatcher resolved for this capability's own binding.
  */
-export async function loadExposureConfig(agentId: string, slug: string): Promise<ExposureResult> {
-  const binding = await prisma.aiAgentCapability.findFirst({
-    where: { agentId, capability: { slug } },
-    select: { customConfig: true },
-  });
-  if (!binding || binding.customConfig === null || binding.customConfig === undefined) {
-    return { ok: true, config: PERMISSIVE };
+export function resolveExposureConfig(context: CapabilityContext, slug: string): ExposureResult {
+  const customConfig = context.customConfig;
+  if (customConfig === undefined) {
+    logger.warn('Slot exposure: no resolved binding on the context; failing closed', {
+      slug,
+      agentId: context.agentId,
+    });
+    return { ok: false };
   }
-  const parsed = exposureConfigSchema.safeParse(binding.customConfig);
+  if (customConfig === null) return { ok: true, config: PERMISSIVE };
+  const parsed = exposureConfigSchema.safeParse(customConfig);
   if (!parsed.success) return { ok: false };
   return { ok: true, config: parsed.data };
 }

@@ -26,7 +26,10 @@ import type {
 import { redactedString } from '@/lib/security/redact';
 import { getSlotHeads } from '@/lib/framework/data-slots/values';
 import { getSlotGroupsScopes } from '@/lib/framework/data-slots/queries';
-import { loadExposureConfig, facetAllows } from '@/lib/framework/data-slots/capabilities/exposure';
+import {
+  resolveExposureConfig,
+  facetAllows,
+} from '@/lib/framework/data-slots/capabilities/exposure';
 import { canRead, type JourneyViewer } from '@/lib/framework/shared/access';
 
 const getStateSchema = z.object({
@@ -111,10 +114,10 @@ export class GetStateCapability extends BaseCapability<GetStateArgs, GetStateDat
       return this.success({ slots: [] });
     }
 
-    // Per-agent read exposure (t-4): a grant's `customConfig` may allowlist which slot
-    // groups/scopes this agent may read. A malformed config fails closed; an absent one is
-    // permissive.
-    const exposure = await loadExposureConfig(context.agentId, this.slug);
+    // Per-agent read exposure (t-4): the binding config the dispatcher resolved for this
+    // capability may allowlist which slot groups/scopes this agent may read. A malformed
+    // config fails closed; an absent one is permissive.
+    const exposure = resolveExposureConfig(context, this.slug);
     if (!exposure.ok) {
       return this.error("This agent's slot-access configuration is invalid.", 'invalid_exposure');
     }
