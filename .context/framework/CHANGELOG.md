@@ -80,6 +80,46 @@ process.
 
 ### Changed
 
+- **The slot capabilities read their per-agent exposure allowlist from the execution
+  context instead of re-querying the grant** — `loadExposureConfig(agentId, slug)` in
+  `lib/framework/data-slots/capabilities/exposure.ts` is replaced by the pure
+  `resolveExposureConfig(context, slug)`. `get_state` and `fill_slot` behave the same
+  for every existing grant; one indexed `AiAgentCapability` lookup disappears from every
+  slot capture and every state read.
+
+  Sunrise 0.7.0 surfaced the resolved binding's `customConfig` onto `CapabilityContext`
+  (#411), which is the value this shim was fetching for itself a few milliseconds after
+  the dispatcher had already fetched it.
+
+  **Two consequences worth knowing if you edit allowlists at runtime.** The config now
+  shares the dispatcher's per-agent binding cache (5-minute TTL). The admin binding routes
+  call `capabilityDispatcher.clearCache()` on every write, so a **single-instance**
+  deployment applies an allowlist edit immediately. On a **multi-instance** deployment,
+  `clearCache()` only clears the process that served the request — instances that did not
+  serve it keep the previous allowlist for up to 5 minutes. The per-execute database read
+  this replaces had no such window, so if you narrow an allowlist to cut off access, budget
+  for that delay (or disable the binding, which has the same window, or restart the
+  instances). This is the window `isEnabled` and `customRateLimit` already had; the
+  fine-grained allowlist now shares it. Cross-instance invalidation is core-owned and filed
+  in [`upstream-asks.md`](./upstream-asks.md).
+
+  And a capability executed **outside** the dispatcher
+  (no resolved binding on the context) now fails closed with `invalid_exposure` rather
+  than treating the missing allowlist as permissive; nothing in Daybreak or Sunrise
+  executes a capability that way, but a leaf calling `execute()` directly would see it.
+
+  One narrowing in the other direction: a `customConfig` that is not a JSON **object**
+  (an array or a scalar) is collapsed to `null` by the dispatcher before the capability
+  sees it, so it now reads as "no allowlist" where the direct column read rejected it.
+  The admin binding routes and the config import both validate the field as an object, so
+  this only bites a leaf that writes the column by hand — write `{}`, not `[]`.
+
+- **Slot prose→typed extraction is tagged `slot-extraction` in traces**
+  (`lib/framework/data-slots/capabilities/extract.ts`) — it inherited the structured
+  runner's default `evaluation` phase, so every extraction was filed under evaluation
+  work in the OTEL span tree. Sunrise 0.7.0 widened `phase` to an open string (#410).
+  Spans only: the runner persists nothing by contract, so this changes no cost record.
+
 - **Module-declared capabilities are registered as themselves, through the core seam,
   instead of being wrapped** — `lib/framework/modules/capabilities/namespace.ts` no longer
   exports `namespaceModuleCapability` (and the `NamespacedModuleCapability` class is gone).

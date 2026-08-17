@@ -11,11 +11,6 @@ import { Prisma } from '@prisma/client';
 vi.mock('@/lib/framework/data-slots/values', () => ({ appendSlotValue: vi.fn() }));
 vi.mock('@/lib/framework/data-slots/queries', () => ({ getSlotDefinition: vi.fn() }));
 vi.mock('@/lib/framework/data-slots/capabilities/extract', () => ({ extractTypedValue: vi.fn() }));
-// Mock only the DB-backed loader; keep the pure `facetAllows` real so enforcement is exercised.
-vi.mock('@/lib/framework/data-slots/capabilities/exposure', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@/lib/framework/data-slots/capabilities/exposure')>()),
-  loadExposureConfig: vi.fn(),
-}));
 vi.mock('@/lib/logging', () => ({
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
@@ -24,13 +19,18 @@ import { FillSlotCapability } from '@/lib/framework/data-slots/capabilities/fill
 import { appendSlotValue } from '@/lib/framework/data-slots/values';
 import { getSlotDefinition } from '@/lib/framework/data-slots/queries';
 import { extractTypedValue } from '@/lib/framework/data-slots/capabilities/extract';
-import { loadExposureConfig } from '@/lib/framework/data-slots/capabilities/exposure';
 import type { CapabilityContext } from '@/lib/orchestration/capabilities/types';
 
 const cap = new FillSlotCapability();
+// The exposure allowlist is read straight off the context the dispatcher builds (t-1.1), so
+// these tests set `customConfig` rather than mocking a loader — the real Zod parse and the
+// real `facetAllows` enforcement run. `null` is the dispatcher's "binding carries no config";
+// omitting it entirely models an execution that never went through the dispatcher.
 const ctx = (over: Partial<CapabilityContext> = {}): CapabilityContext => ({
   userId: 'user-1',
   agentId: 'agent-1',
+  customConfig: null,
+  isEnabled: true,
   ...over,
 });
 const args = (over: Record<string, unknown> = {}) => ({
@@ -56,8 +56,6 @@ beforeEach(() => {
   vi.mocked(appendSlotValue).mockResolvedValue(written());
   // Extraction defaults to "found nothing" — the tests that exercise it override.
   vi.mocked(extractTypedValue).mockResolvedValue(null);
-  // Default: permissive exposure (no allowlist) — the t-4 tests override.
-  vi.mocked(loadExposureConfig).mockResolvedValue({ ok: true, config: {} });
 });
 
 describe('execute', () => {
@@ -185,11 +183,10 @@ describe('typed value + sensitivity masking (t-3)', () => {
 describe('per-agent write exposure (t-4)', () => {
   it('appends when the target slot is inside the agent’s write allowlist', async () => {
     vi.mocked(getSlotDefinition).mockResolvedValue(definition({ group: 'goals', scope: 'global' }));
-    vi.mocked(loadExposureConfig).mockResolvedValue({
-      ok: true,
-      config: { write: { groups: ['goals'], scopes: ['global'] } },
-    });
-    const result = await cap.execute(args(), ctx());
+    const result = await cap.execute(
+      args(),
+      ctx({ customConfig: { write: { groups: ['goals'], scopes: ['global'] } } })
+    );
     expect(result.success).toBe(true);
     expect(appendSlotValue).toHaveBeenCalled();
   });
@@ -198,29 +195,34 @@ describe('per-agent write exposure (t-4)', () => {
     vi.mocked(getSlotDefinition).mockResolvedValue(
       definition({ group: 'wellbeing', scope: 'global' })
     );
-    vi.mocked(loadExposureConfig).mockResolvedValue({
-      ok: true,
-      config: { write: { groups: ['goals'] } },
-    });
-    const result = await cap.execute(args(), ctx());
+    const result = await cap.execute(
+      args(),
+      ctx({ customConfig: { write: { groups: ['goals'] } } })
+    );
     expect(result).toMatchObject({ success: false, error: { code: 'slot_not_permitted' } });
     expect(appendSlotValue).not.toHaveBeenCalled();
   });
 
   it('refuses an open-mint (no group/scope) under an active write restriction', async () => {
     vi.mocked(getSlotDefinition).mockResolvedValue(null); // undefined slug ⇒ would mint
-    vi.mocked(loadExposureConfig).mockResolvedValue({
-      ok: true,
-      config: { write: { groups: ['goals'] } },
-    });
-    const result = await cap.execute(args({ slotSlug: 'invented' }), ctx());
+    const result = await cap.execute(
+      args({ slotSlug: 'invented' }),
+      ctx({ customConfig: { write: { groups: ['goals'] } } })
+    );
     expect(result).toMatchObject({ success: false, error: { code: 'slot_not_permitted' } });
     expect(appendSlotValue).not.toHaveBeenCalled();
   });
 
   it('fails closed with invalid_exposure when the config is malformed', async () => {
-    vi.mocked(loadExposureConfig).mockResolvedValue({ ok: false });
-    const result = await cap.execute(args(), ctx());
+    const result = await cap.execute(args(), ctx({ customConfig: { write: 'anything' } }));
+    expect(result).toMatchObject({ success: false, error: { code: 'invalid_exposure' } });
+    expect(appendSlotValue).not.toHaveBeenCalled();
+  });
+
+  it('fails closed and never writes when the context carries no resolved binding', async () => {
+    // Off the dispatch path there is no binding to read, so an allowlist would silently
+    // vanish. `customConfig: undefined` must refuse the write, not default to permissive.
+    const result = await cap.execute(args(), ctx({ customConfig: undefined }));
     expect(result).toMatchObject({ success: false, error: { code: 'invalid_exposure' } });
     expect(appendSlotValue).not.toHaveBeenCalled();
   });
