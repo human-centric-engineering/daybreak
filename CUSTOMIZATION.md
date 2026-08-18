@@ -1041,7 +1041,7 @@ git tag -l 'v*'                      # the Sunrise releases you can merge
 Then adopt a release with an ordinary merge:
 
 ```bash
-git merge v0.8.1
+git merge v0.9.0
 ```
 
 > **Merge the sync PR with a merge commit — never squash it.** That merge commit
@@ -1052,27 +1052,75 @@ git merge v0.8.1
 > bill arrives at the _next_ sync, which replays the whole preceding range and
 > conflicts on changes that are already present — by which time the cause is
 > months of history away. Daybreak paid exactly this on its v0.8.1 sync (PR #196).
->
-> `npm run app:ci-checks` now includes `framework:sync-ancestry`, which fails the
-> build if the version this tree claims is not in its history. It fetches the
-> Sunrise tags and deepens a shallow clone itself, so it works on a bare CI
-> checkout as well as on your machine — the setup above is for your merges and
-> issue checks, not for the guard. If it fires, repair
-> with a tree-less merge — but confirm the content is genuinely present first,
-> because `-s ours` will silently swallow anything that is missing:
->
-> ```bash
-> git diff --name-only v0.8.0 v0.8.1        # what the release actually touched
-> git diff v0.8.1 HEAD -- <those files>     # confirm each landed
-> git merge -s ours v0.8.1                  # record ancestry, tree untouched
-> ```
 
-With the remote in place, two checks become runnable — use both on every sync:
+Use **"Create a merge commit"** for the sync PR. Squash remains the sensible
+default for your own feature work.
+
+#### The guard that watches for it
+
+**[`Fork Sync Integrity`](./.github/workflows/fork-sync-integrity.yml)** fires on
+**push to `main`**, right after the merge, and prints the repair while the
+context is still fresh. It is a no-op in Sunrise's own repository — Sunrise tags
+every release on `main`, so the tag is always an ancestor there. It can only fire
+downstream, which is where the hazard lives, and it is self-enforcing: a fork
+receives the workflow _by_ doing a sync merge, so squashing that sync makes it
+fire on the first run after.
+
+> Daybreak carried its own `framework:sync-ancestry` npm guard for this between
+> v0.8.1 and v0.9.0, while Sunrise #539 was still open. The workflow above landed
+> in v0.9.0 and the shim was deleted on that sync — one mechanism now runs at
+> every tier, Sunrise through Daybreak to a leaf app. See
+> [`.context/framework/upstream-asks.md`](./.context/framework/upstream-asks.md).
+
+If it fires, repair with a tree-less merge — but confirm the content is
+genuinely present first, because `-s ours` will silently swallow anything that is
+missing:
+
+```bash
+git diff --name-only v0.8.1 v0.9.0        # what the release actually touched
+git diff v0.9.0 HEAD -- <those files>     # confirm each landed
+git merge -s ours v0.9.0 -m "chore: record Sunrise 0.9.0 as merged (ancestry repair)"
+```
+
+**Leave `SUNRISE_UPSTREAM_URL` unset unless you have to set it.** The tag the
+workflow looks for is `v<SUNRISE_VERSION>` — Sunrise's namespace — but it is
+resolved against whatever that URL points at. **This is the trap a fork of
+Daybreak is most likely to hit:** point it at a framework-tier fork that versions
+itself independently and you may fetch _its_ `v0.9.0`, an unrelated release of a
+different project. The guard usually detects that and skips — it compares the
+fetched tag's own `lib/sunrise-version.ts` against your claim — so it normally
+fails safe, but it stops checking anything, which is not what you want. And the
+comparison is on the version _string_, so it does not help in the one case where
+the numbers coincide: an intermediate fork cutting its own `v0.9.0` while sitting
+on Sunrise 0.9.0. A tag name is not a globally unique identifier and no check
+makes it one.
+
+Sunrise's public URL is reachable from a leaf fork anyway, so only override this
+when Sunrise's tags genuinely are not. If you must — a private upstream, or a
+mirror — set it as a repository **variable** named `SUNRISE_UPSTREAM_URL`. If
+that upstream is **private** and the URL has to carry a token, put it in a
+**secret** of the same name instead — the workflow prefers the secret. Secrets
+are masked in logs and are write-only; repository variables are neither, and are
+readable back through the API by anyone with write access.
+
+Without either, the check skips rather than failing — it cannot tell "ancestry
+lost" from "cannot look" — and says so with a warning annotation on the run,
+quoting git's own error, so a permanently-skipping guard is visible and
+diagnosable rather than a silent green tick.
+
+**If your default branch is not `main`,** edit the `branches:` filter in
+`.github/workflows/fork-sync-integrity.yml`. The workflow triggers on pushes to
+`main` only, so on a fork that uses something else it never runs at all — no
+check, no annotation, not even a skip.
+
+#### Two checks to run on every sync
+
+With the remote in place, both of these become runnable — use both:
 
 ```bash
 # Which release am I actually on? (lib/sunrise-version.ts is the claim;
 # this is the evidence)
-git merge-base --is-ancestor v0.8.1 HEAD && echo "v0.8.1 is in my history"
+git merge-base --is-ancestor v0.9.0 HEAD && echo "v0.9.0 is in my history"
 
 # Has an upstream ask I'm shimming landed yet?
 gh issue view <n> -R human-centric-engineering/sunrise --json state,title
