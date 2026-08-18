@@ -6,6 +6,13 @@ check each **open** row: if its upstream issue has landed, **delegate to the
 upstream resolver and delete the fork shim**, then close the row. This is the
 "delegate when it lands" trigger that would otherwise be lost in feature-plan prose.
 
+**Two different things live here.** [The ledger](#the-ledger) tracks seams where
+Daybreak carries code it intends to delete — every row has a shim and a delegate
+action. [Carried upstream defects](#carried-upstream-defects--no-fork-shim) tracks
+the opposite case: a Sunrise-owned defect with **no seam a fork can reach**, so
+there is nothing to shim and nothing to delete — only something to know about and
+re-check. Both are checked on a sync; only the first has work attached.
+
 ## Running the check
 
 Twice now the ledger has gone stale by asserting from memory rather than looking
@@ -124,7 +131,30 @@ framework register into a core seam that has no fork shim?" gets the answer here
 > in v1.3 Phase 0 (t-0.3) and was recorded only in `plan.md` prose, which is
 > exactly the gap this ledger exists to close.
 
+## Carried upstream defects — no fork shim
+
+Sunrise-owned defects Daybreak **runs as-is** because no seam exists to work
+around them. There is no shim to delete, so these are not ledger rows: the
+delegate-when-it-lands action is simply "confirm the fix is in the tag, then close
+the row".
+
+They are recorded because the alternative is worse than it looks. A defect with no
+fork-side code leaves no trace in this repo at all — no shim, no comment, no
+failing test — so the only thing standing between it and being forgotten is
+whoever happened to read the upstream issue. **Where a defect is gated behind a
+config flag, this table is also the warning attached to setting that flag**, which
+is the case the row below exists for.
+
+| Upstream defect                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | Filed                                                                                                                  | Daybreak's exposure                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              | Re-check trigger                                                                                                                                                                                                                                                                                 |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Sunrise [#628](https://github.com/human-centric-engineering/sunrise/issues/628) — `executeHttpRequest` (`lib/orchestration/http/fetch.ts:89`, `:177`) validates its host allowlist once against the initial URL, then `fetch()`es with no `redirect` option, so undici follows `Location` unvalidated. The model chooses the initial URL and the response body is returned to it, making it a read primitive. Sunrise #534 hardened the four outbound-fetch sites guarding with `checkSafeProviderUrl`; this fifth one uses the `ORCHESTRATION_ALLOWED_HOSTS` allowlist instead and was outside that sweep. | 2026-08-18, on the **v0.9.0** sync. Pre-existing — `fetch.ts` is blob `1be1e9e6` at v0.8.1, v0.9.0 and current `main`. | **None today, and that is a config fact rather than a code one.** `ORCHESTRATION_ALLOWED_HOSTS` is unset in every env file and an empty set denies every call, so the path is inert. **Setting that variable to enable `call_external_api` or the workflow `external_call` step activates the gap** — read #628 first, and note `allowedUrlPrefixes` is applied only to the model-supplied URL, so it does not survive a redirect either. Credential exposure on a hop is narrow but real: `Authorization` is stripped cross-origin by the fetch spec, but `api-key` with a custom `apiKeyHeaderName` is not, and `query-param` auth puts the secret in the URL. | Each Sunrise pull: `gh issue view 628 -R human-centric-engineering/sunrise --json state`. **Closed is not enough** — confirm the fix is in the tag being merged (`git show "v<tag>:lib/orchestration/http/fetch.ts" \| grep redirect`), the same trap the "Running the check" section describes. |
+
 ## Adding a row
+
+**Which section?** If Daybreak carries code it plans to delete, it is a ledger row
+(below). If Daybreak carries nothing and is only waiting on an upstream fix, it is
+a [carried upstream defect](#carried-upstream-defects--no-fork-shim) — file the
+Sunrise issue, add the row with its exposure and re-check trigger, and stop there.
 
 When a feature builds a seam whose final home is an upstream Sunrise seam:
 
