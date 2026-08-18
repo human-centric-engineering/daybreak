@@ -1056,23 +1056,23 @@ git merge v0.9.0
 Use **"Create a merge commit"** for the sync PR. Squash remains the sensible
 default for your own feature work.
 
-#### Two guards watch for it
+#### The guard that watches for it
 
-Since v0.9.0 there are two, with different triggers — keep both:
+**[`Fork Sync Integrity`](./.github/workflows/fork-sync-integrity.yml)** fires on
+**push to `main`**, right after the merge, and prints the repair while the
+context is still fresh. It is a no-op in Sunrise's own repository — Sunrise tags
+every release on `main`, so the tag is always an ancestor there. It can only fire
+downstream, which is where the hazard lives, and it is self-enforcing: a fork
+receives the workflow _by_ doing a sync merge, so squashing that sync makes it
+fire on the first run after.
 
-1. **`npm run app:ci-checks`** includes `framework:sync-ancestry`, which fails
-   the build if the version this tree claims is not in its history. It runs on
-   every CI job and on your machine, so a lost ancestry is visible on the **PR**
-   rather than only after merge. It fetches the Sunrise tags and deepens a
-   shallow clone itself, so it works on a bare CI checkout as well as locally —
-   the remote setup above is for your merges and issue checks, not for the guard.
-2. **[`Fork Sync Integrity`](./.github/workflows/fork-sync-integrity.yml)**
-   (Sunrise's own, landed in v0.9.0) fires on **push to `main`**, right after the
-   merge, and prints the repair while the context is fresh. It is a no-op in
-   Sunrise's own repo — it can only fire downstream, which is where the hazard
-   lives.
+> Daybreak carried its own `framework:sync-ancestry` npm guard for this between
+> v0.8.1 and v0.9.0, while Sunrise #539 was still open. The workflow above landed
+> in v0.9.0 and the shim was deleted on that sync — one mechanism now runs at
+> every tier, Sunrise through Daybreak to a leaf app. See
+> [`.context/framework/upstream-asks.md`](./.context/framework/upstream-asks.md).
 
-If either fires, repair with a tree-less merge — but confirm the content is
+If it fires, repair with a tree-less merge — but confirm the content is
 genuinely present first, because `-s ours` will silently swallow anything that is
 missing:
 

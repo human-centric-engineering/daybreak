@@ -25,6 +25,25 @@ process.
 
 ## [Unreleased]
 
+### Removed
+
+- **`npm run framework:sync-ancestry`** and its `app:ci-checks` entry, together
+  with `scripts/release/sync-ancestry.ts`, `sync-ancestry-check.ts` and their unit
+  tests. Sunrise 0.9.0 landed the seam this shim stood in for (Sunrise #539) as the
+  [`Fork Sync Integrity`](../../.github/workflows/fork-sync-integrity.yml)
+  workflow, so the fork stops carrying its own.
+
+  **Leaf-visible, no action required — but read this if your leaf pinned it.** A
+  leaf invoking `framework:sync-ancestry` directly must switch to the workflow,
+  which ships in the same merge. The trigger changes: the npm guard ran on every
+  CI job, the workflow runs on **push to `main`**. That is the right trigger for a
+  leaf as well as for Daybreak — and, unlike the shim, the workflow resolves its
+  upstream through `SUNRISE_UPSTREAM_URL` instead of hardcoding Sunrise's clone
+  URL, which is what a fork of Daybreak actually needs. **Leave that variable
+  unset unless Sunrise's tags are genuinely unreachable** — see
+  [`CUSTOMIZATION.md` §9](../../CUSTOMIZATION.md) for the trap it opens.
+  ([`upstream-asks.md`](./upstream-asks.md) — Sunrise #539.)
+
 ### Fixed
 
 - **Module registrations now survive the request realm** — `registerModule()` /
