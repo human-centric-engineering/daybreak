@@ -43,6 +43,10 @@ beforeEach(() => {
     value: 7,
     tokenUsage: { input: 10, output: 2 },
     costUsd: 0.001,
+    // Required since Sunrise 0.9.0 (#593/#602): a completion now reports how it
+    // ended, so a truncated extraction is distinguishable from a complete one.
+    // 'stop' is the shape of the happy path these cases exercise.
+    finishReason: 'stop',
   });
 });
 
