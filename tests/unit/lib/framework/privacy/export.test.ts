@@ -136,6 +136,54 @@ describe('collectFrameworkSubjectData', () => {
     );
   });
 
+  it('returns an empty eval section — and asks the eval table nothing — for a subject with no conversations', async () => {
+    // The early return is not an optimisation. `conversationId: { in: [] }` is a
+    // query Prisma will happily send, and the section would come back empty
+    // either way — but the guard is what makes "no conversations" reach the
+    // subject as `conversationEvals: []` without a round trip, and it is the one
+    // branch of this join-reached source that no other case exercises.
+    findMany.aiConversation.mockResolvedValue([]);
+    // Call history is not reset between cases in this file — `beforeEach` sets
+    // return values, not `clearAllMocks` — so assert against a clean slate
+    // rather than against an accumulated count.
+    findMany.frameworkConversationEval.mockClear();
+
+    const result = await collectFrameworkSubjectData(SUBJECT);
+
+    expect(result.conversationEvals).toEqual([]);
+    expect(Object.hasOwn(result, 'conversationEvals')).toBe(true);
+    expect(findMany.frameworkConversationEval).not.toHaveBeenCalled();
+  });
+
+  it('scopes conversation evals to the subject’s own conversations', async () => {
+    // The regression this guards is the one that matters for a join-reached
+    // source: a query that forgot the id filter would hand this subject every
+    // eval row in the table — assessments of strangers' conversations — and the
+    // section would look perfectly plausible.
+    await collectFrameworkSubjectData(SUBJECT);
+
+    expect(findMany.aiConversation).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: 'user-1' } })
+    );
+    expect(findMany.frameworkConversationEval).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { conversationId: { in: ['c1', 'c2'] } } })
+    );
+  });
+
+  it('never returns what a judge call cost the operator', async () => {
+    // `costUsd` is the organisation's data, not the subject's: it says what the
+    // operator spent, and nothing about the person. The manifest uses `select`,
+    // so the guarantee is that the selected shape has no such key.
+    await collectFrameworkSubjectData(SUBJECT);
+
+    const calls = findMany.frameworkConversationEval.mock.calls;
+    const call = calls[calls.length - 1]?.[0] as {
+      select: Record<string, boolean>;
+    };
+    expect(call.select).not.toHaveProperty('costUsd');
+    expect(call.select.judgeReasoning).toBe(true);
+  });
+
   it('nests node states inside the journey that owns them', async () => {
     // UserNodeState holds no user id, so no coverage scan can see it; the only
     // way it reaches the subject is this include.
