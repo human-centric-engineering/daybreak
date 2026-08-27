@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * RegionNode (f-map-editor t-2b) — the custom group container. `@xyflow/react`
  * primitives are mocked (no flow context in happy-dom); this proves the header

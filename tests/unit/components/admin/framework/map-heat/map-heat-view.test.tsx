@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * MapHeatView (f-engagement-analytics t-1b) — the client shell. `JourneyCanvas` is
  * mocked to isolate the view's fold + metric toggle from canvas internals. Proves: it

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * VersionHistory (f-map-editor t-4) — the version-history dialog. Proves it lists the
  * versions the API returns (marking the live one), rolls back a prior version through

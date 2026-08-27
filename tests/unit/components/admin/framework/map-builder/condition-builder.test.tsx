@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ConditionBuilder (f-map-editor t-3) — the descriptor-driven gating-condition builder.
  * Proves it seeds from an existing condition, emits a *valid* `MapCondition` for each of

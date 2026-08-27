@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Integration test — ProposalReview (f-admin-surfaces t-3).
  *

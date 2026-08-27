@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * AtlasNode (f-atlas t-2a) — the read-only composition node. Presentational: colours by entity kind,
  * shows a deep-link affordance only when the node has an `href`. React Flow's `Handle`/`Position` are

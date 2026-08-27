@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * JourneyExplorer (f-ops-views t-5b) — the detail view: a read-only map canvas
  * coloured by journey status, in Live or Replay mode.

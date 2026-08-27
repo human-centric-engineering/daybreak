@@ -42,7 +42,9 @@
 >   only `framework_*` tables (the boundary CI keys on this prefix)
 > - **`.context/framework/`** — Daybreak's own documentation tree
 > - Daybreak identity: `package.json`, `README.md`, `CUSTOMIZATION.md`, `.env*`, and brand
->   env (`NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_LEGAL_NAME`) — not by editing `lib/brand.ts`
+>   values in `lib/app/brand.ts` — not by editing `lib/brand.ts`. (The old
+>   `NEXT_PUBLIC_APP_NAME` / `NEXT_PUBLIC_LEGAL_NAME` env vars were removed in Sunrise 0.11.0;
+>   they are inlined at build time and never reached a container build.)
 > - New framework files anywhere (admin pages/routes under a `framework` segment, `components/`)
 >
 > **Reserved for leaf apps (Daybreak keeps these EMPTY — do NOT fill):**
@@ -50,14 +52,18 @@
 > - The `lib/app/*` **leaf** scaffolds (`env.ts`, `capabilities.ts`, `context-contributors.ts`,
 >   `leaf-bootstrap.ts`, `leaf-admin-nav.ts`, …) — Sunrise ships them empty; Daybreak keeps them
 >   empty for the app. Filling one collides with a leaf's registrations on a Daybreak upgrade.
->   **Exception — the three `lib/app/*` _bridges_ Daybreak DOES fill:** `bootstrap.ts` (server boot →
->   `initFramework()`), `admin-nav.ts` (client sidebar → the framework nav section), and
+>   **Exception — the four `lib/app/*` _bridges_ Daybreak DOES fill:** `bootstrap.ts` (server boot →
+>   `initFramework()`), `admin-nav.ts` (client sidebar → the framework nav section),
 >   `data-export.ts` (GDPR Art. 15 subject access → the framework's own manifest at
->   `lib/framework/privacy/export-sources.ts`). A framework registration that must run in a realm
->   `initFramework()` can't reach — server-boot, the client sidebar, or a static function core
->   imports directly — has nowhere else to go; each bridge delegates to a reserved leaf hook
->   (`leaf-bootstrap.ts` / `leaf-admin-nav.ts` / `leaf-data-export.ts`) so the leaf's own
->   registrations never collide.
+>   `lib/framework/privacy/export-sources.ts`, declared through core's
+>   `registerAppSubjectSources({ tier: 'framework' })`), and `brand.ts` (product name + legal
+>   entity → `lib/brand.ts`). A framework registration that must run in a realm
+>   `initFramework()` can't reach — server-boot, the client sidebar, a lazy seam core owns the
+>   init of, or a static function core imports directly — has nowhere else to go; each bridge
+>   delegates to a reserved leaf hook (`leaf-bootstrap.ts` / `leaf-admin-nav.ts` /
+>   `leaf-data-export.ts` / `leaf-brand.ts`) so the leaf's own registrations never collide.
+>   `brand.ts` is the one bridge where the leaf hook **overrides** rather than appends — brand
+>   identity is single-valued, so a leaf replaces Daybreak's name, it does not compose with it.
 > - `prisma/schema/app.prisma` + `app_…` migrations, `app/brand-theme.css`, and **`.context/app/`**
 >
 > **Sunrise-owned (do NOT edit; extend through a seam instead):**
@@ -160,7 +166,9 @@ npm run db:reset               # Drop, re-migrate, re-seed from scratch
 npm run db:studio              # Open Prisma Studio
 
 # Testing
-npm run test                   # Run tests
+npm run test:changed           # Tests this branch affects + whole-tree guards (fast; what /pre-pr runs)
+npm run test:changed:coverage  # ...and gate coverage per changed file (≥80% each)
+npm run test                   # Full suite — for a merge from main, a release cut, or the whole picture
 npm run test:watch             # Watch mode
 npm run smoke:chat             # Smoke: streaming chat handler vs real dev DB
 
@@ -229,6 +237,7 @@ import { FormError } from './form-error'; // ❌ no exception for siblings
 | Logging               | `logger.info()`, `logger.error()`                                    | `lib/logging/index.ts`                  |
 | Local storage         | `useLocalStorage()`                                                  | `lib/hooks/use-local-storage.ts`        |
 | Wizard state          | `useWizard()`                                                        | `lib/hooks/use-wizard.ts`               |
+| Unmount-safe timer    | `useTimeout()`                                                       | `lib/hooks/use-timeout.ts`              |
 | ETag / 304            | `computeETag()`, `checkConditional()`                                | `lib/api/etag.ts`                       |
 
 ## Skills
@@ -355,104 +364,107 @@ All commands default to branch diff mode but accept file/folder paths. The test-
 
 > **Two namespace tiers are reserved for downstream forks — Sunrise core must
 > never create files or tables under either.** `/app` is the **leaf-fork** tier
-> (`.context/app/`, `lib/app/**` fork-owned scaffold, and
+> (`.context/app/`, `lib/app/**` fork-owned scaffold, `components/app/**`, and
 > `prisma/schema/app.prisma` — which ships empty; the platform's own app-domain
 > models live in `prisma/schema/platform.prisma`). `/framework` is the
 > **framework-layer** tier for forks that sit _between_ Sunrise and their own
-> leaf forks (e.g. Daybreak): `lib/framework/`, `.context/framework/`,
-> `prisma/schema/framework-*.prisma`, and the `framework_` table prefix. Keeping
+> leaf forks (e.g. Daybreak): `lib/framework/`, `components/framework/`,
+> `.context/framework/`, `prisma/schema/framework-*.prisma`, and the
+> `framework_` table prefix. Keeping
 > both empty upstream is what lets a fork's files there merge cleanly. Sunrise
 > platform docs go under a named domain folder (below); the app boot seam is
 > `lib/app/bootstrap.ts` (empty `initApp()`). See
 > [`CUSTOMIZATION.md`](./CUSTOMIZATION.md#the-appplatform-model).
 
-| Domain                   | Path                                                      | Key Content                                                                                                                 |
-| ------------------------ | --------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| Architecture             | `.context/architecture/`                                  | System design, deployment                                                                                                   |
-| CI Pipeline              | `.context/architecture/ci.md`                             | GitHub Actions pipeline; public/private-fork adaptation, `CI_TEST_SCOPE` knob, GHAS-skip, sharding, the two forker gotchas  |
-| Multi-Tenancy            | `.context/architecture/multi-tenancy.md`                  | Opt-in RLS retrofit playbook; single-tenant by default, `TENANCY_MODE` seam, fork-tier map, upstream-sync checklist         |
-| Multi-Tenancy Research   | `.context/architecture/multi-tenancy-research.md`         | Gap analysis: five isolation planes, control/commercial planes, ownership matrix, fork merge surface, provisions for forks  |
-| Authentication           | `.context/auth/`                                          | better-auth, sessions, guards                                                                                               |
-| API                      | `.context/api/`                                           | Endpoints, responses, client                                                                                                |
-| Database                 | `.context/database/`                                      | Prisma schema, migrations, seeding                                                                                          |
-| Security                 | `.context/security/`                                      | Rate limiting, headers, CORS                                                                                                |
-| Privacy                  | `.context/privacy/`                                       | Consent, erasure (Art. 17), subject access (Art. 15) and its source manifest                                                |
-| Logging                  | `.context/logging/`                                       | Structured logging, request ctx                                                                                             |
-| Testing                  | `.context/testing/`                                       | Patterns, mocking, async                                                                                                    |
-| Email                    | `.context/email/`                                         | Templates, sending                                                                                                          |
-| Workflow                 | `.context/workflow.md`                                    | Git, commits, PR process                                                                                                    |
-| AI Orchestration         | `.claude/docs/agent-orchestration.md`                     | Architectural rules for Claude Code sessions (platform-agnostic core, file paths)                                           |
-| Orchestration Spec       | `.context/orchestration/meta/functional-specification.md` | **Canonical** — what the system does (every step type, capability, route, schema model)                                     |
-| Orchestration Decisions  | `.context/orchestration/meta/architectural-decisions.md`  | Why each choice was made; alternatives rejected and the reasons                                                             |
-| Orchestration Roadmap    | `.context/orchestration/meta/improvement-priorities.md`   | Prioritised improvements against actual deployment profile                                                                  |
-| Orchestration Hosting    | `.context/orchestration/meta/hosting-requirements.md`     | What it takes to run in production; platform comparison                                                                     |
-| Orchestration Meta Index | `.context/orchestration/meta/README.md`                   | Index for the 8 meta docs (spec, decisions, roadmap, commercial, QA)                                                        |
-| Orchestration Overview   | `.context/admin/orchestration.md`                         | Admin operator landing — quick start and pointers to admin sub-pages                                                        |
-| Solution Builder         | `.context/admin/orchestration-solution-builder.md`        | Problem-to-solution guide, 5 worked examples                                                                                |
-| Capabilities Guide       | `.context/admin/orchestration-capabilities-guide.md`      | How to create capabilities, BaseCapability ref                                                                              |
-| Workflows Guide          | `.context/admin/orchestration-workflows-guide.md`         | Step types, error strategies, templates, extending                                                                          |
-| LLM Providers            | `.context/orchestration/llm-providers.md`                 | Provider abstraction, cost tracking                                                                                         |
-| Capabilities             | `.context/orchestration/capabilities.md`                  | Tool dispatcher, built-ins, rate limits                                                                                     |
-| Streaming Chat           | `.context/orchestration/chat.md`                          | Chat handler, tool loop, context builder                                                                                    |
-| Knowledge Base           | `.context/orchestration/knowledge.md`                     | Document ingestion, chunking, vector search                                                                                 |
-| Workflows                | `.context/orchestration/workflows.md`                     | DAG validator, step types, error codes                                                                                      |
-| Workflow Versioning      | `.context/orchestration/workflow-versioning.md`           | Publish/draft/rollback model, execution pinning, audit events                                                               |
-| Cost Estimation          | `.context/orchestration/cost-estimation.md`               | Generic pre-run USD estimate service; empirical/heuristic modes; trigger-UI recipe                                          |
-| Step Provenance          | `.context/orchestration/provenance.md`                    | `output.sources` contract, engine capture, approval/trace UI pills, opt-in guard rule                                       |
-| Agent Field Registry     | `.context/orchestration/agent-fields.md`                  | Single source of truth for `AiAgent` config fields; how to add a field, derived vs parity-tested surfaces, fork seam        |
-| Patterns & Steps         | `.context/orchestration/patterns-and-steps.md`            | The 21 canonical patterns, step→pattern relationships, author guidance                                                      |
-| Orchestration Engine     | `.context/orchestration/engine.md`                        | Runtime executor, registry, events, strategies                                                                              |
-| Tracing (OTEL plug-in)   | `.context/orchestration/tracing.md`                       | Tracer interface, no-op default, OTEL adapter, span tree, attributes                                                        |
-| External Calls           | `.context/orchestration/external-calls.md`                | HTTP executor, outbound rate limits, auth, response caps                                                                    |
-| Resilience & Errors      | `.context/orchestration/resilience.md`                    | Circuit breaker, fallback, budget UX, input guard                                                                           |
-| Output Guard             | `.context/orchestration/output-guard.md`                  | Topic boundaries, PII detection, brand voice                                                                                |
-| Agent Visibility         | `.context/orchestration/agent-visibility.md`              | Visibility modes, invite tokens, access control                                                                             |
-| API Keys                 | `.context/orchestration/api-keys.md`                      | Self-service API keys, scopes, key resolution                                                                               |
-| MCP Server               | `.context/orchestration/mcp.md`                           | MCP protocol, tools, resources, keys, audit                                                                                 |
-| Orchestration Admin API  | `.context/orchestration/admin-api.md`                     | Agents, capabilities, chat, knowledge, executions                                                                           |
-| Orchestration Endpoints  | `.context/api/orchestration-endpoints.md`                 | Admin HTTP reference — full table of every admin route                                                                      |
-| Provider Selection       | `.context/orchestration/provider-selection-matrix.md`     | Tier classification, decision heuristic, model audit workflow                                                               |
-| Consumer Chat API        | `.context/api/consumer-chat.md`                           | End-user chat endpoints, agent visibility, rate limits                                                                      |
-| Document Ingestion       | `.context/orchestration/document-ingestion.md`            | Multi-format parsing, PDF preview flow, parser arch                                                                         |
-| Scheduling & Webhooks    | `.context/orchestration/scheduling.md`                    | Cron schedules, webhook triggers, scheduler tick                                                                            |
-| Data Retention & Pruning | `.context/orchestration/retention.md`                     | Scheduled purge of aged conversations/executions/evals/logs; terminal-only, coherent windows                                |
-| Inbound Triggers         | `.context/orchestration/inbound-triggers.md`              | Slack / Postmark / generic-HMAC adapters, replay protection, per-channel payload tables                                     |
-| Event Hooks              | `.context/orchestration/hooks.md`                         | In-process dispatch, outbound webhooks vs internal handlers                                                                 |
-| Client Analytics         | `.context/orchestration/analytics.md`                     | Popular topics, unanswered questions, engagement, gaps                                                                      |
-| Autonomous Orchestration | `.context/orchestration/autonomous-orchestration.md`      | Orchestrator step, workflows vs autonomous, when to use each                                                                |
-| Backup & Restore         | `.context/orchestration/backup.md`                        | Export/import config, schema versioning, ImportResult                                                                       |
-| Experiments (A/B)        | `.context/orchestration/experiments.md`                   | Variants, lifecycle (draft→running→completed), run API                                                                      |
-| Embed Widget             | `.context/orchestration/embed.md`                         | Token auth, CORS, widget.js loader, Shadow DOM chat                                                                         |
-| SSE Bridge               | `.context/api/sse.md`                                     | `sseResponse` helper, framing, sanitization                                                                                 |
-| Orchestration Dashboard  | `.context/admin/orchestration-dashboard.md`               | Admin landing page, data sources, layout                                                                                    |
-| Agents List / Pages      | `.context/admin/orchestration-agents.md`                  | List, create, edit shells; table, bulk export                                                                               |
-| Agent Form               | `.context/admin/agent-form.md`                            | 6-tab create/edit form, FieldHelp reference                                                                                 |
-| Agent Profiles (admin)   | `.context/admin/orchestration-agent-profiles.md`          | Shared persona / voice / guardrails library, attached-agent counts                                                          |
-| Agent Profiles (runtime) | `.context/orchestration/agent-profiles.md`                | Inheritance resolver, override/append modes, composition order                                                              |
-| Capabilities List        | `.context/admin/orchestration-capabilities.md`            | Table, category filter, agents-using count                                                                                  |
-| Capability Form          | `.context/admin/capability-form.md`                       | 4 tabs, visual builder ↔ JSON editor, safety                                                                                |
-| Providers List           | `.context/admin/orchestration-providers.md`               | Card grid, status dots, env-var-only security                                                                               |
-| Provider Form            | `.context/admin/provider-form.md`                         | 4-flavor selector, reverse-mapping on edit                                                                                  |
-| Provider Models (admin)  | `.context/admin/orchestration-provider-models.md`         | Matrix view, decision heuristic, model form                                                                                 |
-| Provider Audit Guide     | `.context/admin/orchestration-provider-audit-guide.md`    | Walkthrough: run the built-in audit workflow, tamper test                                                                   |
-| Costs & Budget           | `.context/admin/orchestration-costs.md`                   | Summary, trend, savings, settings singleton                                                                                 |
-| Workflow Builder         | `.context/admin/workflow-builder.md`                      | React Flow canvas, palette, step registry                                                                                   |
-| Learning UI              | `.context/admin/orchestration-learn.md`                   | Pattern explorer, advisor chatbot, quiz, tabbed hub                                                                         |
-| Knowledge Base UI        | `.context/admin/orchestration-knowledge-ui.md`            | Document management, upload, search test                                                                                    |
-| Chat Interface           | `.context/admin/orchestration-chat-interface.md`          | Reusable SSE chat component, embedded mode                                                                                  |
-| Conversations (admin)    | `.context/admin/orchestration-conversations.md`           | Conversation list, trace viewer, tagging, export                                                                            |
-| Evaluations UI           | `.context/admin/orchestration-evaluations.md`             | Evaluation runner, annotations, completion flow                                                                             |
-| Evaluation Metrics       | `.context/orchestration/evaluation-metrics.md`            | Named-metric scoring (faithfulness, groundedness, relevance), rescore                                                       |
-| Dataset-driven Evals     | `.context/orchestration/evaluations.md`                   | Phase 1 batch runs: datasets, grader registry, worker, polymorphic subject                                                  |
-| Observability Dashboard  | `.context/admin/orchestration-observability.md`           | Dashboard metrics, trace viewers, logging audit                                                                             |
-| Live Engine (admin)      | `.context/admin/orchestration-executions-live-engine.md`  | Stuck-execution dashboard (embedded above the executions list), force-fail action, lease inspector, stuck-threshold setting |
-| Analytics (admin)        | `.context/admin/orchestration-analytics.md`               | Usage, popular topics, unanswered, feedback, gaps                                                                           |
-| Audit Log (admin)        | `.context/admin/orchestration-audit-log.md`               | Immutable config change log, entity filters                                                                                 |
-| Approval Queue (admin)   | `.context/admin/orchestration-approvals.md`               | Pending approvals list, approve/reject, sidebar badge                                                                       |
-| Setup Wizard             | `.context/admin/setup-wizard.md`                          | 5-step guided setup flow, resume behavior                                                                                   |
-| Contextual Help          | `.context/ui/contextual-help.md`                          | `<FieldHelp>` directive for form fields                                                                                     |
-| UI Hooks                 | `.context/ui/hooks.md`                                    | `useLocalStorage`, `useWizard`                                                                                              |
-| Per-Surface Theming      | `.context/ui/surface-theming.md`                          | `data-surface` seam: proxy classification, `<SurfaceSync>`, fork-owned `brand-theme.css`, the six design constraints        |
+| Domain                   | Path                                                      | Key Content                                                                                                                              |
+| ------------------------ | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Architecture             | `.context/architecture/`                                  | System design, deployment                                                                                                                |
+| CI Pipeline              | `.context/architecture/ci.md`                             | GitHub Actions pipeline; public/private-fork adaptation, `CI_TEST_SCOPE` knob, GHAS-skip, sharding, the two forker gotchas               |
+| Checks & Gates           | `.context/architecture/checks.md`                         | "I found nothing" vs "I could not look" — the six channels, with the defect each one caused                                              |
+| Fork Init Seams          | `.context/architecture/fork-init-seams.md`                | The eleven `lib/app/*` seams; the rollback guarantee, the roster (derived, not written), and what per-registration isolation still needs |
+| Multi-Tenancy            | `.context/architecture/multi-tenancy.md`                  | Opt-in RLS retrofit playbook; single-tenant by default, `TENANCY_MODE` seam, fork-tier map, upstream-sync checklist                      |
+| Multi-Tenancy Research   | `.context/architecture/multi-tenancy-research.md`         | Gap analysis: five isolation planes, control/commercial planes, ownership matrix, fork merge surface, provisions for forks               |
+| Authentication           | `.context/auth/`                                          | better-auth, sessions, guards                                                                                                            |
+| API                      | `.context/api/`                                           | Endpoints, responses, client                                                                                                             |
+| Database                 | `.context/database/`                                      | Prisma schema, migrations, seeding                                                                                                       |
+| Security                 | `.context/security/`                                      | Rate limiting, headers, CORS                                                                                                             |
+| Privacy                  | `.context/privacy/`                                       | Consent, erasure (Art. 17), subject access (Art. 15) and its source manifest                                                             |
+| Logging                  | `.context/logging/`                                       | Structured logging, request ctx                                                                                                          |
+| Testing                  | `.context/testing/`                                       | Patterns, mocking, async                                                                                                                 |
+| Email                    | `.context/email/`                                         | Templates, sending                                                                                                                       |
+| Workflow                 | `.context/workflow.md`                                    | Git, commits, PR process                                                                                                                 |
+| AI Orchestration         | `.claude/docs/agent-orchestration.md`                     | Architectural rules for Claude Code sessions (platform-agnostic core, file paths)                                                        |
+| Orchestration Spec       | `.context/orchestration/meta/functional-specification.md` | **Canonical** — what the system does (every step type, capability, route, schema model)                                                  |
+| Orchestration Decisions  | `.context/orchestration/meta/architectural-decisions.md`  | Why each choice was made; alternatives rejected and the reasons                                                                          |
+| Orchestration Roadmap    | `.context/orchestration/meta/improvement-priorities.md`   | Prioritised improvements against actual deployment profile                                                                               |
+| Orchestration Hosting    | `.context/orchestration/meta/hosting-requirements.md`     | What it takes to run in production; platform comparison                                                                                  |
+| Orchestration Meta Index | `.context/orchestration/meta/README.md`                   | Index for the 8 meta docs (spec, decisions, roadmap, commercial, QA)                                                                     |
+| Orchestration Overview   | `.context/admin/orchestration.md`                         | Admin operator landing — quick start and pointers to admin sub-pages                                                                     |
+| Solution Builder         | `.context/admin/orchestration-solution-builder.md`        | Problem-to-solution guide, 5 worked examples                                                                                             |
+| Capabilities Guide       | `.context/admin/orchestration-capabilities-guide.md`      | How to create capabilities, BaseCapability ref                                                                                           |
+| Workflows Guide          | `.context/admin/orchestration-workflows-guide.md`         | Step types, error strategies, templates, extending                                                                                       |
+| LLM Providers            | `.context/orchestration/llm-providers.md`                 | Provider abstraction, cost tracking                                                                                                      |
+| Capabilities             | `.context/orchestration/capabilities.md`                  | Tool dispatcher, built-ins, rate limits                                                                                                  |
+| Streaming Chat           | `.context/orchestration/chat.md`                          | Chat handler, tool loop, context builder                                                                                                 |
+| Knowledge Base           | `.context/orchestration/knowledge.md`                     | Document ingestion, chunking, vector search                                                                                              |
+| Workflows                | `.context/orchestration/workflows.md`                     | DAG validator, step types, error codes                                                                                                   |
+| Workflow Versioning      | `.context/orchestration/workflow-versioning.md`           | Publish/draft/rollback model, execution pinning, audit events                                                                            |
+| Cost Estimation          | `.context/orchestration/cost-estimation.md`               | Generic pre-run USD estimate service; empirical/heuristic modes; trigger-UI recipe                                                       |
+| Step Provenance          | `.context/orchestration/provenance.md`                    | `output.sources` contract, engine capture, approval/trace UI pills, opt-in guard rule                                                    |
+| Agent Field Registry     | `.context/orchestration/agent-fields.md`                  | Single source of truth for `AiAgent` config fields; how to add a field, derived vs parity-tested surfaces, fork seam                     |
+| Patterns & Steps         | `.context/orchestration/patterns-and-steps.md`            | The 21 canonical patterns, step→pattern relationships, author guidance                                                                   |
+| Orchestration Engine     | `.context/orchestration/engine.md`                        | Runtime executor, registry, events, strategies                                                                                           |
+| Tracing (OTEL plug-in)   | `.context/orchestration/tracing.md`                       | Tracer interface, no-op default, OTEL adapter, span tree, attributes                                                                     |
+| External Calls           | `.context/orchestration/external-calls.md`                | HTTP executor, outbound rate limits, auth, response caps                                                                                 |
+| Resilience & Errors      | `.context/orchestration/resilience.md`                    | Circuit breaker, fallback, budget UX, input guard                                                                                        |
+| Output Guard             | `.context/orchestration/output-guard.md`                  | Topic boundaries, PII detection, brand voice                                                                                             |
+| Agent Visibility         | `.context/orchestration/agent-visibility.md`              | Visibility modes, invite tokens, access control                                                                                          |
+| API Keys                 | `.context/orchestration/api-keys.md`                      | Self-service API keys, scopes, key resolution                                                                                            |
+| MCP Server               | `.context/orchestration/mcp.md`                           | MCP protocol, tools, resources, keys, audit                                                                                              |
+| Orchestration Admin API  | `.context/orchestration/admin-api.md`                     | Agents, capabilities, chat, knowledge, executions                                                                                        |
+| Orchestration Endpoints  | `.context/api/orchestration-endpoints.md`                 | Admin HTTP reference — full table of every admin route                                                                                   |
+| Provider Selection       | `.context/orchestration/provider-selection-matrix.md`     | Tier classification, decision heuristic, model audit workflow                                                                            |
+| Consumer Chat API        | `.context/api/consumer-chat.md`                           | End-user chat endpoints, agent visibility, rate limits                                                                                   |
+| Document Ingestion       | `.context/orchestration/document-ingestion.md`            | Multi-format parsing, PDF preview flow, parser arch                                                                                      |
+| Scheduling & Webhooks    | `.context/orchestration/scheduling.md`                    | Cron schedules, webhook triggers, scheduler tick                                                                                         |
+| Data Retention & Pruning | `.context/orchestration/retention.md`                     | Scheduled purge of aged conversations/executions/evals/logs; terminal-only, coherent windows                                             |
+| Inbound Triggers         | `.context/orchestration/inbound-triggers.md`              | Slack / Postmark / generic-HMAC adapters, replay protection, per-channel payload tables                                                  |
+| Event Hooks              | `.context/orchestration/hooks.md`                         | In-process dispatch, outbound webhooks vs internal handlers                                                                              |
+| Client Analytics         | `.context/orchestration/analytics.md`                     | Popular topics, unanswered questions, engagement, gaps                                                                                   |
+| Autonomous Orchestration | `.context/orchestration/autonomous-orchestration.md`      | Orchestrator step, workflows vs autonomous, when to use each                                                                             |
+| Backup & Restore         | `.context/orchestration/backup.md`                        | Export/import config, schema versioning, ImportResult                                                                                    |
+| Experiments (A/B)        | `.context/orchestration/experiments.md`                   | Variants, lifecycle (draft→running→completed), run API                                                                                   |
+| Embed Widget             | `.context/orchestration/embed.md`                         | Token auth, CORS, widget.js loader, Shadow DOM chat                                                                                      |
+| SSE Bridge               | `.context/api/sse.md`                                     | `sseResponse` helper, framing, sanitization                                                                                              |
+| Orchestration Dashboard  | `.context/admin/orchestration-dashboard.md`               | Admin landing page, data sources, layout                                                                                                 |
+| Agents List / Pages      | `.context/admin/orchestration-agents.md`                  | List, create, edit shells; table, bulk export                                                                                            |
+| Agent Form               | `.context/admin/agent-form.md`                            | 6-tab create/edit form, FieldHelp reference                                                                                              |
+| Agent Profiles (admin)   | `.context/admin/orchestration-agent-profiles.md`          | Shared persona / voice / guardrails library, attached-agent counts                                                                       |
+| Agent Profiles (runtime) | `.context/orchestration/agent-profiles.md`                | Inheritance resolver, override/append modes, composition order                                                                           |
+| Capabilities List        | `.context/admin/orchestration-capabilities.md`            | Table, category filter, agents-using count                                                                                               |
+| Capability Form          | `.context/admin/capability-form.md`                       | 4 tabs, visual builder ↔ JSON editor, safety                                                                                             |
+| Providers List           | `.context/admin/orchestration-providers.md`               | Card grid, status dots, env-var-only security                                                                                            |
+| Provider Form            | `.context/admin/provider-form.md`                         | 4-flavor selector, reverse-mapping on edit                                                                                               |
+| Provider Models (admin)  | `.context/admin/orchestration-provider-models.md`         | Matrix view, decision heuristic, model form                                                                                              |
+| Provider Audit Guide     | `.context/admin/orchestration-provider-audit-guide.md`    | Walkthrough: run the built-in audit workflow, tamper test                                                                                |
+| Costs & Budget           | `.context/admin/orchestration-costs.md`                   | Summary, trend, savings, settings singleton                                                                                              |
+| Workflow Builder         | `.context/admin/workflow-builder.md`                      | React Flow canvas, palette, step registry                                                                                                |
+| Learning UI              | `.context/admin/orchestration-learn.md`                   | Pattern explorer, advisor chatbot, quiz, tabbed hub                                                                                      |
+| Knowledge Base UI        | `.context/admin/orchestration-knowledge-ui.md`            | Document management, upload, search test                                                                                                 |
+| Chat Interface           | `.context/admin/orchestration-chat-interface.md`          | Reusable SSE chat component, embedded mode                                                                                               |
+| Conversations (admin)    | `.context/admin/orchestration-conversations.md`           | Conversation list, trace viewer, tagging, export                                                                                         |
+| Evaluations UI           | `.context/admin/orchestration-evaluations.md`             | Evaluation runner, annotations, completion flow                                                                                          |
+| Evaluation Metrics       | `.context/orchestration/evaluation-metrics.md`            | Named-metric scoring (faithfulness, groundedness, relevance), rescore                                                                    |
+| Dataset-driven Evals     | `.context/orchestration/evaluations.md`                   | Phase 1 batch runs: datasets, grader registry, worker, polymorphic subject                                                               |
+| Observability Dashboard  | `.context/admin/orchestration-observability.md`           | Dashboard metrics, trace viewers, logging audit                                                                                          |
+| Live Engine (admin)      | `.context/admin/orchestration-executions-live-engine.md`  | Stuck-execution dashboard (embedded above the executions list), force-fail action, lease inspector, stuck-threshold setting              |
+| Analytics (admin)        | `.context/admin/orchestration-analytics.md`               | Usage, popular topics, unanswered, feedback, gaps                                                                                        |
+| Audit Log (admin)        | `.context/admin/orchestration-audit-log.md`               | Immutable config change log, entity filters                                                                                              |
+| Approval Queue (admin)   | `.context/admin/orchestration-approvals.md`               | Pending approvals list, approve/reject, sidebar badge                                                                                    |
+| Setup Wizard             | `.context/admin/setup-wizard.md`                          | 5-step guided setup flow, resume behavior                                                                                                |
+| Contextual Help          | `.context/ui/contextual-help.md`                          | `<FieldHelp>` directive for form fields                                                                                                  |
+| UI Hooks                 | `.context/ui/hooks.md`                                    | `useLocalStorage`, `useWizard`, `useTimeout`                                                                                             |
+| Per-Surface Theming      | `.context/ui/surface-theming.md`                          | `data-surface` seam: proxy classification, `<SurfaceSync>`, fork-owned `brand-theme.css`, the six design constraints                     |
 
 ## Troubleshooting
 

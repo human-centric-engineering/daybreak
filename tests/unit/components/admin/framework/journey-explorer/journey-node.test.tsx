@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * JourneyNode (f-ops-views t-5b) — the read-only canvas node. Presentational: colours
  * by journey status, rings the current replay node, shows a bound module slug. React

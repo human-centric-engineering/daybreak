@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Integration test — KnowledgeTab (f-ops-views t-4c).
  *

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Integration test — PoliciesTable (f-admin-surfaces t-2).
  *

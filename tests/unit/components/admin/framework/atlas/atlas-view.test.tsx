@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * AtlasView (f-atlas t-2a) — the client shell. Runs the real mapper over the projection, renders the
  * legend + canvas, and deep-links on node click. `next/navigation`'s router + the canvas are mocked

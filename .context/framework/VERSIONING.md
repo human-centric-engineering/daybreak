@@ -30,11 +30,20 @@ A Daybreak-derived app reports three versions, and they answer three different
 questions. None can be derived from another, because each is owned by a different
 party:
 
-| Constant           | File                      | Owned by         | Answers                         | Surfaced as              |
-| ------------------ | ------------------------- | ---------------- | ------------------------------- | ------------------------ |
-| `APP_VERSION`      | `lib/app-version.ts`      | the **leaf app** | which build of _this app_?      | `/api/health` `version`  |
-| `DAYBREAK_VERSION` | `lib/daybreak-version.ts` | **Daybreak**     | which framework is it built on? | `/api/health` `daybreak` |
-| `SUNRISE_VERSION`  | `lib/sunrise-version.ts`  | **Sunrise**      | which platform is underneath?   | `/api/health` `sunrise`  |
+| Constant           | File                      | Owned by         | Answers                         | Surfaced as                           |
+| ------------------ | ------------------------- | ---------------- | ------------------------------- | ------------------------------------- |
+| `APP_VERSION`      | `lib/app-version.ts`      | the **leaf app** | which build of _this app_?      | `/api/health` `version` · admin stats |
+| `DAYBREAK_VERSION` | `lib/daybreak-version.ts` | **Daybreak**     | which framework is it built on? | admin stats `system.daybreakVersion`  |
+| `SUNRISE_VERSION`  | `lib/sunrise-version.ts`  | **Sunrise**      | which platform is underneath?   | admin stats `system.sunriseVersion`   |
+
+**Only `version` is on the unauthenticated `/api/health`.** The other two moved
+to `GET /api/v1/admin/stats` (behind `withAdminAuth`) and the `/admin/overview`
+System Information card in the Sunrise v0.11.1 sync — `sunrise` because Sunrise
+removed it there (#531), `daybreak` for the same reason one tier up. A platform
+release number names the exact set of published issues to try against it, and
+that answer is useful against **every** deployment derived from that platform
+rather than one. A leaf's own app version is the leaf's to disclose: it means
+nothing outside that leaf, and container health checks read it.
 
 `APP_VERSION` reads `package.json`, which in a leaf says the _leaf's_ name and
 version — so Daybreak's version cannot be recovered from it downstream. That is
@@ -84,7 +93,7 @@ on:
 - **`framework_*` Prisma models** and their published shapes.
 - **Framework admin routes** — `/admin/framework/**` and `/api/v1/**/framework/**`.
 - **Exported values from `lib/framework/**`** that a leaf is documented to call.
-- **`DAYBREAK_VERSION`** and the `daybreak` field on `/api/health`.
+- **`DAYBREAK_VERSION`** and `system.daybreakVersion` on `GET /api/v1/admin/stats`.
 
 **Deliberately NOT public surface** — changing these needs no changelog entry:
 internals of `lib/framework/**` no leaf is documented to call, test-only changes,

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Framework atlas page (f-atlas t-2a) — the thin server page. Fetches the composition projection and
  * renders `<AtlasView>`, degrading to a "couldn't load" notice on any fetch failure (a pure read — no

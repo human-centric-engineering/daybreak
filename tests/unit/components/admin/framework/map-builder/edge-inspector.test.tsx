@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * EdgeInspector (f-map-editor t-2 / t-3) — the selected-edge panel. Proves it shows the
  * connection, marks the current type, changes the type on click, deletes the edge, and

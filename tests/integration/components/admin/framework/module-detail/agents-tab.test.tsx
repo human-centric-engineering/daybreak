@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Integration test — AgentsTab (f-ops-views t-4a).
  *

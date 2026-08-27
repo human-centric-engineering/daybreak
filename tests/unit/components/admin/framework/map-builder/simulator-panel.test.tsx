@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * SimulatorPanel (f-map-editor t-5, F18) — the dry-run dialog. Proves it collects
  * synthetic inputs (completions, slot rows, clock), POSTs the current definition + those

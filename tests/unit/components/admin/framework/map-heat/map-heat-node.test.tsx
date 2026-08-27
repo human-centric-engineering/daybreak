@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * MapHeatNode (f-engagement-analytics t-1b) — the read-only heat canvas node.
  * Presentational: colours by the active metric's bucket, shows the collective figures,

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Integration test — Framework Map Heat page (f-engagement-analytics t-1b).
  *

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * MapBuilder (f-map-editor t-1) — the editor shell's behavioural contract. React Flow
  * is mocked (no layout measurement in happy-dom) with a stateful `useNodesState` /

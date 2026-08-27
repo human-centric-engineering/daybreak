@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Integration test — Framework Slot detail page (f-admin-surfaces t-1).
  *

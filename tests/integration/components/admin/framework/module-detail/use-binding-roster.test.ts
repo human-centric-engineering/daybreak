@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Unit test — useBindingRoster (f-ops-views t-4c · searchable typeahead f-admin-surfaces t-4).
  *

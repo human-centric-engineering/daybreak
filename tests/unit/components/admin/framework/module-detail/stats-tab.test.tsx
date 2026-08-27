@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * StatsTab (f-engagement t-3b) — the read-only module-stats panel. Presentational; asserts
  * the engagement counts and feedback summary render, a fetch failure (`null`) shows the

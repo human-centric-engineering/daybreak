@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Integration test — `<ModulesTable>` (f-ops-views t-1).
  *

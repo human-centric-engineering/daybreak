@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * NodeInspector (f-map-editor t-3) — the per-node config panel. Proves each field edit
  * calls `onDataChange` with the right patch (type retype drops the module binding,

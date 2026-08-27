@@ -44,17 +44,38 @@ Daybreak reserves a leaf surface and keeps it empty for you — the same discipl
 inherits from Sunrise, applied one level down. **Fill the `leaf-*` files, not the
 bridges they delegate to.**
 
-| Fill this (yours)             | NOT this (Daybreak's) | Registers                       |
-| ----------------------------- | --------------------- | ------------------------------- |
-| `lib/app/leaf-bootstrap.ts`   | `bootstrap.ts`        | one-time server boot work       |
-| `lib/app/leaf-admin-nav.ts`   | `admin-nav.ts`        | admin sidebar sections          |
-| `lib/app/leaf-db-drift.ts`    | `db-drift.ts`         | Prisma-unmodelled DB objects    |
-| `lib/app/leaf-data-export.ts` | `data-export.ts`      | your tables in a subject export |
+| Fill this (yours)             | NOT this (Daybreak's) | Registers                                                       |
+| ----------------------------- | --------------------- | --------------------------------------------------------------- |
+| `lib/app/leaf-bootstrap.ts`   | `bootstrap.ts`        | one-time server boot work                                       |
+| `lib/app/leaf-admin-nav.ts`   | `admin-nav.ts`        | admin sidebar sections                                          |
+| `lib/app/leaf-db-drift.ts`    | `db-drift.ts`         | Prisma-unmodelled DB objects                                    |
+| `lib/app/leaf-data-export.ts` | `data-export.ts`      | your tables in a subject export, and their Art. 15 declarations |
+| `lib/app/leaf-brand.ts`       | `brand.ts`            | product name, legal entity, meta description                    |
 
 Each bridge runs Daybreak's registration and then calls your `leaf-*` hook. Filling a
 bridge directly collides with Daybreak on your next merge — and in the
 `data-export.ts` case, resolving that conflict the obvious way silently drops the
 framework's tables from every GDPR subject-access export.
+
+**`leaf-brand.ts` is the one that OVERRIDES rather than appends.** Brand identity is
+single-valued: your name replaces Daybreak's, it does not compose with it. A
+non-`null` value wins; `null` falls through to Daybreak's, then to Sunrise's. Note
+these three values used to be `NEXT_PUBLIC_*` env vars — Sunrise 0.11.0 removed them,
+because `NEXT_PUBLIC_*` is inlined at build time and `.dockerignore` excludes `.env*`,
+so on a container build they delivered nothing and the footers shipped someone else's
+name. Setting them in `.env` now does nothing, and a boot warning names each one you
+have left set.
+
+**`leaf-data-export.ts` now carries two exports, and the second is not optional.**
+Beside `collectLeafSubjectData()` there is `initLeafSubjectSources()`, where you
+declare each model in `prisma/schema/app.prisma` as a subject-data source or as an
+exclusion with a reason. Sunrise 0.10.0 holds a fork tier's schema file to **full
+accounting** — every model, no third state — so `tests/unit/lib/privacy/export-sources.test.ts`
+fails naming any model that is neither. Full accounting rather than a `userId` scan
+because core reads its own column vocabulary and cannot read yours: a table keyed
+`authorId`, or reached by a join, is invisible to a scan and is exactly the table
+nobody remembers. Your section names must not collide with the framework tier's —
+the registry refuses a section another tier claimed.
 
 **Every other `lib/app/*` file is yours to fill as normal** (`capabilities.ts`,
 `context-contributors.ts`, `env.ts`, `rate-limit.ts`, `public-nav.ts`,

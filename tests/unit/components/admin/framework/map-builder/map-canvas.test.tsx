@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * MapCanvas (f-map-editor t-1/t-2) — the editable React Flow surface. `@xyflow/react`
  * is mocked (no layout measurement in happy-dom); this proves the drop handler

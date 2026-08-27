@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Unit test — useRowActions (f-ops-views t-4c).
  *

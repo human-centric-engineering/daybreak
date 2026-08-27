@@ -25,7 +25,104 @@ process.
 
 ## [Unreleased]
 
+### Added
+
+- **`lib/app/leaf-brand.ts` — a leaf declares its own brand identity here.**
+  Sunrise 0.11.0 removed `NEXT_PUBLIC_APP_NAME`, `NEXT_PUBLIC_LEGAL_NAME` and
+  `NEXT_PUBLIC_APP_DESCRIPTION` and moved brand identity into committed code at
+  `lib/app/brand.ts` (Sunrise #661) — a leaf-reserved scaffold. Daybreak has to
+  set its own name there, so it fills that file as its **fourth** bridge and
+  reads a reserved-empty `lib/app/leaf-brand.ts` in front of its own values.
+
+  Brand is the one seam where a leaf **overrides** rather than appends: a leaf
+  does not compose with the framework's name, it replaces it. So a non-`null`
+  value in `leaf-brand.ts` wins; `null` falls through to Daybreak's, and
+  `lib/brand.ts` falls through again to Sunrise's. `??`, not `||`, so a leaf can
+  deliberately set an empty string.
+
+  **What a leaf must do.** Move your three values out of `.env` — they do
+  nothing there now, and a boot warning names each one still set — into
+  `lib/app/leaf-brand.ts`, then pin them in the `lib/app/leaf-brand.ts` row of
+  `tests/unit/lib/app/defaults.test.ts`. Change the row rather than deleting it:
+  pinning keeps the protection for the seams you have not filled.
+
+  Note this defect was live in Daybreak until now. `NEXT_PUBLIC_*` is inlined at
+  build time and `.dockerignore` excludes `.env*`, so a container build shipped
+  `© <year> Sunrise` in both footers regardless of what was configured.
+
+### Changed
+
+- **BREAKING: the framework tier's subject-access sections moved out of
+  `app.framework` and sit flat under `app`.** The Sunrise v0.11.1 sync delegates
+  Daybreak's Art. 15 manifest to the registry Sunrise 0.10.0 landed
+  (`registerAppSubjectSources({ tier: 'framework' })`, Sunrise #533) — the ask
+  Daybreak filed and had been carrying a fork-first shim for.
+
+  A subject export used to carry one nested key,
+  `app.framework = { meta, personalData, attributions }`. It now carries one key
+  per source directly under `app` — `app.journeys`, `app.slotValues`,
+  `app.facilitationMaps`, and so on — and the hand-rolled `meta` block is gone,
+  because core emits `meta.app` (every declared source with its row count and
+  disposition) and folds the framework tier's exclusions into `meta.excluded`
+  beside its own. The `export` / `attribution` distinction survives: it moved
+  from which sibling object a section sat in onto `meta.app[].disposition`.
+
+  **Anything parsing a Daybreak export bundle breaks** — a leaf's own tooling, a
+  DPO's script, a stored fixture. The subject receives strictly more than before:
+  one manifest describing every tier on the same terms, rather than core's
+  manifest plus a second one describing only ours.
+
+  **What a leaf must do.** `lib/app/leaf-data-export.ts` gains
+  `initLeafSubjectSources()` beside its collector — declare your `app_*` models
+  there, each as a source or an exclusion with a reason. This is no longer
+  optional: Sunrise 0.10.0 holds every fork-tier schema file to **full
+  accounting**, so `tests/unit/lib/privacy/export-sources.test.ts` fails naming
+  any model in `prisma/schema/app.prisma` that is neither. Your section names
+  must not collide with the framework tier's — the registry refuses a section
+  another tier claimed, and a refused declaration then fails that guard.
+
+### Fixed
+
+- **`FrameworkConversationEval` was silently absent from every subject-access
+  export.** It holds the automated quality scores and judge reasoning recorded
+  against a subject's own conversation turns — assessments *of* what they said —
+  and Art. 15 covers those as squarely as it covers the words assessed.
+
+  It was missed because it reaches the subject through `conversationId` with no
+  user column, and the coverage guard Daybreak carried scanned for
+  `userId` / `createdBy`. A table keyed by a join is invisible to that scan, and
+  the tables such a scan cannot see are exactly the ones nobody remembers. It
+  surfaced the moment full accounting replaced the heuristic — which is the whole
+  argument for full accounting, and the reason a leaf now owes a decision on
+  every one of its own tables rather than only the obvious ones.
+
+  **Leaf action: none for this table** — the fix ships in the framework
+  collector. But if your leaf has a table reached by a join rather than by a user
+  column, it has the same defect today and the new guard will now name it.
+
 ### Removed
+
+- **BREAKING: `daybreak` is gone from the `GET /api/health` response**, along
+  with `sunrise` — which Sunrise removed for its own reasons in 0.10.0 (#531).
+  Anything reading `body.daybreak` breaks: an uptime monitor asserting on it, a
+  deploy-verification script grepping it.
+
+  The reason is the one Sunrise gave, applied one tier up. `/api/health` takes no
+  authentication — load balancers and container orchestrators probe it — so the
+  field named the exact Daybreak release a deployment runs, and therefore the
+  exact set of published Daybreak issues to try against it, to anyone who asked.
+  Unlike a leaf's own app version, that answer is useful against **every**
+  Daybreak-derived deployment rather than one. `version` is unaffected: it is the
+  leaf's own number to disclose, it means nothing outside that leaf, and health
+  checks read it.
+
+  **Read it from `GET /api/v1/admin/stats` instead** — `system.daybreakVersion`,
+  behind `withAdminAuth`, beside `system.sunriseVersion` — or import
+  `DAYBREAK_VERSION` server-side. It is also rendered on `/admin/overview`, where
+  the System Information card now shows all three tiers: the leaf's app version,
+  the Daybreak framework version, and the Sunrise platform version. That card is
+  where an operator can now answer "did that upgrade actually ship?" without a
+  terminal.
 
 - **`npm run framework:sync-ancestry`** and its `app:ci-checks` entry, together
   with `scripts/release/sync-ancestry.ts`, `sync-ancestry-check.ts` and their unit

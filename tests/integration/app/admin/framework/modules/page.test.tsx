@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Integration test — Framework Modules list page (f-ops-views t-1).
  *
