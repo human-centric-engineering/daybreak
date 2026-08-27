@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * JourneysTable (f-ops-views t-5b) — the explorer picker list.
  *

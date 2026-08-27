@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * JourneyCanvas (f-ops-views t-5b) — the read-only React Flow surface. It owns no
  * state; it just paints the nodes/edges the explorer computes. `@xyflow/react` is

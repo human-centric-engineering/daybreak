@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Integration test — PolicyFormDialog (f-admin-surfaces t-2).
  *

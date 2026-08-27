@@ -11,6 +11,20 @@
  * at runtime) rather than `@/lib/framework/*` directly.
  *
  * @see lib/app/admin-nav.ts
+ *
+ * ---------------------------------------------------------------------------
+ * FORK NOTE — this reads the real `lib/app/admin-nav.ts`, not a mock
+ * ---------------------------------------------------------------------------
+ * Daybreak FILLS that bridge (it registers the "Framework" sidebar section and
+ * then delegates to the reserved `lib/app/leaf-admin-nav.ts`), so the section
+ * list this file asserts on is Daybreak's, not an empty default.
+ *
+ * **What a leaf should expect, and what to do.** Filling
+ * `lib/app/leaf-admin-nav.ts` adds your sections to what `initAppNav()`
+ * produces, so any assertion here counting or listing sections will fail.
+ * PIN the new value — assert your sections alongside the framework's — rather
+ * than deleting the case: what it protects is that registration is idempotent
+ * and ordered, which your sections need as much as ours.
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';

@@ -26,22 +26,25 @@
  * ---------------------------------------------------------------------------
  * DAYBREAK — the two bridges this fork fills, pinned rather than deleted
  * ---------------------------------------------------------------------------
- * Daybreak fills exactly two `lib/app/*` bridges, so their rows below assert the
- * FILLED value instead of emptiness:
+ * Daybreak fills four `lib/app/*` bridges, so their rows below assert the FILLED
+ * value instead of emptiness:
  *
- * - `lib/app/bootstrap.ts` → `initFramework()` + framework sync
- * - `lib/app/admin-nav.ts` → the framework's "Framework" sidebar section
+ * - `lib/app/bootstrap.ts`   → `initFramework()` + framework sync
+ * - `lib/app/admin-nav.ts`   → the framework's "Framework" sidebar section
+ * - `lib/app/data-export.ts` → the framework tier's Art. 15 manifest
+ * - `lib/app/brand.ts`       → Daybreak's product name and legal entity
  *
  * Each delegates to a reserved-empty leaf seam (`leaf-bootstrap.ts`,
- * `leaf-admin-nav.ts`) which carries the no-op contract forward for leaf forks —
- * those rows are here too. See the Daybreak banner in CLAUDE.md.
+ * `leaf-admin-nav.ts`, `leaf-data-export.ts`, `leaf-brand.ts`) which carries the
+ * no-op contract forward for leaf forks — those rows are here too. See the
+ * Daybreak banner in CLAUDE.md.
  *
  * @see lib/app/ · CUSTOMIZATION.md §4
  */
 
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import { registerAppRateLimits } from '@/lib/app/rate-limit';
 import { initAppCapabilities } from '@/lib/app/capabilities';
 import { initAppContextContributors } from '@/lib/app/context-contributors';
@@ -59,13 +62,36 @@ import { initAppGuardEventContributors } from '@/lib/app/guard-event-contributor
 import { appAgentFields } from '@/lib/app/agent-fields';
 import { appProtectedRoutes } from '@/lib/app/protected-routes';
 import { appEnvSchema } from '@/lib/app/env';
+import { footerCopyright } from '@/lib/app/footer';
+import { APP_API_KEY_SCOPES } from '@/lib/app/api-key-scopes';
+import { listValidApiKeyScopes, CORE_API_KEY_SCOPES } from '@/lib/auth/api-key-scopes';
 import appEslintConfig from '@/lib/app/eslint.config.mjs';
 import { appFrameSrc } from '@/lib/app/csp';
+import { occupiedTiers } from '@/lib/app/reserved-tiers';
 import { initAppUserCreatedHooks } from '@/lib/app/user-created';
-import { collectLeafSubjectData } from '@/lib/app/leaf-data-export';
+import { collectLeafSubjectData, initLeafSubjectSources } from '@/lib/app/leaf-data-export';
+import {
+  getAppSubjectSources,
+  getAppExcludedSubjectSources,
+  __resetAppSubjectSourceRegistryForTests,
+} from '@/lib/privacy/subject-source-registry';
 import { getAppJobs, __resetAppJobsForTests } from '@/lib/orchestration/maintenance/app-jobs';
 import { getEffectiveRateLimitPolicy, RATE_LIMIT_POLICY } from '@/lib/security/rate-limit-policy';
 import { getRegisteredNavSections, __resetNavRegistryForTests } from '@/lib/admin-nav/registry';
+import {
+  listAppMcpResourceTypes,
+  listAllowedMcpResourceUriSchemes,
+  __resetAppMcpResourcesForTests,
+} from '@/lib/orchestration/mcp/resource-registry';
+import {
+  listGraders,
+  __resetGraderRegistryForTests,
+} from '@/lib/orchestration/evaluations/graders/registry';
+import {
+  ACCOUNT_SURFACES,
+  getRegisteredAccountSections,
+  __resetAccountSectionRegistryForTests,
+} from '@/lib/account-sections/registry';
 
 /**
  * One row per `lib/app/*` seam.
@@ -86,6 +112,9 @@ interface SeamDefault {
  * Seam files deliberately absent from the table below, with the reason. The
  * drift guard at the bottom of this file allows exactly these two.
  */
+/** This file's own repo-relative path — the one place importActual is allowed. */
+const THIS_FILE = path.join('tests', 'unit', 'lib', 'app', 'defaults.test.ts');
+
 const UNASSERTED_SEAMS = new Set([
   // Asserted behaviourally instead — see tests/unit/lib/db/drift-probes.test.ts.
   'lib/app/db-drift.ts',
@@ -171,17 +200,78 @@ const SEAM_DEFAULTS: SeamDefault[] = [
     },
   },
   {
+    seam: 'lib/app/footer.ts',
+    risk: 'a stray value would rewrite — or silently remove — the attribution line on every install, on both the public and authenticated footers',
+    assert: () => expect(footerCopyright).toBeNull(),
+  },
+  {
     seam: 'lib/app/emails.ts',
     risk: 'a stray override would swap an auth email for every install',
     assert: () => expect(emailOverrides).toEqual({}),
   },
   {
     seam: 'lib/app/leaf-data-export.ts',
-    risk: 'a stray collector would leak leaf rows into every Daybreak leaf’s subject-access export',
-    assert: async () =>
+    risk: 'a stray collector would leak leaf rows into every Daybreak leaf’s subject-access export, and a stray declaration would pre-account for a table nobody decided about',
+    assert: async () => {
       expect(await collectLeafSubjectData({ userId: 'user-1', email: 'user@example.com' })).toEqual(
         {}
-      ),
+      );
+      // The declaration half (#533), asserted as "this seam changes nothing"
+      // rather than "the registry is empty". Reading the registry TRIGGERS the
+      // lazy init, which runs the framework tier as well — so an emptiness
+      // assertion here would be asserting Daybreak's declarations are absent,
+      // which is false and is not the property this row holds. What a leaf fork
+      // needs pinned is that `initLeafSubjectSources()` itself contributes
+      // nothing, and that survives whatever the tier above it declared.
+      __resetAppSubjectSourceRegistryForTests();
+      const sourcesBefore = getAppSubjectSources();
+      const excludedBefore = getAppExcludedSubjectSources();
+      initLeafSubjectSources();
+      expect(getAppSubjectSources()).toEqual(sourcesBefore);
+      expect(getAppExcludedSubjectSources()).toEqual(excludedBefore);
+    },
+  },
+  {
+    seam: 'lib/app/data-export.ts',
+    // PINNED (Daybreak fills this bridge): it contributes the framework tier's
+    // manifest and delegates the rest to `leaf-data-export.ts` (row above). The
+    // empty contract moved there; what is pinned here is that the bridge declares
+    // EXACTLY the framework manifest — nothing extra, and nothing missing.
+    //
+    // Only the declaration half runs. `collectAppSubjectData()` reaches real
+    // Prisma through the framework collector, and proving those queries execute
+    // is `npm run smoke:export`'s job against a live database — a unit test
+    // mocking Prisma could only assert what the mock returned.
+    risk: 'a stray declaration would pre-account for a table nobody decided about, silencing the fork-accounting rule in export-sources.test.ts for that model',
+    // Derived from `prisma/schema/framework-*.prisma` on disk, NOT from the
+    // framework manifest — the ESLint boundary forbids app-shell code importing
+    // `@/lib/framework`, and this file is app-shell. Reading the schema is also
+    // the stronger pin: it says the bridge accounts for EVERY framework model,
+    // which is the property core's coverage guard enforces, rather than that it
+    // agrees with a constant it derives from anyway.
+    assert: () => {
+      const schemaDir = path.join(process.cwd(), 'prisma', 'schema');
+      const frameworkModels = readdirSync(schemaDir)
+        .filter((file) => file.startsWith('framework-') && file.endsWith('.prisma'))
+        .flatMap((file) => [
+          ...readFileSync(path.join(schemaDir, file), 'utf8').matchAll(/^model\s+(\w+)\s*\{/gm),
+        ])
+        .map((match) => match[1])
+        .sort();
+
+      // A regex that quietly stopped matching would make the comparison below
+      // vacuously true on both sides.
+      expect(frameworkModels.length).toBeGreaterThan(5);
+
+      __resetAppSubjectSourceRegistryForTests();
+      // Reading triggers the lazy init, so this exercises the REAL seam.
+      const accounted = [
+        ...getAppSubjectSources().map((entry) => entry.model),
+        ...getAppExcludedSubjectSources().map((entry) => entry.model),
+      ].sort();
+
+      expect(accounted).toEqual(frameworkModels);
+    },
   },
   {
     seam: 'lib/app/bootstrap.ts',
@@ -258,6 +348,95 @@ const SEAM_DEFAULTS: SeamDefault[] = [
     assert: () => expect(initAppUserCreatedHooks()).toBeUndefined(),
   },
   {
+    seam: 'lib/app/mcp-resources.ts',
+    risk: 'a stray handler would expose app data over MCP to every install\u2019s connected clients',
+    assert: () => {
+      __resetAppMcpResourcesForTests();
+      // Both readers trigger the lazy init, so this exercises the REAL seam.
+      expect(listAppMcpResourceTypes()).toEqual([]);
+      // Core's own scheme, and nothing else.
+      expect(listAllowedMcpResourceUriSchemes()).toEqual(['sunrise']);
+    },
+  },
+  {
+    seam: 'lib/app/evaluations.ts',
+    risk: 'a stray grader would appear in every install\u2019s metric picker \u2014 and, on a slug core already uses, would silently rescore every run',
+    assert: () => {
+      // The registry module is driven directly, so core's barrel has not
+      // side-effect-registered anything: whatever listGraders() returns here
+      // came from the seam. The read triggers the lazy init, so this exercises
+      // the REAL file.
+      __resetGraderRegistryForTests();
+      expect(listGraders()).toEqual([]);
+    },
+  },
+  {
+    seam: 'lib/app/account-sections.ts',
+    risk: 'a stray section would appear on every install\u2019s /profile and /settings',
+    assert: () => {
+      __resetAccountSectionRegistryForTests();
+      // The read triggers the lazy init, so this exercises the REAL seam.
+      for (const surface of ACCOUNT_SURFACES) {
+        expect(getRegisteredAccountSections(surface)).toEqual([]);
+      }
+    },
+  },
+  {
+    seam: 'lib/app/api-key-scopes.ts',
+    risk: 'a stray scope would be mintable on every install \u2014 and a name colliding with a core scope would change what an existing key satisfies',
+    assert: () => {
+      expect(APP_API_KEY_SCOPES).toEqual([]);
+      // …and the union it feeds is exactly core, by value not just by length.
+      expect(listValidApiKeyScopes()).toEqual([...CORE_API_KEY_SCOPES]);
+    },
+  },
+  {
+    seam: 'lib/app/reserved-tiers.ts',
+    // PINNED (Daybreak is the framework-layer fork): it occupies `lib/framework`
+    // and `.context/framework`, so those two rows of reserved-fork-tiers.test.ts
+    // are unsatisfiable here and are declared away. Pinned exactly, not loosened
+    // to a `toContain`: the value of this row in a fork is that the OTHER three
+    // tiers keep guarding, and `/app` in particular — Daybreak reserves the leaf
+    // surface EMPTY for its own forks, so a file appearing under `components/app/`
+    // or `.context/app/` in THIS repo is a real defect that guard is what catches.
+    risk: 'a stray entry would switch OFF the guard that keeps a reserved tier empty — for Daybreak that means silently permitting core, or this repo itself, to occupy the leaf surface it holds in trust for its own forks',
+    assert: () => expect(occupiedTiers).toEqual(['lib/framework', '.context/framework']),
+  },
+  {
+    seam: 'lib/app/brand.ts',
+    risk: 'a stray value would rebrand every install — page titles, both footers’ copyright line, the root meta description and every transactional email — and the legal-entity field is a legal-attribution surface, not a cosmetic one',
+    // `importActual`, NOT a plain import: tests/setup.ts pins this seam to null
+    // for the whole suite so that no core test reads a fork's brand. Importing
+    // it normally here would therefore assert the MOCK ships null, which is true
+    // by construction and would keep passing in a fork that had filled the real
+    // file — turning the one row that tells a fork to pin its value into a row
+    // that can never fail.
+    // PINNED (Daybreak fills this bridge): the framework's own identity, which a
+    // leaf fork overrides from the reserved-empty `leaf-brand.ts` (row below).
+    assert: async () => {
+      const seam = await vi.importActual<typeof import('@/lib/app/brand')>('@/lib/app/brand');
+      expect(seam.appBrandName).toBe('Daybreak');
+      expect(seam.appBrandLegalName).toBe('All Too Human Ltd');
+      expect(seam.appBrandDescription).toBe(
+        'Daybreak — an AI-application framework built on the Sunrise platform.'
+      );
+    },
+  },
+  {
+    seam: 'lib/app/leaf-brand.ts',
+    risk: 'a stray value would rebrand every Daybreak leaf — page titles, both footers’ copyright line, the root meta description and every transactional email — and the legal-entity field is a legal-attribution surface, not a cosmetic one',
+    // `importActual` for the same reason the row above uses it: tests/setup.ts
+    // pins the brand seam for the whole suite, and asserting against the mock
+    // would be true by construction.
+    assert: async () => {
+      const seam =
+        await vi.importActual<typeof import('@/lib/app/leaf-brand')>('@/lib/app/leaf-brand');
+      expect(seam.leafBrandName).toBeNull();
+      expect(seam.leafBrandLegalName).toBeNull();
+      expect(seam.leafBrandDescription).toBeNull();
+    },
+  },
+  {
     seam: 'lib/app/csp.ts',
     risk: 'a stray origin would widen the iframe policy on every install',
     // These values are spliced straight into a response header, so an
@@ -268,11 +447,71 @@ const SEAM_DEFAULTS: SeamDefault[] = [
 
 afterEach(() => {
   __resetNavRegistryForTests();
+  __resetAccountSectionRegistryForTests();
 });
 
 describe('lib/app/ seams ship empty', () => {
   it.each(SEAM_DEFAULTS)('$seam registers nothing by default', async ({ assert }) => {
     await assert();
+  });
+
+  it('nothing but this file escapes the suite-wide brand-seam pin', () => {
+    // tests/setup.ts mocks `@/lib/app/brand` to null for EVERY test file, so
+    // that no core test can read a fork's brand and fail for a reason the fork
+    // cannot fix (#660/#661). That guarantee holds across all ~1095 test files
+    // by construction, but only while nothing escapes the mock.
+    //
+    // `vi.importActual` is legitimate here and nowhere else: it is what makes
+    // the brand row above assert the REAL scaffold rather than the mock, which
+    // is what keeps "seams ship empty" able to fail in a fork.
+    //
+    // `vi.doUnmock` is never right. It REMOVES the pin instead of restoring it,
+    // so every later case in that file sees the real seam. That is not
+    // hypothetical: it shipped twice during this change — once in this suite's
+    // own brand tests (13 cases failed against a filled seam) and once in
+    // layout-metadata, where it was invisible only because every remaining case
+    // happened to re-stub first. To go back to the null default mid-file,
+    // re-`doMock` it; do not unmock it.
+    //
+    // Matched by REGEX over vitest's whole unmocking surface, not by two string
+    // literals. The literal version missed `vi.unmock` — a third escape route —
+    // and was also defeated by double quotes or a line-wrapped call. That is the
+    // enumerating-guard failure mode this repo keeps meeting: it fails one
+    // instance per round. vitest exposes exactly `unmock` and `doUnmock` for
+    // removing a mock, so anchoring on `(?:do)?unmock` is exhaustive over the API
+    // rather than over the spellings someone happened to think of.
+    const seamPath = String.raw`['"\`]@/lib/app/brand['"\`]`;
+    const unmockRe = new RegExp(String.raw`\bvi\s*\.\s*(?:do)?[Uu]nmock\s*\(\s*` + seamPath);
+    const actualRe = new RegExp(String.raw`importActual[\s\S]{0,80}?` + seamPath);
+
+    const offenders: string[] = [];
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(full);
+          continue;
+        }
+        if (!/\.tsx?$/.test(entry.name)) continue;
+        const src = readFileSync(full, 'utf8');
+        const rel = path.relative(process.cwd(), full);
+        if (unmockRe.test(src)) {
+          offenders.push(`${rel}: unmocks the pin instead of restoring it`);
+        }
+        if (actualRe.test(src) && rel !== THIS_FILE) {
+          offenders.push(`${rel}: reads the real seam past the pin`);
+        }
+      }
+    };
+    walk(path.join(process.cwd(), 'tests'));
+
+    expect(
+      offenders,
+      'These test files escape the brand-seam pin in tests/setup.ts. A fork that ' +
+        'fills lib/app/brand.ts would see its own brand here and fail a core test ' +
+        'it cannot fix — the exact class #660 is about. Re-doMock the null values ' +
+        'instead of unmocking, and leave importActual to this file.'
+    ).toEqual([]);
   });
 
   it('has a row for every seam file in lib/app/', () => {

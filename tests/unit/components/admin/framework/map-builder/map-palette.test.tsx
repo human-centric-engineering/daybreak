@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * MapPalette (f-map-editor t-1) — the draggable node-kind sidebar. Proves it renders
  * a block per kind, sets the drag payload on dragstart, and shows the usage count

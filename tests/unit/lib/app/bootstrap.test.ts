@@ -6,6 +6,19 @@
  * NOT prevent the leaf hook or callers. The real framework registration is
  * covered by init.test.ts; the real end-to-end chain by
  * tests/integration/lib/framework/boot.test.ts.
+ *
+ * ---------------------------------------------------------------------------
+ * FORK NOTE — this reads the real `lib/app/bootstrap.ts`, not a mock
+ * ---------------------------------------------------------------------------
+ * Upstream Sunrise ships that seam empty and this file asserts the no-op.
+ * Daybreak FILLS it, so the assertions here are pinned to the filled behaviour:
+ * `initApp()` boots the framework tier and runs the module sync, each isolated
+ * in its own try/catch so a failure degrades rather than crashing the server.
+ *
+ * **What a leaf should expect, and what to do.** Your boot work goes in
+ * `lib/app/leaf-bootstrap.ts`, which this seam calls — so it runs here. Pin
+ * what it does rather than removing a case; the contract every tier depends on
+ * is that `initApp()` never rejects, and that is what these cases hold.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';

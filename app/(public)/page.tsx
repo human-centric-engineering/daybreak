@@ -13,22 +13,31 @@ import {
   Search,
 } from 'lucide-react';
 import { Hero, Section, Features, Pricing, FAQ, CTA } from '@/components/marketing';
+import { BRAND } from '@/lib/brand';
 
-const heroDescription =
-  'Build production-ready applications faster with Sunrise. A Next.js 16 starter template with authentication, database, email, Docker — plus a complete AI agent orchestration layer for building agents, workflows, and knowledge bases.';
+// Placeholder copy, like the rest of this page — you are expected to rewrite or
+// delete it. It reads `BRAND.name` rather than naming the product, so a fork
+// that has set `appBrandName` in lib/app/brand.ts but not yet rewritten this
+// file still advertises itself rather than Sunrise (#519). A full sentence rather than
+// `BRAND.description`, whose fallback is the bare product name: that is the
+// right trade for the root layout and the wrong one here, where this string is
+// the search-result snippet and the shared-link card.
+const homeDescription = `Build production-ready applications faster with ${BRAND.name}.`;
 
 export const metadata: Metadata = {
-  title: 'Sunrise - Production-Ready Next.js Starter Template',
-  description: heroDescription,
+  // `(public)/layout.tsx` supplies the template `%s - ${BRAND.name}`, so this
+  // declares the bare segment and the brand is appended once. The cards below
+  // set no title of their own, so Next copies the resolved "Home - <brand>"
+  // into both — one string to keep correct rather than three.
+  title: 'Home',
+  description: homeDescription,
   openGraph: {
-    title: 'Sunrise - Production-Ready Next.js Starter Template',
-    description: heroDescription,
+    description: homeDescription,
     type: 'website',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'Sunrise - Production-Ready Next.js Starter Template',
-    description: heroDescription,
+    description: homeDescription,
   },
 };
 
@@ -189,6 +198,20 @@ const faqItems = [
  *
  * Public landing page showcasing Sunrise features and encouraging adoption.
  * Uses reusable marketing components for consistent styling.
+ *
+ * **Fork-owned placeholder.** Every fork rewrites or deletes this page, so
+ * Sunrise deliberately ships **no test asserting its content** — section ids,
+ * copy, pricing tiers and FAQ items are all a fork's to change, and a core test
+ * pinning them is a core test a fork cannot satisfy (the #480 / #525 / #530 /
+ * #533 class). Do not add one.
+ *
+ * That leaves one real exposure, and it has bitten: this file was once
+ * overwritten wholesale with `about/page.tsx`, and `/` served the About page
+ * through a release. Nothing content-shaped could have caught that without
+ * becoming a fork's problem, so the guard is structural instead —
+ * `tests/unit/app/route-module-distinctness.test.ts` fails when any two route
+ * modules under `app/` are byte-identical, which needs no opinion about what
+ * this page says.
  *
  * Phase 3.5: Landing Page & Marketing
  */

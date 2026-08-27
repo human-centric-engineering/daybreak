@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * MapNode (f-map-editor t-1) — the editable canvas node. `@xyflow/react`'s `Handle`
  * is stubbed (no flow context in happy-dom); this proves the node paints its key,

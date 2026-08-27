@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * ValidationPanel (f-map-editor t-3) — the live-preflight error strip. Proves it hides
  * when clean, lists each issue with its code + message, selects the referenced node on

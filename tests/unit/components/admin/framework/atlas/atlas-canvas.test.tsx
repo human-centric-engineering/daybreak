@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * AtlasCanvas (f-atlas t-2a) — the read-only React Flow surface. It owns no state; it paints the
  * nodes/edges the view computes and forwards a node click up. `@xyflow/react` is mocked (no layout

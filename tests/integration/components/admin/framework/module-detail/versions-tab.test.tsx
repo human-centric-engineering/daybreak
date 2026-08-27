@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Integration test — VersionsTab (f-ops-views t-2).
  *

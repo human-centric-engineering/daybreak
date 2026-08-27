@@ -7,6 +7,22 @@
  * framework and leaf tiers together without either losing the other.
  *
  * @see lib/framework/privacy/export.ts · lib/app/data-export.ts
+ *
+ * ---------------------------------------------------------------------------
+ * FORK NOTE — this reads the real `lib/app/data-export.ts`, not a mock
+ * ---------------------------------------------------------------------------
+ * It has to: the bridge is the thing under test in the second describe block —
+ * that Daybreak's framework sections reach `app` and that the leaf tier is not
+ * lost on the way. A mocked seam would assert the mock.
+ *
+ * **What a leaf should expect, and what to do.** Filling
+ * `lib/app/leaf-data-export.ts` adds your sections to what
+ * `collectAppSubjectData()` returns, so the two cases that count keys — "spreads
+ * the framework tier's sections directly under `app`" and "contributes nothing
+ * leaf-owned by default" — will fail. That second one is asserting emptiness on
+ * YOUR behalf, so PIN it: assert your sections alongside the framework's.
+ * Deleting either case loses the guarantee that one tier cannot shadow the
+ * other's section, which is the failure mode that costs a data subject rows.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -27,6 +43,9 @@ const findMany = {
   structureChangeProposal: vi.fn(),
   moduleVersion: vi.fn(),
   moduleWorkflowBinding: vi.fn(),
+  // The eval source reaches the subject by JOIN: conversations first, then evals.
+  aiConversation: vi.fn(),
+  frameworkConversationEval: vi.fn(),
 };
 
 vi.mock('@/lib/db/client', () => ({
@@ -45,10 +64,15 @@ vi.mock('@/lib/db/client', () => ({
     },
     moduleVersion: { findMany: (...a: unknown[]) => findMany.moduleVersion(...a) },
     moduleWorkflowBinding: { findMany: (...a: unknown[]) => findMany.moduleWorkflowBinding(...a) },
+    aiConversation: { findMany: (...a: unknown[]) => findMany.aiConversation(...a) },
+    frameworkConversationEval: {
+      findMany: (...a: unknown[]) => findMany.frameworkConversationEval(...a),
+    },
   },
 }));
 
 const { collectFrameworkSubjectData } = await import('@/lib/framework/privacy/export');
+const { FRAMEWORK_SUBJECT_DATA_SOURCES } = await import('@/lib/framework/privacy/export-sources');
 const { collectAppSubjectData } = await import('@/lib/app/data-export');
 
 const SUBJECT = { userId: 'user-1', email: 'subject@example.com' };
@@ -83,6 +107,11 @@ beforeEach(() => {
   findMany.moduleWorkflowBinding.mockResolvedValue([
     { id: 'mw1', eventType: 'completed', createdAt: NOW, module: { slug: 'coaching' } },
   ]);
+
+  findMany.aiConversation.mockResolvedValue([{ id: 'c1' }, { id: 'c2' }]);
+  findMany.frameworkConversationEval.mockResolvedValue([
+    { id: 'ev1', conversationId: 'c1', messageId: 'm1', faithfulness: 0.9, scoredAt: NOW },
+  ]);
 });
 
 describe('collectFrameworkSubjectData', () => {
@@ -90,9 +119,9 @@ describe('collectFrameworkSubjectData', () => {
     const result = await collectFrameworkSubjectData(SUBJECT);
 
     // Rows come back verbatim — an `export` source must not narrow.
-    expect(result.personalData.journeys).toEqual([{ id: 'j1', graphSlug: 'onboarding' }]);
-    expect(result.personalData.slotValues).toEqual([{ id: 's1', value: 'a captured fact' }]);
-    expect(result.personalData.journeyNudges).toEqual([{ id: 'n1', nodeKey: 'step-2' }]);
+    expect(result.journeys).toEqual([{ id: 'j1', graphSlug: 'onboarding' }]);
+    expect(result.slotValues).toEqual([{ id: 's1', value: 'a captured fact' }]);
+    expect(result.journeyNudges).toEqual([{ id: 'n1', nodeKey: 'step-2' }]);
   });
 
   it('includes the non-journey engagement event, which carries the subject’s own words', async () => {
@@ -101,7 +130,7 @@ describe('collectFrameworkSubjectData', () => {
     // reporting a plausible count for the events it did return.
     const result = await collectFrameworkSubjectData(SUBJECT);
 
-    expect(result.personalData.journeyEvents).toHaveLength(2);
+    expect(result.journeyEvents).toHaveLength(2);
     expect(findMany.journeyEvent).toHaveBeenCalledWith(
       expect.objectContaining({ where: { userId: 'user-1' } })
     );
@@ -135,13 +164,11 @@ describe('collectFrameworkSubjectData', () => {
   it('reduces authored config to id + label + date, never its contents', async () => {
     const result = await collectFrameworkSubjectData(SUBJECT);
 
-    expect(result.attributions.facilitationMaps).toEqual([
-      { id: 'g1', label: 'Onboarding', createdAt: NOW },
-    ]);
-    expect(result.attributions.facilitationMapVersions).toEqual([
+    expect(result.facilitationMaps).toEqual([{ id: 'g1', label: 'Onboarding', createdAt: NOW }]);
+    expect(result.facilitationMapVersions).toEqual([
       { id: 'gv1', label: 'onboarding v3', createdAt: NOW },
     ]);
-    expect(result.attributions.moduleWorkflowBindings).toEqual([
+    expect(result.moduleWorkflowBindings).toEqual([
       { id: 'mw1', label: 'coaching → completed', createdAt: NOW },
     ]);
   });
@@ -151,7 +178,10 @@ describe('collectFrameworkSubjectData', () => {
     // uses `select`, so the guarantee is that the selected shape has no such key.
     const result = await collectFrameworkSubjectData(SUBJECT);
 
-    const serialised = JSON.stringify(result.attributions);
+    const serialised = JSON.stringify([
+      result.facilitationPolicies,
+      result.structureChangeProposals,
+    ]);
     expect(serialised).not.toContain('payload');
     expect(serialised).not.toContain('proposedDefinition');
   });
@@ -169,26 +199,48 @@ describe('collectFrameworkSubjectData', () => {
     );
   });
 
-  it('echoes every source into meta with its row count', async () => {
+  it('produces exactly one key per declared source, and no others', async () => {
+    // The manifest and the collector are two halves of one promise: every
+    // declared `section` must appear in what this returns, or `exportUserData()`
+    // throws DeclaredAppSourceMissingError. Deriving BOTH from the same constant
+    // is what makes that hold, and this is the test that says so — an extra key
+    // is a section `meta.app` would never describe, and a missing one is the
+    // throw.
     const result = await collectFrameworkSubjectData(SUBJECT);
 
-    // The meta block is how the subject sees the BOUNDARY of what they got.
-    expect(result.meta.exported).toHaveLength(4);
-    expect(result.meta.attribution).toHaveLength(6);
-
-    const events = result.meta.exported.find((s) => s.section === 'journeyEvents');
-    expect(events).toMatchObject({ model: 'JourneyEvent', rows: 2 });
-    expect(events?.description.length).toBeGreaterThan(10);
+    expect(Object.keys(result).sort()).toEqual(
+      FRAMEWORK_SUBJECT_DATA_SOURCES.map((source) => source.section).sort()
+    );
   });
 
-  it('discloses a narrowing by surfacing the source’s scopeNote in meta', async () => {
+  it('returns an empty array for a source the subject owns nothing in, never omitting the key', async () => {
+    // `undefined` counts as missing — JSON.stringify drops the key, so the
+    // section would be certified in `meta.app` and absent from what the subject
+    // receives. `rows.length ? rows : undefined` is the shape this forbids.
+    findMany.slotValue.mockResolvedValue([]);
+
+    const result = await collectFrameworkSubjectData(SUBJECT);
+
+    expect(result.slotValues).toEqual([]);
+    expect(Object.hasOwn(result, 'slotValues')).toBe(true);
+  });
+
+  it('discloses a narrowing by folding the source’s scopeNote into its declared description', async () => {
     // No framework source narrows TODAY, so this branch would otherwise never
     // run — and it is the one that keeps a narrowed source honest. A source that
-    // returns only some of the subject's rows without a scopeNote is the
+    // returns only some of the subject's rows without saying so is the
     // silent-omission failure at row granularity instead of table granularity:
     // the count looks like a complete answer either way.
-    const { FRAMEWORK_SUBJECT_DATA_SOURCES } =
+    //
+    // Core's `AppSubjectDataSource` has no `scopeNote` field — only core's own
+    // `SubjectDataSource` does — so delegating to the registry would have dropped
+    // the note entirely. Folding it into the description is what keeps it in
+    // front of the subject, on the one surface (`meta.app`) that reaches them.
+    const { FRAMEWORK_SUBJECT_DATA_SOURCES, initFrameworkSubjectSources } =
       await import('@/lib/framework/privacy/export-sources');
+    const { getAppSubjectSources, __resetAppSubjectSourceRegistryForTests } =
+      await import('@/lib/privacy/subject-source-registry');
+
     FRAMEWORK_SUBJECT_DATA_SOURCES.push({
       model: 'JourneyEvent',
       section: 'narrowedProbe',
@@ -199,16 +251,25 @@ describe('collectFrameworkSubjectData', () => {
     });
 
     try {
-      const result = await collectFrameworkSubjectData(SUBJECT);
-      const probe = result.meta.exported.find((entry) => entry.section === 'narrowedProbe');
+      __resetAppSubjectSourceRegistryForTests();
+      initFrameworkSubjectSources();
+      const declared = getAppSubjectSources();
 
-      expect(probe?.scopeNote).toBe('Withholds rows belonging to a third party.');
-      // Sources that do NOT narrow must stay free of the key, so its presence
-      // always means something.
-      const slots = result.meta.exported.find((entry) => entry.section === 'slotValues');
-      expect(slots && 'scopeNote' in slots).toBe(false);
+      const probe = declared.find((entry) => entry.section === 'narrowedProbe');
+      expect(probe?.description).toBe(
+        'A deliberately narrowed probe source. Withholds rows belonging to a third party.'
+      );
+
+      // A source that does NOT narrow must be left exactly as written, so the
+      // extra sentence always means something.
+      const slots = declared.find((entry) => entry.section === 'slotValues');
+      expect(slots?.description).toBe(
+        FRAMEWORK_SUBJECT_DATA_SOURCES.find((source) => source.section === 'slotValues')
+          ?.description
+      );
     } finally {
       FRAMEWORK_SUBJECT_DATA_SOURCES.pop();
+      __resetAppSubjectSourceRegistryForTests();
     }
   });
 
@@ -222,23 +283,57 @@ describe('collectFrameworkSubjectData', () => {
 });
 
 describe('collectAppSubjectData bridge', () => {
-  it('puts the framework tier under the reserved `framework` section', async () => {
+  it('spreads the framework tier’s sections directly under `app`', async () => {
+    // The nesting is gone. Daybreak used to fold the tier into a single
+    // `app.framework = { meta, personalData, attributions }` key, because core
+    // had no way to describe a fork tier's sections and an undescribed section
+    // is a bundle whose manifest contradicts its contents. Sunrise 0.10.0 landed
+    // that (#533), so the sections sit flat where `meta.app` can name each one.
     const result = await collectAppSubjectData(SUBJECT);
 
-    expect(Object.keys(result)).toEqual(['framework']);
-    expect(result.framework).toMatchObject({
-      personalData: expect.objectContaining({ slotValues: expect.any(Array) }),
-      attributions: expect.objectContaining({ facilitationMaps: expect.any(Array) }),
-    });
+    expect(result).not.toHaveProperty('framework');
+    expect(Object.keys(result).sort()).toEqual(
+      FRAMEWORK_SUBJECT_DATA_SOURCES.map((source) => source.section).sort()
+    );
+    expect(result.slotValues).toEqual([{ id: 's1', value: 'a captured fact' }]);
+    expect(result.facilitationMaps).toEqual([{ id: 'g1', label: 'Onboarding', createdAt: NOW }]);
   });
 
   it('contributes nothing leaf-owned by default', async () => {
     // Daybreak keeps `leaf-data-export.ts` reserved-empty; a vanilla Daybreak
-    // export must carry the framework section and nothing else.
+    // export must carry the framework sections and nothing else.
     const result = await collectAppSubjectData(SUBJECT);
 
     expect(Object.keys(result)).not.toContain('bookings');
-    expect(Object.keys(result)).toHaveLength(1);
+    expect(Object.keys(result)).toHaveLength(FRAMEWORK_SUBJECT_DATA_SOURCES.length);
+  });
+
+  it('declares every framework model to core’s registry — as a source or an exclusion', async () => {
+    // The delegation itself. Core's coverage guard diffs `framework-*.prisma`
+    // against this registry, so a model that fails to register is not a quiet
+    // gap: it fails the suite by name. What this pins is that the bridge routes
+    // the framework tier's declarations there at all — a bridge that collected
+    // rows but declared nothing would pass every test above and ship a bundle
+    // whose manifest described none of it.
+    const { initAppSubjectSources } = await import('@/lib/app/data-export');
+    const {
+      getAppSubjectSources,
+      getAppExcludedSubjectSources,
+      __resetAppSubjectSourceRegistryForTests,
+    } = await import('@/lib/privacy/subject-source-registry');
+    const { FRAMEWORK_EXCLUDED_SOURCES } = await import('@/lib/framework/privacy/export-sources');
+
+    __resetAppSubjectSourceRegistryForTests();
+    initAppSubjectSources();
+
+    expect(
+      getAppSubjectSources()
+        .map((entry) => entry.model)
+        .sort()
+    ).toEqual(FRAMEWORK_SUBJECT_DATA_SOURCES.map((source) => source.model).sort());
+    expect(getAppExcludedSubjectSources()).toEqual(FRAMEWORK_EXCLUDED_SOURCES);
+
+    __resetAppSubjectSourceRegistryForTests();
   });
 
   it('propagates a framework failure instead of returning a partial bundle', async () => {

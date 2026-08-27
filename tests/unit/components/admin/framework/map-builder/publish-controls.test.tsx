@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * PublishControls (f-map-editor t-4) — the header publish + history cluster. Proves the
  * Publish button is gated on a saved draft, the History button delegates, the confirm

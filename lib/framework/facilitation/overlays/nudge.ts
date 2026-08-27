@@ -253,6 +253,14 @@ async function postNudgeWebhook(url: string, payload: NudgeWebhookPayload): Prom
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ event: 'proactive_nudge', ...payload }),
       signal: AbortSignal.timeout(10_000),
+      // Refuse redirects (Sunrise #628 / 0.10.0). The URL is validated once,
+      // before this call; following a `Location` would carry this payload — a
+      // named user's email and their journey positions — to a host nothing
+      // validated, chosen by whoever controls the configured endpoint. A
+      // redirect here is a misconfiguration or an attack, never a working setup,
+      // so failing is the right answer: the catch below logs it and returns
+      // false, which leaves the journey unthrottled and retried next sweep.
+      redirect: 'error',
     });
     if (!response.ok) {
       logger.warn('Proactive nudge webhook returned non-OK', {

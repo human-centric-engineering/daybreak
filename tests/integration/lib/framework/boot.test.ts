@@ -7,6 +7,22 @@
  * knowledge search, the leaf context-contributors scaffold), so the framework
  * side and the core registry run for real. Proves the tiers compose, not just
  * that each unit works in isolation.
+ *
+ * ---------------------------------------------------------------------------
+ * FORK NOTE — this reads the real `lib/app/bootstrap.ts`, not a mock
+ * ---------------------------------------------------------------------------
+ * That is deliberate: the property under test is that Daybreak's FILLED boot
+ * bridge reaches `initFramework()` and survives a failure inside it, and a
+ * mocked seam cannot show either. The cost is that a leaf fork which fills
+ * `lib/app/leaf-bootstrap.ts` changes what this measures — its own boot work
+ * runs here too.
+ *
+ * **What a leaf should expect, and what to do.** If your leaf's boot work is
+ * side-effect-free, nothing changes. If it registers or touches a database,
+ * this file will exercise it. Pin your own expectation rather than deleting a
+ * case: add an assertion that your leaf hook ran, and keep the existing ones —
+ * they hold the contract that boot NEVER rejects into instrumentation, which is
+ * as load-bearing for your fork as it is for Daybreak.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';

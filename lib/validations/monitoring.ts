@@ -44,11 +44,6 @@ export const memoryUsageSchema = z.object({
 export const healthCheckResponseSchema = z.object({
   status: z.enum(['ok', 'error']),
   version: z.string(),
-  sunrise: z.string(),
-  // DAYBREAK — required, matching `sunrise`. Required rather than optional on
-  // purpose: this schema exists to catch a stripping proxy or an older
-  // deployment, and an optional field would let exactly that pass silently.
-  daybreak: z.string(),
   uptime: z.number(),
   timestamp: z.string(),
   services: z.object({

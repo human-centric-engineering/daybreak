@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Integration test — Framework Journey detail page (f-ops-views t-5b).
  *

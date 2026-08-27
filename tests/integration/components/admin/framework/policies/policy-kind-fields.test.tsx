@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Integration test — PolicyKindFields helpers + controls (f-admin-surfaces t-2).
  *

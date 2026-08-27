@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Unit test — RowConfirm (f-ops-views t-4c).
  *

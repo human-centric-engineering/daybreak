@@ -29,8 +29,28 @@ export interface SystemStats {
   system: {
     /** Node.js version */
     nodeVersion: string;
-    /** Application version from package.json */
+    /** Application version from package.json (the fork's app version) */
     appVersion: string;
+    /**
+     * Sunrise platform version this checkout corresponds to
+     * (`lib/sunrise-version.ts`). Distinct from `appVersion`, which a fork owns
+     * and bumps on its own cadence. Served only from admin-authenticated routes
+     * — see `app/api/health/route.ts` for why it is not on the public health
+     * payload.
+     */
+    sunriseVersion: string;
+    /**
+     * DAYBREAK — the framework version this checkout is built on
+     * (`lib/daybreak-version.ts`). The third member of the three-tier set:
+     * `appVersion` is the leaf app's own, `daybreakVersion` is the framework it
+     * forked, `sunriseVersion` is the platform underneath. Each tier is owned by
+     * a different party, so none can be derived from another. Admin-only for the
+     * same reason `sunriseVersion` is — it names the exact framework release, and
+     * therefore the exact set of published Daybreak issues, and that answer is
+     * useful against every Daybreak-derived deployment rather than just this one.
+     * See `.context/framework/VERSIONING.md`.
+     */
+    daybreakVersion: string;
     /** Current environment (development/production) */
     environment: string;
     /** Server uptime in seconds */

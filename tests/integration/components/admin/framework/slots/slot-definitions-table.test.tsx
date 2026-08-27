@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Integration test — SlotDefinitionsTable (f-admin-surfaces t-1).
  *

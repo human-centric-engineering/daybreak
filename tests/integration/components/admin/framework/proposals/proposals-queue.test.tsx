@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Integration test — ProposalsQueue (f-admin-surfaces t-3).
  *

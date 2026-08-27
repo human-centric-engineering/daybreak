@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Integration test — RosterSearch (f-admin-surfaces t-4).
  *

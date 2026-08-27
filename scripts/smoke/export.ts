@@ -16,7 +16,9 @@
  *
  * Read-only against user data: creates a throwaway subject with a conversation
  * and an API key, exports it, and removes what it created. Never touches seed
- * data and never exports a real user.
+ * data and never exports a real user. That the subject is brand new is load
+ * bearing, not incidental — it is what makes "every declared app section is
+ * empty" a leak check rather than a formality.
  *
  * Skips cleanly (exit 0) when no database is reachable, so it is safe to invoke
  * anywhere — it only does real work where a DB exists (CI's `validate` job,
@@ -28,12 +30,15 @@
  *   npx tsx --env-file=.env.local scripts/smoke/export.ts
  */
 
+import { CREDENTIAL_ACCOUNT_ISSUER } from '@/lib/auth/constants';
 import { prisma } from '@/lib/db/client';
 import { exportUserData, SubjectNotFoundError } from '@/lib/privacy/export-user';
 import { SUBJECT_DATA_SOURCES } from '@/lib/privacy/export-sources';
-// DAYBREAK — the framework tier's manifest, so the assertions below derive their
-// expected counts rather than hardcoding them (see the framework block near the end).
-import { FRAMEWORK_SUBJECT_DATA_SOURCES } from '@/lib/framework/privacy/export-sources';
+import {
+  getAppSubjectSources,
+  getAppExcludedSubjectSources,
+} from '@/lib/privacy/subject-source-registry';
+import { isEmptySection } from '@/scripts/smoke/export-assertions';
 
 const PREFIX = 'smoke-test-export';
 const stamp = Date.now();
@@ -63,6 +68,18 @@ async function dbReachable(): Promise<boolean> {
 function check(cond: boolean, msg: string): void {
   if (!cond) throw new Error(`assertion failed: ${msg}`);
   console.log(`  ✓ ${msg}`);
+}
+
+/**
+ * Report something the run cannot assess, without failing it.
+ *
+ * The distinction matters for a fork: a failing `check` means "you have a bug",
+ * and this means "this script cannot tell". Conflating them is how a fork ends
+ * up with a red pipeline and no fork-owned way to green it — the shape of the
+ * issues this whole change exists to fix.
+ */
+function warn(msg: string): void {
+  console.log(`  ! ${msg}`);
 }
 
 async function main(): Promise<void> {
@@ -140,6 +157,9 @@ async function main(): Promise<void> {
     await prisma.account.create({
       data: {
         userId: subject.id,
+        // better-auth >= 1.7 keys identity on (issuer, accountId); a credential
+        // row must carry this issuer and the owning user's id.
+        issuer: CREDENTIAL_ACCOUNT_ISSUER,
         accountId: subject.id,
         providerId: 'credential',
         password: PASSWORD_HASH,
@@ -299,51 +319,141 @@ async function main(): Promise<void> {
 
     check(
       bundle.meta.exported.length + bundle.meta.attribution.length === sections.length,
-      'meta summarises every source'
-    );
-    check(bundle.meta.excluded.length > 0, 'meta discloses the documented exclusions');
-    // DAYBREAK — pinned, not deleted. Vanilla Sunrise asserts this seam is empty;
-    // Daybreak FILLS it (lib/app/data-export.ts bridges the framework tier), so
-    // the value moves rather than the check disappearing. What still has to hold
-    // is that the bridge contributes exactly the reserved `framework` section and
-    // nothing leaf-owned — and, more importantly, that every framework manifest
-    // query actually EXECUTED against real Postgres to produce it. That is the
-    // property this whole script exists for, and unit tests (which mock Prisma)
-    // cannot prove it.
-    const appSections = Object.keys(bundle.app);
-    check(
-      appSections.length === 1 && appSections[0] === 'framework',
-      'app seam carries exactly the framework section (Daybreak)'
+      'meta summarises every core source'
     );
 
-    const framework = bundle.app.framework as {
-      meta: { exported: { section: string }[]; attribution: { section: string }[] };
-      personalData: Record<string, unknown[]>;
-      attributions: Record<string, unknown[]>;
-    };
-    // Derived from the manifest, exactly as the core assertion above derives from
-    // SUBJECT_DATA_SOURCES — NOT a hardcoded count. A literal here would be a
-    // second place to edit every time the framework gains a table, and the two
-    // would drift apart silently the first time someone forgot.
-    const frameworkSections = [
-      ...Object.keys(framework.personalData),
-      ...Object.keys(framework.attributions),
-    ];
+    const declaredAppSources = getAppSubjectSources();
+
+    // The app tier's half of the same claim, asserted against the SERIALISED
+    // bundle.
+    //
+    // The in-memory comparison this replaced could not fail: `meta.app` is built
+    // by mapping the same `getAppSubjectSources()` the script would have read
+    // back, so it compared the registry with itself. What the subject actually
+    // receives is JSON, and that is a different artifact — so the row counts are
+    // recomputed here from the delivered payload rather than trusting the ones
+    // the service wrote.
+    //
+    // What that catches, precisely: a miscount, a section missing from the
+    // delivered JSON, and a value whose serialised form has a different size
+    // (a `Date` becomes a string). It does NOT catch a `Map` or a `Set` — both
+    // sides compute nought for those — nor `undefined`, which throws
+    // `DeclaredAppSourceMissingError` long before here. The `warn` above is
+    // what notices those shapes. An earlier version of this comment claimed
+    // otherwise, which is the overclaim this branch keeps making.
+    const delivered = JSON.parse(JSON.stringify(bundle)) as typeof bundle;
+    const mismatched: string[] = [];
+    for (const summary of delivered.meta.app) {
+      const value = delivered.app[summary.section];
+      const actualRows = Array.isArray(value) ? value.length : isEmptySection(value) ? 0 : 1;
+      if (!Object.hasOwn(delivered.app, summary.section) || actualRows !== summary.rows) {
+        mismatched.push(`${summary.section} (meta says ${summary.rows}, bundle has ${actualRows})`);
+      }
+    }
     check(
-      frameworkSections.length === FRAMEWORK_SUBJECT_DATA_SOURCES.length,
-      `all ${FRAMEWORK_SUBJECT_DATA_SOURCES.length} framework manifest sources ran against real Postgres`
+      mismatched.length === 0 && delivered.meta.app.length === declaredAppSources.length,
+      mismatched.length > 0
+        ? `meta.app disagrees with the delivered bundle for ${mismatched.join('; ')} — the ` +
+            'subject is told about data that is not there, or given data that is miscounted'
+        : delivered.meta.app.length !== declaredAppSources.length
+          ? `meta.app describes ${delivered.meta.app.length} section(s) after serialisation, ` +
+            `but ${declaredAppSources.length} were declared`
+          : declaredAppSources.length === 0
+            ? 'no app sources declared (vanilla Sunrise) — nothing to summarise'
+            : `all ${declaredAppSources.length} declared app source(s) survive serialisation ` +
+              'with row counts matching the delivered payload'
     );
+    check(bundle.meta.excluded.length > 0, 'meta discloses the documented exclusions');
+
+    // A fork tier's exclusions are disclosed on the same terms as core's, and
+    // this too is checked against the delivered JSON rather than the in-memory
+    // bundle — `meta.excluded` is spread from the same registry the script would
+    // read back, so comparing the two in memory checks nothing. What is worth
+    // proving here is that the reason a tier wrote reaches the subject verbatim.
+    const declaredAppExclusions = getAppExcludedSubjectSources();
+    const undisclosed = declaredAppExclusions
+      .filter(
+        (entry) =>
+          !delivered.meta.excluded.some(
+            (shown) => shown.model === entry.model && shown.reason === entry.reason
+          )
+      )
+      .map((entry) => entry.model);
     check(
-      framework.meta.exported.length + framework.meta.attribution.length ===
-        frameworkSections.length,
-      'framework meta summarises every framework source'
+      undisclosed.length === 0,
+      undisclosed.length > 0
+        ? `app exclusion(s) ${undisclosed.join(', ')} were declared but are absent from ` +
+            'meta.excluded — the subject is not told the table was withheld, or why'
+        : declaredAppExclusions.length === 0
+          ? 'no app exclusions declared (vanilla Sunrise) — nothing to disclose'
+          : `all ${declaredAppExclusions.length} declared app exclusion(s) disclosed to the subject`
     );
-    // Every declared section produced a key — a query that threw would have
-    // failed the export outright, and one silently skipped would be missing here.
+
+    // FORK NOTE — this asserts your declarations, not their absence.
+    //
+    // It used to read `Object.keys(bundle.app).length === 0` ("app seam is
+    // empty in vanilla Sunrise"), which implementing `collectAppSubjectData`
+    // makes false by construction — and this script is not in `validate` or
+    // `npm test`, so a fork found out from a red pipeline after a green local
+    // run (#530).
+    //
+    // What replaces it is stronger in both directions. Reaching this line at
+    // all proves every declared section arrived: `exportUserData()` throws
+    // `DeclaredAppSourceMissingError` otherwise, and that throw has never run
+    // against real Postgres until here. And the subject is synthetic — created
+    // moments ago, owning nothing of yours — so a declared section with rows in
+    // it means the collector matched a *stranger's*, which is the leak this
+    // whole script exists to detect and which the old check could not see.
+    // Split by shape. A declared section is documented as a row list, so a
+    // non-empty ARRAY for a subject who owns nothing is a leak and says so. A
+    // non-empty object is off-contract rather than incriminating — a fork
+    // returning `{ count: 0, currency: 'GBP' }` is doing something the seam
+    // permits and this check cannot reason about, and telling them they had
+    // leaked a stranger's rows would be a false accusation.
+    const leaked = declaredAppSources
+      .filter((source) => {
+        const value = bundle.app[source.section];
+        return Array.isArray(value) && value.length > 0;
+      })
+      .map((source) => source.section);
+    // Anything that is not an array, empty or not. `exportUserData()` tolerates
+    // a non-list section deliberately — it must not break a fork that is
+    // otherwise working — but this script is a diagnostic, and the shapes it
+    // cannot reason about are exactly the ones that lose data quietly: a `Map`
+    // serialises to `{}`, so the bundle stays internally consistent (meta says
+    // nought rows, the payload holds nought rows) while the subject's data is
+    // gone. Reporting the shape is the only place that gets caught.
+    const unrecognised = declaredAppSources
+      .filter((source) => !Array.isArray(bundle.app[source.section]))
+      .map((source) => source.section);
+
+    // A shape this script cannot assess is NOT a failure. `AppSubjectData` is
+    // `Record<string, unknown>`, `countAppRows` handles a single-record object
+    // deliberately, and `export-user.test.ts` pins that behaviour — so failing
+    // here would hand a fork with a one-record `profile` section a red pipeline
+    // and no fork-owned way to green it, which is exactly #530's shape. The
+    // previous version of this check did precisely that.
+    if (unrecognised.length > 0) {
+      warn(
+        `app section(s) ${unrecognised.join(', ')} returned something other than a row list, ` +
+          'so the leak check cannot assess them. Core accepts that shape; return an array if ' +
+          'you want this script to check the section for a stranger’s rows.'
+      );
+    }
+
     check(
-      framework.meta.exported.every((entry) => entry.section in framework.personalData) &&
-        framework.meta.attribution.every((entry) => entry.section in framework.attributions),
-      'every framework source ran and produced its section'
+      leaked.length === 0,
+      leaked.length > 0
+        ? // `check` prints its message on failure too, so the failing branch has to
+          // describe the failure — otherwise a leak reports itself as "assertion
+          // failed: all sections are empty", which reads as the opposite.
+          `app section(s) ${leaked.join(', ')} returned rows for a subject created ` +
+            'seconds ago who owns nothing — the collector is matching rows that are not theirs'
+        : declaredAppSources.length === 0
+          ? 'no app subject sources declared (vanilla Sunrise) — nothing to check'
+          : `${declaredAppSources.length - unrecognised.length} of ` +
+            `${declaredAppSources.length} declared app section(s) checked, and empty for a ` +
+            'subject who owns none of them'
     );
 
     // A missing subject is a distinct, catchable failure — not a silent empty bundle.

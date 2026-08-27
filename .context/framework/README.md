@@ -55,35 +55,55 @@ reserves for its own forks.**
   **Sunrise** migration
 - Daybreak registers its framework pieces into Sunrise's seams **from within
   `lib/framework/`** (driven by `initFramework()`) — exactly as Sunrise
-  registers its own built-ins from core. The **three exceptions** are the
+  registers its own built-ins from core. The **four exceptions** are the
   `lib/app/*` **bridges** Daybreak fills: `bootstrap.ts` (server boot →
   `initFramework()`), `admin-nav.ts` (client sidebar → the framework nav
-  section), and `data-export.ts` (subject access → the framework's own
-  GDPR Art. 15 manifest). A framework registration that must run in a realm
-  `initFramework()` can't reach — server-boot, the client sidebar, or a static
-  function core imports directly — has nowhere else to go; each delegates to a
+  section), `data-export.ts` (subject access → the framework's own GDPR Art. 15
+  manifest), and `brand.ts` (product name + legal entity → `lib/brand.ts`). A
+  framework registration that must run in a realm `initFramework()` can't reach —
+  server-boot, the client sidebar, a lazy seam whose init core owns, or a static
+  value core imports directly — has nowhere else to go; each delegates to a
   reserved leaf hook (`leaf-bootstrap.ts` / `leaf-admin-nav.ts` /
-  `leaf-data-export.ts`). Otherwise Daybreak does **not** fill `lib/app/*` (see
-  next).
+  `leaf-data-export.ts` / `leaf-brand.ts`). `brand.ts` is the one where the leaf
+  **overrides** rather than appends — brand identity is single-valued, so a leaf
+  replaces Daybreak's name rather than composing with it. Otherwise Daybreak does
+  **not** fill `lib/app/*` (see next).
 
-  `data-export.ts` is the newest and the least willing of the three. Sunrise
-  v0.8.0 (#467) shipped subject access assuming exactly **two** tiers — core
-  declares its tables in `lib/privacy/export-sources.ts`, the leaf declares its
-  own in `lib/app/data-export.ts` — and a framework fork has three. It is a
-  static function rather than a boot-time registry (an unregistered export
-  collector yields a bundle that looks complete and is not), so there is no
-  registry for the framework to push into. Until Sunrise grows a contributor
-  seam, Daybreak occupies the seam and hands the leaf `leaf-data-export.ts`
-  beside it. Tracked in [`upstream-asks.md`](./upstream-asks.md).
+  `data-export.ts` has the most history behind it. Sunrise v0.8.0 (#467) shipped
+  subject access assuming exactly **two** tiers — core declares its tables in
+  `lib/privacy/export-sources.ts`, the leaf declares its own in
+  `lib/app/data-export.ts` — and a framework fork has three, so Daybreak
+  occupied the seam and handed the leaf `leaf-data-export.ts` beside it. Sunrise
+  0.10.0 landed the contributor seam that was asked for (#533):
+  `registerAppSubjectSources({ tier: 'framework' })`. The bridge **stays**, and
+  that is not an oversight — upstream requires a framework tier to register from
+  the leaf's lazy `initAppSubjectSources()` rather than from `initFramework()` at
+  boot, because the registry re-runs only that lazy seam and a boot-time
+  contribution is lost the first time anything resets it. What the delegation did
+  remove is the fork edit to Sunrise's core guard test, which is byte-identical
+  to upstream again.
 
-  The framework's own manifest lives at `lib/framework/privacy/export-sources.ts`,
-  guarded by `tests/unit/lib/framework/privacy/export-sources.test.ts` — which
-  parses `prisma/schema/framework-*.prisma` and fails until a new user-linked
-  framework table declares what a data subject receives from it. Its dispositions
-  mirror the erasure policy already in each migration: a `userId` column with
-  `ON DELETE CASCADE` exports in full; a `createdBy` column with `SET NULL`
-  exports as attribution. **Both halves of GDPR must agree on what a row is** —
-  change one, change the other.
+  The framework's own manifest lives at `lib/framework/privacy/export-sources.ts`.
+  **Core owns the coverage check now** — `tests/unit/lib/privacy/export-sources.test.ts`
+  holds every model in `prisma/schema/framework-*.prisma` to **full accounting**
+  against what the manifest registers: declared as a source, or excluded with a
+  reason the data subject is shown verbatim, with no third state. That is
+  stronger than the `userId` / `createdBy` scan Daybreak used to run, which could
+  not see a table reached by a join — `FrameworkConversationEval` was invisible to
+  it, and silently absent from every export, until full accounting forced the
+  question.
+
+  `tests/unit/lib/framework/privacy/export-sources.test.ts` keeps what core cannot
+  do: **disposition ↔ erasure parity**. The dispositions mirror the policy already
+  in each migration — a `userId` column with `ON DELETE CASCADE` exports in full;
+  a `createdBy` column with `SET NULL` exports as attribution. **Both halves of
+  GDPR must agree on what a row is** — change one, change the other. Core reads its
+  own column vocabulary, not our migrations, so nothing upstream can check that.
+
+  The bundle shape changed with the delegation: the framework's sections sit flat
+  under `app` rather than nested in `app.framework`, and core emits `meta.app` and
+  `meta.excluded` in place of the `meta` block the fork used to build. That is a
+  breaking change for a leaf — see [`CHANGELOG.md`](./CHANGELOG.md).
 
 **Reserved for the leaf app — Daybreak keeps these empty:**
 
@@ -162,8 +182,11 @@ be derived from another** — full contract in [`VERSIONING.md`](./VERSIONING.md
 | `DAYBREAK_VERSION` (`lib/daybreak-version.ts`)                | The **Daybreak framework** version                        | Daybreak, on each Daybreak release — leaves merge it through, never edit it |
 | `SUNRISE_VERSION` (`lib/sunrise-version.ts`)                  | The **Sunrise platform** version forked from              | Sunrise upstream — merged through, never edited                             |
 
-All three surface on `/api/health` (`version` / `daybreak` / `sunrise`), which is
-how an operator answers "what is actually deployed?" for a three-tier app.
+`version` surfaces on the unauthenticated `/api/health`; the other two on
+`GET /api/v1/admin/stats` (`system.daybreakVersion` / `system.sunriseVersion`)
+and the `/admin/overview` System Information card, both behind admin auth —
+see [`VERSIONING.md`](./VERSIONING.md) for why a platform version is not a
+public disclosure.
 
 `APP_VERSION` reads `package.json` — which in a **leaf** names the leaf, not
 Daybreak. That is exactly why `DAYBREAK_VERSION` is its own constant rather than

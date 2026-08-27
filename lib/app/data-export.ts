@@ -34,11 +34,28 @@
  * swallowed so app trouble can never block a deletion. An export that quietly
  * lost a section looks exactly like a complete answer to the person reading it.
  *
+ * **Keep it complete — and core now checks that you did.** Declare your tables
+ * in `initAppSubjectSources()` below. The core guard test
+ * (`export-sources.test.ts`) diffs `prisma/schema/*.prisma` against the core
+ * manifest so a new core table can't quietly narrow the export, and it holds
+ * your tier's schema file to the same rule against your declarations: **every**
+ * model in a schema file that is not one of Sunrise's own — `app.prisma`,
+ * `framework-*.prisma`, or any other name you choose — must be declared as a
+ * source or excluded with a reason, or the suite fails naming it.
+ *
+ * Full accounting, rather than the user-id heuristic core applies to itself,
+ * because core reads its own column vocabulary and cannot read yours: a table
+ * keyed `authorId` or `respondentId` is invisible to that scan, and the tables
+ * it cannot see are exactly the ones nobody remembers. A lookup or join table
+ * holding no personal data is an `excluded` row with a one-line reason — which
+ * is the note a DPO wants anyway, and it costs you a line once per table.
+ *
  * Full guide: .context/privacy/data-export.md · CUSTOMIZATION.md §4
  */
 
 import { collectFrameworkSubjectData } from '@/lib/framework/privacy/export';
-import { collectLeafSubjectData } from '@/lib/app/leaf-data-export';
+import { initFrameworkSubjectSources } from '@/lib/framework/privacy/export-sources';
+import { collectLeafSubjectData, initLeafSubjectSources } from '@/lib/app/leaf-data-export';
 
 /** Identity of the subject being exported. */
 export interface AppSubjectQuery {
@@ -55,8 +72,61 @@ export interface AppSubjectQuery {
 export type AppSubjectData = Record<string, unknown>;
 
 /**
- * Collect Daybreak's data about one subject: the framework tier under the
- * reserved `framework` section, plus whatever the leaf app contributes.
+ * Declare which of your tier's models hold data about a person, and which
+ * deliberately do not.
+ *
+ * **Fork-owned scaffold**, run once and lazily by
+ * `lib/privacy/subject-source-registry.ts` before its first read — so the
+ * coverage guard and the export both see your declarations with no wiring step.
+ *
+ * ```ts
+ * export function initAppSubjectSources(): void {
+ *   registerAppSubjectSources({
+ *     tier: 'app',
+ *     sources: [
+ *       {
+ *         model: 'AppInvoice',
+ *         section: 'invoices',
+ *         disposition: 'export',
+ *         description: 'Invoices raised against your account.',
+ *       },
+ *     ],
+ *     excluded: [
+ *       { model: 'AppCountry', reason: 'Reference list of countries — holds no personal data.' },
+ *     ],
+ *   });
+ * }
+ * ```
+ *
+ * A framework tier declares from its own init with `tier: 'framework'`; both
+ * tiers register independently, so filling this in does not consume the slot a
+ * leaf fork is entitled to.
+ *
+ * **Every `section` you declare must appear in what `collectAppSubjectData()`
+ * returns** — `exportUserData()` throws if one is missing. Return the key with
+ * an empty array when the subject has no rows rather than omitting it: a bundle
+ * short by a section reads exactly like a complete answer. `undefined` counts
+ * as missing, because `JSON.stringify` drops the key — so
+ * `rows.length ? rows : undefined` is the shape to avoid.
+ */
+export function initAppSubjectSources(): void {
+  // DAYBREAK — the framework tier declares here, NOT from `initFramework()` at
+  // boot. Core's registry re-runs only this lazy seam, so a boot-time
+  // contribution is lost the first time anything resets the registry — and the
+  // coverage guard does exactly that — never to come back. Upstream documents
+  // this shape, and it is the same bridge as `bootstrap.ts` → `initFramework()`.
+  initFrameworkSubjectSources();
+  initLeafSubjectSources();
+}
+
+/**
+ * Collect Daybreak's data about one subject: the framework tier's sections plus
+ * whatever the leaf app contributes — flat, one key of `app` per declared source.
+ *
+ * Every key returned here is declared in `initAppSubjectSources()` above. That is
+ * the contract `exportUserData()` enforces, throwing `DeclaredAppSourceMissingError`
+ * on a declared section this fails to produce; on the framework side it holds by
+ * construction, because both halves derive from `FRAMEWORK_SUBJECT_DATA_SOURCES`.
  */
 export async function collectAppSubjectData(subject: AppSubjectQuery): Promise<AppSubjectData> {
   const [framework, leaf] = await Promise.all([
@@ -64,8 +134,9 @@ export async function collectAppSubjectData(subject: AppSubjectQuery): Promise<A
     collectLeafSubjectData(subject),
   ]);
 
-  // Leaf sections spread first so that `framework` cannot be shadowed by a leaf
-  // returning that key — the framework's contribution is the one section a leaf
-  // must not be able to overwrite (documented as reserved in leaf-data-export.ts).
-  return { ...leaf, framework };
+  // Framework sections spread LAST, so a leaf returning the same key cannot
+  // shadow one. It should never reach here: core's registry refuses a section
+  // another tier already declared, and a refused declaration fails the coverage
+  // guard by name. This is the backstop for the ordering, not the guard itself.
+  return { ...leaf, ...framework };
 }

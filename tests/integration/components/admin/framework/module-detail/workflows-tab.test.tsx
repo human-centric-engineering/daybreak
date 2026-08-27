@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Integration test — WorkflowsTab (f-ops-views t-4b).
  *

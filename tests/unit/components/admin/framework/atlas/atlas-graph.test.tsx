@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * AtlasGraph (f-atlas t-2b) — the semantic-zoom layer. Tracks zoom via `useOnViewportChange` (mocked
  * to capture the handler so the test can drive it) and hands hidden-flagged nodes/edges to the canvas

@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * MapsTable (f-map-editor t-1) — the map list + create dialog.
  *

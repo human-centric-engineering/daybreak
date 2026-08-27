@@ -9,17 +9,36 @@
  * mirror-image rule (a missing `onDelete` throws `P2003` and breaks erasure
  * loudly); access has no natural loud failure, so this test is it.
  *
- * The core guard scans every `prisma/schema/*.prisma` and exempts models this
- * manifest declares. That exemption is what makes this file load-bearing: a
- * `framework_*` table is allowed out of the core manifest only for as long as it
- * is declared HERE. Between the two, every user-linked table in the repo is
- * forced into one manifest or the other.
+ * ---------------------------------------------------------------------------
+ * WHAT MOVED TO CORE — and what did not (Sunrise 0.10.0, #533)
+ * ---------------------------------------------------------------------------
+ * The COVERAGE half is no longer here. Daybreak carried it fork-first while
+ * Sunrise #533 was open; 0.10.0 landed the resolver, and core's guard
+ * (`tests/unit/lib/privacy/export-sources.test.ts`) now holds every
+ * `framework-*.prisma` model to FULL accounting against what
+ * `initFrameworkSubjectSources()` registers — declared as a source or excluded
+ * with a reason, no third state. That is strictly stronger than the
+ * `userId`/`createdBy` heuristic this file used to apply, which could not see a
+ * table reached by JOIN: `FrameworkConversationEval` was invisible to it for
+ * exactly as long as it was what we relied on. Carrying a weaker duplicate
+ * alongside it is the shim we said we would delete when the ask landed.
+ *
+ * What core cannot do — and what this file therefore still holds:
+ *
+ *   • **Disposition ↔ erasure parity.** Core reads its own column vocabulary,
+ *     not the framework's migrations. Nothing upstream can check that a CASCADE
+ *     `userId` table exports in full while a SET NULL `createdBy` table reduces
+ *     to attribution.
+ *   • **Manifest integrity.** Core's registry refuses a duplicate model or a
+ *     colliding section by REJECTING the row, which then fails core's guard as
+ *     "unaccounted" — a true failure with a misleading cause. Catching it here
+ *     names what actually went wrong.
  *
  * ---------------------------------------------------------------------------
  * IF THIS TEST IS FAILING
  * ---------------------------------------------------------------------------
- * You added a `framework_*` model holding a user id. Add it to
- * `FRAMEWORK_SUBJECT_DATA_SOURCES` with a disposition:
+ * You added a `framework_*` model. Add it to `FRAMEWORK_SUBJECT_DATA_SOURCES`
+ * with a disposition:
  *
  *   • `export`      — it holds the subject's own data (a `userId` column with
  *                     ON DELETE CASCADE). Return the rows in full.
@@ -101,7 +120,6 @@ function scanFrameworkSchema(): SchemaScan {
 
 describe('framework subject-data source manifest', () => {
   const { userLinked, allModels } = scanFrameworkSchema();
-  const declared = new Set(FRAMEWORK_SUBJECT_DATA_SOURCES.map((source) => source.model));
 
   describe('the scan itself', () => {
     // A regex that quietly stops matching would make every assertion below
@@ -117,40 +135,10 @@ describe('framework subject-data source manifest', () => {
     });
   });
 
-  describe('coverage', () => {
-    it('declares every framework model holding a user id', () => {
-      const missing = [...userLinked]
-        .filter((model) => !declared.has(model))
-        .filter((model) => !FRAMEWORK_EXCLUDED_SOURCES.some((source) => source.model === model))
-        .sort();
-
-      expect(
-        missing,
-        missing.length === 0
-          ? ''
-          : `These framework models hold a user id but are missing from ` +
-              `FRAMEWORK_SUBJECT_DATA_SOURCES, so a data subject's export silently ` +
-              `omits them: ${missing.join(', ')}. Add each with a disposition — ` +
-              `'export' for the subject's own data (a userId/CASCADE column), ` +
-              `'attribution' for framework config they authored (a createdBy/SET NULL ` +
-              `column) — or to FRAMEWORK_EXCLUDED_SOURCES with a reason. ` +
-              `See .context/privacy/data-export.md.`
-      ).toEqual([]);
-    });
-
-    it('names only models that exist', () => {
-      // Catches a rename or typo, which would otherwise leave a source in the
-      // manifest that queries nothing and reports zero rows forever.
-      const unknown = [
-        ...FRAMEWORK_SUBJECT_DATA_SOURCES.map((source) => source.model),
-        ...FRAMEWORK_EXCLUDED_SOURCES.map((source) => source.model),
-      ]
-        .filter((model) => !allModels.has(model))
-        .sort();
-
-      expect(unknown).toEqual([]);
-    });
-  });
+  // The `coverage` block that stood here is gone — delegated to core's guard,
+  // which holds every framework model to full accounting rather than to a
+  // user-id heuristic. See the header. `tests/unit/lib/framework/privacy/export.test.ts`
+  // pins the other half of that delegation: that the bridge actually registers.
 
   describe('manifest integrity', () => {
     it('lists each model once', () => {
@@ -166,9 +154,12 @@ describe('framework subject-data source manifest', () => {
     });
 
     it('does not collide with a core section key', () => {
-      // The framework's sections land under `app.framework.*` rather than beside
-      // core's, so a collision is not fatal today — but a shared name would make
-      // the two tiers' output indistinguishable to a reader diffing bundles.
+      // Sections are FLAT under `app` since the 0.11.1 sync — the nested
+      // `app.framework` wrapper is gone — so a name shared with a core section
+      // puts two tiers' rows under keys a reader cannot tell apart. `app` and
+      // `personalData` are still separate objects in the bundle, so this is a
+      // legibility guard rather than an overwrite guard; the overwrite case
+      // (two FRAMEWORK sources sharing a section) is the test above.
       const coreSections = new Set(['sessions', 'authProviders', 'conversations', 'agents']);
       const collisions = FRAMEWORK_SUBJECT_DATA_SOURCES.map((source) => source.section).filter(
         (section) => coreSections.has(section)
@@ -202,8 +193,43 @@ describe('framework subject-data source manifest', () => {
         FRAMEWORK_SUBJECT_DATA_SOURCES.filter((s) => s.disposition === 'export').map((s) => s.model)
       );
       expect(personal).toEqual(
-        new Set(['UserJourney', 'JourneyEvent', 'SlotValue', 'FrameworkJourneyNudge'])
+        new Set([
+          'UserJourney',
+          'JourneyEvent',
+          'SlotValue',
+          'FrameworkJourneyNudge',
+          // Reached by JOIN through `conversationId`, not by a user column — so
+          // the CASCADE/SET NULL rule above does not classify it and the userId
+          // scan never saw it. It is still the subject's data (assessments OF
+          // their turns), and it is here because full accounting forced the
+          // question the heuristic could not ask.
+          'FrameworkConversationEval',
+        ])
       );
+    });
+
+    it('classifies every declared source by one of the two rules, or names why not', () => {
+      // The set above is a literal, so a new source added without thinking about
+      // its erasure policy would simply fail it with a diff. This says what the
+      // diff MEANS: every export source is either a CASCADE user column or a
+      // deliberate join-reached exception, and there is no third way in.
+      const joinReached = new Set(['FrameworkConversationEval']);
+      const unclassified = FRAMEWORK_SUBJECT_DATA_SOURCES.filter(
+        (source) =>
+          source.disposition === 'export' &&
+          !userLinked.has(source.model) &&
+          !joinReached.has(source.model)
+      ).map((source) => source.model);
+
+      expect(
+        unclassified,
+        unclassified.length === 0
+          ? ''
+          : `These sources export in full but hold no user column: ` +
+              `${unclassified.join(', ')}. Either they reach the subject by a join ` +
+              `(add them to joinReached here, with the join spelled out in the ` +
+              `manifest) or the disposition is wrong.`
+      ).toEqual([]);
     });
 
     it('reduces the SET NULL (createdBy) tables to attribution', () => {

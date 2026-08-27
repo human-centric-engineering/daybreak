@@ -1,5 +1,15 @@
+'use client';
+
 /**
  * Client-side calls for the module config surface (f-ops-views t-2).
+ *
+ * The `'use client'` directive above is load-bearing beyond bundling: it is what
+ * tells `tests/unit/lib/security/outbound-fetch-redirects.test.ts` that the
+ * `fetch` below is not a server-side call. That guard exists for SSRF — a
+ * server following an unvalidated `Location` — which does not apply to a
+ * browser issuing a same-origin request to a relative path. Declaring what the
+ * module IS is the honest way past it; an EXEMPT row would have meant editing a
+ * Sunrise-owned test to say the same thing less accurately.
  *
  * The config save is a **PUT** (`saveModuleConfig` replaces the whole config), but the
  * shared `apiClient` (`lib/api/client.ts`) exposes only get/post/patch/delete — and it's

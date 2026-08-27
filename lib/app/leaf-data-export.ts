@@ -18,26 +18,57 @@
  * }
  * ```
  *
- * **`framework` is a reserved section name** — the bridge puts the framework
- * tier's contribution there, and a leaf returning that key would overwrite it.
+ * **Declare what you return, in `initLeafSubjectSources()` below.** Since Sunrise
+ * 0.10.0 core holds every fork-tier schema file to full accounting: each model in
+ * `prisma/schema/app.prisma` must be declared a source or excluded with a reason,
+ * or `tests/unit/lib/privacy/export-sources.test.ts` fails naming it. Declaring is
+ * also a promise — `exportUserData()` throws if a declared section is missing from
+ * what you return, so return the key with an empty array rather than omitting it.
  *
- * **Keep it complete.** Sunrise's core guard (`export-sources.test.ts`) and
- * Daybreak's framework guard (`lib/framework/privacy/export-sources.test.ts`)
- * each diff their own schema files against their own manifest; neither can see
- * your `app_*` tables. The pattern worth copying is a constant listing the
- * tables you export plus a test that greps `prisma/schema/app.prisma` for
- * `@@map("app_…")` and asserts each mapped table appears in it. Then adding a
- * table without extending the export fails your build instead of shipping a
- * short answer to a data subject.
+ * **The framework tier's section names are taken** — its sources are declared in
+ * the same registry, which refuses a section another tier already claimed. See
+ * `lib/framework/privacy/export-sources.ts` for the current list.
  *
- * A table holding no personal data is fine to leave out — but say so in a
- * comment where you list them, so the omission reads as a decision rather than
- * an oversight.
+ * A table holding no personal data is not left out silently — it is an `excluded`
+ * row with a reason, and that reason is shown to the data subject verbatim in the
+ * bundle's `meta.excluded`. It is what lets them tell "we hold nothing about you"
+ * apart from "we decided not to give it to you", so write it for that reader.
  *
  * @see lib/app/data-export.ts · .context/privacy/data-export.md · CUSTOMIZATION.md §4
  */
 
 import type { AppSubjectData, AppSubjectQuery } from '@/lib/app/data-export';
+
+/**
+ * Declare the leaf app's own models to core's subject-source registry —
+ * RESERVED, empty by default.
+ *
+ * Called (synchronously) by `lib/app/data-export.ts`'s `initAppSubjectSources()`
+ * after the framework tier declares, so both tiers land in the same registry
+ * without either consuming the other's slot.
+ *
+ * ```ts
+ * export function initLeafSubjectSources(): void {
+ *   registerAppSubjectSources({
+ *     tier: 'app',
+ *     sources: [
+ *       {
+ *         model: 'AppBooking',
+ *         section: 'bookings',
+ *         disposition: 'export',
+ *         description: 'Bookings you made through the app.',
+ *       },
+ *     ],
+ *     excluded: [
+ *       { model: 'AppRoomType', reason: 'Reference list of room types — holds no personal data.' },
+ *     ],
+ *   });
+ * }
+ * ```
+ */
+export function initLeafSubjectSources(): void {
+  // No leaf subject sources by default.
+}
 
 /**
  * Collect this leaf app's data about one subject. Ships empty — Daybreak has no

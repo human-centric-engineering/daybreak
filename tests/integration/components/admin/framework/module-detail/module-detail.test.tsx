@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Integration test — ModuleDetail shell (f-ops-views t-2 / t-3).
  *

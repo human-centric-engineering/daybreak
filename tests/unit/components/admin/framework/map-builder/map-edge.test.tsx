@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * MapEdge (f-map-editor t-2) — the custom typed-edge component. `@xyflow/react`'s
  * edge primitives are mocked (no flow context in happy-dom); this proves the edge

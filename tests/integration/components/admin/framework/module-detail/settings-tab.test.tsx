@@ -1,3 +1,5 @@
+// @vitest-environment happy-dom
+
 /**
  * Integration test — SettingsTab (f-ops-views t-3).
  *
