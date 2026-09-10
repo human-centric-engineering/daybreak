@@ -79,6 +79,15 @@ export interface AlwaysRunEntry {
  */
 export const ALWAYS_RUN_TESTS: readonly AlwaysRunEntry[] = [
   {
+    path: 'tests/unit/prisma/framework-boot-seed.test.ts',
+    reason:
+      'reads `prisma/seeds/` off disk to assert the framework boot seed still ' +
+      'sorts after the core seeds and before any leaf directory. Nothing ' +
+      'imports a seed file, so adding or renaming one — the change that breaks ' +
+      'the ordering, silently — connects to this test by no import chain. ' +
+      '(Daybreak keep-mine; see Sunrise #759 for the fork-tail ask.)',
+  },
+  {
     path: 'tests/unit/lib/privacy/export-sources.test.ts',
     reason:
       'parses `prisma/schema/*.prisma` and fails until every model with a ' +
