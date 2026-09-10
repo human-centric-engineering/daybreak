@@ -8,8 +8,11 @@
  *
  *   - **guard before write** — a denied viewer throws `ForbiddenError` and Prisma is
  *     never touched (the read queries' discipline, applied to a write);
- *   - **idempotence** — the write is an upsert on the natural key with an EMPTY
- *     `update`, so a second "start" cannot move `startedAt`;
+ *   - **the shape of the write** — an upsert on the natural key with an EMPTY
+ *     `update`. That the write is genuinely idempotent is proven against a stateful
+ *     store in `tests/integration/.../journey/create-idempotence.test.ts`; a
+ *     constant-returning mock structurally cannot show it (the second call would
+ *     resolve the same object whatever the code did);
  *   - **the `''` sentinel** — an omitted `contextKey` becomes `''`, never `undefined`
  *     (X3: a nullable discriminator would let duplicate default journeys past the
  *     unique index);
@@ -22,10 +25,22 @@ import { Prisma } from '@prisma/client';
 import type { UserJourney } from '@prisma/client';
 import { ForbiddenError } from '@/lib/api/errors';
 
+// The journey/state tables the seam must NOT touch are present on purpose: an
+// assertion that a call was never made only means something if the call was
+// possible. (A mock exposing only `userJourney` would turn a future
+// `journeyEvent.create` into a TypeError, whose natural repair is to widen the
+// fixture — so the assertion could never fail for the reason it names.)
 const prismaMock = {
   userJourney: {
     upsert: vi.fn(),
     findUniqueOrThrow: vi.fn(),
+  },
+  userNodeState: {
+    create: vi.fn(),
+    upsert: vi.fn(),
+  },
+  journeyEvent: {
+    create: vi.fn(),
   },
 };
 
@@ -120,29 +135,27 @@ describe('createJourney — the write it issues', () => {
     expect(where.userId_graphSlug_contextKey.contextKey).toBe('');
   });
 
-  it('returns the existing row untouched when the journey has already started', async () => {
-    const existing = journeyRow({ startedAt: new Date('2025-06-01T09:30:00.000Z') });
+  it('returns whatever row the upsert resolved, unmodified', async () => {
+    const existing = journeyRow({ id: 'uj_existing', startedAt: new Date('2025-06-01T09:30:00Z') });
     prismaMock.userJourney.upsert.mockResolvedValue(existing);
 
-    const first = await createJourney(
-      { userId: SUBJECT },
-      { userId: SUBJECT, graphSlug: 'reclaim' }
-    );
-    const second = await createJourney(
-      { userId: SUBJECT },
-      { userId: SUBJECT, graphSlug: 'reclaim' }
-    );
-
-    expect(second).toEqual(first);
-    expect(second.startedAt).toEqual(new Date('2025-06-01T09:30:00.000Z'));
+    await expect(
+      createJourney({ userId: SUBJECT }, { userId: SUBJECT, graphSlug: 'reclaim' })
+    ).resolves.toBe(existing);
   });
 
-  it('writes only the UserJourney row — no node states, no events', async () => {
+  it('makes no Prisma call other than the upsert on the happy path', async () => {
     await createJourney({ userId: SUBJECT }, { userId: SUBJECT, graphSlug: 'reclaim' });
 
-    // applyEvent stays the sole writer of journey STATE; this seam creates the row
-    // those transitions hang off and nothing more.
-    expect(Object.keys(prismaMock)).toEqual(['userJourney']);
+    // `applyEvent` stays the sole writer of journey STATE. Asserted against the
+    // recorded calls on a mock surface that DOES expose the state tables, so adding
+    // a `journeyEvent.create` to the seam fails here rather than throwing a
+    // TypeError that invites someone to widen the fixture.
+    expect(prismaMock.userJourney.upsert).toHaveBeenCalledOnce();
+    expect(prismaMock.userJourney.findUniqueOrThrow).not.toHaveBeenCalled();
+    expect(prismaMock.userNodeState.create).not.toHaveBeenCalled();
+    expect(prismaMock.userNodeState.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.journeyEvent.create).not.toHaveBeenCalled();
   });
 });
 

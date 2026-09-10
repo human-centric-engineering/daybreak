@@ -16,11 +16,16 @@
  *
  * ## The four decisions behind the signature
  *
- * 1. **Guarded by {@link canRead}, not a new `canWrite`.** `shared/access.ts`
- *    exposes one access seam, and every framework write already guards on it
- *    (`applyJourneyTransition` via `assembleJourneyContext`). A second guard
- *    vocabulary here would only have to be re-unified when Sunrise #367's ownership
- *    resolver lands. Default-deny is inherited, not restated.
+ * 1. **Guarded by {@link canWrite}, not by `canRead`.** The first draft used
+ *    `canRead` — one access seam, default-deny inherited, and the existing write
+ *    path (`applyJourneyTransition` via `assembleJourneyContext`) already authorizes
+ *    writes through a read. Review pushed back, correctly: `canRead` is documented
+ *    as widening `own → team → all` when Sunrise #367's ownership resolver lands,
+ *    and that widening is about *reading* a cohort. Guarding creation on it would
+ *    hand every future cohort-reader the right to create journeys for those
+ *    subjects, silently, with no diff to this file. `canWrite` pins the write grant
+ *    to self-or-admin-support so widening it is a visible edit. It composes with
+ *    `canRead` rather than replacing it — see `shared/access.ts`.
  * 2. **Idempotent on the natural key** `@@unique([userId, graphSlug, contextKey])`,
  *    returning the existing row untouched rather than throwing. A double-submitted
  *    "start" is ordinary client behaviour, and the natural key already *is* a run's
@@ -56,7 +61,7 @@ import { Prisma } from '@prisma/client';
 import type { UserJourney } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { ForbiddenError } from '@/lib/api/errors';
-import { canRead, type JourneyViewer, type AccessScope } from '@/lib/framework/shared/access';
+import { canWrite, type JourneyViewer, type AccessScope } from '@/lib/framework/shared/access';
 import type { JourneyKey } from '@/lib/framework/facilitation/journey/queries';
 
 /**
@@ -65,7 +70,8 @@ import type { JourneyKey } from '@/lib/framework/facilitation/journey/queries';
  *
  * The viewer is gated against the journey's owner (`key.userId`) **before any
  * write** — a denied call throws `ForbiddenError` without touching the database,
- * mirroring the read queries.
+ * mirroring the read queries. The gate is {@link canWrite}, which is deliberately
+ * narrower than the `canRead` guarding those reads (see decision 1).
  *
  * @throws {ForbiddenError} when `viewer` may not act for `key.userId`.
  */
@@ -74,7 +80,7 @@ export async function createJourney(
   key: JourneyKey,
   scope?: AccessScope
 ): Promise<UserJourney> {
-  if (!(await canRead(viewer, key.userId, scope))) {
+  if (!(await canWrite(viewer, key.userId, scope))) {
     throw new ForbiddenError('Not permitted to start this journey');
   }
 
