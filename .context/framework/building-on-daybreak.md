@@ -194,8 +194,13 @@ const unit: SeedUnit = {
 export default unit;
 ```
 
-It is idempotent, so calling it when the boot seed already ran costs a reconcile
-and nothing else.
+It is idempotent, so calling it when the boot seed already ran is safe. It is not
+free of noise, though: re-registering a framework capability logs
+`registerFrameworkCapability: duplicate slug — last registration wins` per
+capability, and the registry is `globalThis`-backed, so it persists across seed
+units in one process. Call it from the seeds that need it rather than from all of
+them, or those warnings will outnumber your actual output. They are harmless — the
+last registration is identical to the first.
 
 **Pass `registerLeaf`.** It runs between framework registration and the database
 reconcile, which is the only correct position: the reconcile does not just write

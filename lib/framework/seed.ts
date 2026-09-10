@@ -40,7 +40,12 @@
  * ## Idempotent, and safe to call more than once
  *
  * `initFramework()` replaces its registrations per key and `syncFramework()`
- * reconciles rather than inserts, so calling this twice in a process is harmless.
+ * reconciles rather than inserts, so calling this twice in a process is harmless —
+ * though not silent: `registerFrameworkCapability` warns `duplicate slug — last
+ * registration wins` for each already-registered capability, and its store is
+ * `globalThis`-backed, so the warnings accumulate across callers in one process.
+ * Harmless (the last registration is identical to the first), but a caller invoking
+ * this from several seed units will see them pile up.
  * That matters because of a runner property worth knowing:
  *
  * > **A seed unit runs once, ever.** `prisma/runner.ts` skips any unit whose

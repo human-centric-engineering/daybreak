@@ -41,9 +41,14 @@
  * all fine. An **incremental `db:seed` after a leaf adds a module** is not: this is
  * skipped, the new `Module` row is never synced, and the leaf's new seed fails.
  *
- * The fix for that case is not here — it is for the leaf's own seed to call
- * `syncFrameworkForSeed()` at the top of its `run()`, since *that* unit's hash
- * changes when the leaf edits it. See `lib/framework/seed.ts`.
+ * Two different remedies, because the two cases differ:
+ *
+ *   - **A leaf adding a module** also adds a seed to configure it, so it calls
+ *     `syncFrameworkForSeed()` at the top of that seed's `run()` — that unit's hash
+ *     changes when the leaf edits it. See `lib/framework/seed.ts`.
+ *   - **Daybreak adding a framework capability** has no such seed to hook into, so
+ *     this unit declares `hashInputs` over the framework's registration sources
+ *     (below) and re-runs itself when they change.
  */
 
 import type { SeedUnit } from '@/prisma/runner';
@@ -52,6 +57,28 @@ import { initLeafApp } from '@/lib/app/leaf-bootstrap';
 
 const unit: SeedUnit = {
   name: 'framework-boot',
+  // Fold the framework's own registration sources into this unit's content hash,
+  // so editing them re-runs it (see "It runs once, ever" above).
+  //
+  // Without this, the once-ever property bites DAYBREAK as well as a leaf — and
+  // worse, because the documented remedy does not apply. A leaf that adds a module
+  // also adds a seed for it, and can call `syncFrameworkForSeed()` from that seed's
+  // own `run()`. Add a framework CAPABILITY, though, and there is no seed of your
+  // own to hook into: `ai_capability` row never appears on an existing dev
+  // database, and the tool cannot be granted to an agent, with nothing to edit to
+  // fix it short of touching this file.
+  //
+  // `index.ts` covers a new capability GROUP (it is where each is registered); the
+  // four collections cover a new capability inside an existing group, which does
+  // not touch `index.ts`. Adding a fifth group means editing `index.ts` AND adding
+  // its collection here.
+  hashInputs: [
+    '../../../lib/framework/index.ts',
+    '../../../lib/framework/data-slots/capabilities/index.ts',
+    '../../../lib/framework/guidance/capabilities/index.ts',
+    '../../../lib/framework/engagement/capabilities/index.ts',
+    '../../../lib/framework/facilitation/emergence/capabilities/index.ts',
+  ],
   async run({ logger }) {
     // Throws on failure rather than logging and continuing — the difference from
     // `initApp()`, and the point of the seed-specific entry point. A sync that

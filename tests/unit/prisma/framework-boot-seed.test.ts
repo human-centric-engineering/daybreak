@@ -18,8 +18,8 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 const SEEDS = join(process.cwd(), 'prisma', 'seeds');
 const BOOT = '_framework/000-framework-boot.ts';
@@ -80,5 +80,62 @@ describe('framework boot seed ordering', () => {
     expect(sorted.indexOf(renamed)).toBeGreaterThan(sorted.indexOf('app-example/001-init.ts'));
     // …whereas the name actually used sorts before it.
     expect([BOOT, 'app-example/001-init.ts'].sort()[0]).toBe(BOOT);
+  });
+});
+
+describe('the _framework directory holds only the bridge', () => {
+  it('contains exactly the boot seed', () => {
+    // `_framework/` exists for ORDERING, and its single unit is a bridge: it is the
+    // one seed exempt from both tier bans, because composing the two tiers is its
+    // whole job (the seed-time twin of `lib/app/bootstrap.ts`). A genuine framework
+    // seed dropped here would inherit an exemption it has no claim to — those go in
+    // `prisma/seeds/framework/`.
+    //
+    // The ESLint exemption now names this file exactly rather than the directory,
+    // so a second file fails lint on its first `@/lib/framework` import. This
+    // asserts the same invariant with a message that says WHY, rather than leaving
+    // the next person to decode a restricted-import error.
+    const entries = readdirSync(join(SEEDS, '_framework'));
+    expect(entries).toEqual(['000-framework-boot.ts']);
+  });
+});
+
+describe('the boot seed re-runs when the framework changes', () => {
+  it('declares hashInputs over the framework registration sources', async () => {
+    // The once-ever property bites Daybreak too, and there the leaf's remedy does
+    // not exist: adding a framework CAPABILITY brings no seed of your own to call
+    // `syncFrameworkForSeed()` from, so without this the `ai_capability` row never
+    // appears on an existing dev database. `hashInputs` folds these files into the
+    // unit's content hash, so editing one re-runs the seed.
+    const unit = (await import('@/prisma/seeds/_framework/000-framework-boot')).default;
+    expect(unit.hashInputs).toBeDefined();
+
+    // Every declared path must exist — `applySeed` throws at seed time otherwise,
+    // which is a runtime failure for a purely static mistake.
+    const seedDir = join(SEEDS, '_framework');
+    for (const rel of unit.hashInputs ?? []) {
+      expect(existsSync(resolve(seedDir, rel))).toBe(true);
+    }
+
+    // And it must cover every capability collection `initFramework()` registers —
+    // a fifth group added there without a matching entry here silently reopens the
+    // hole for that group.
+    const init = readFileSync(join(process.cwd(), 'lib/framework/index.ts'), 'utf8');
+    // Derive the collections from the REGISTRATION LOOP, not from import names:
+    // `initFramework()` iterates each as `for (const capability of X)`. Matching on
+    // the name shape instead swept in `registerRegisteredModuleCapabilities` — a
+    // function, and one whose contents come from the module registry the LEAF
+    // populates, so it is covered by the leaf's remedy rather than by hashInputs.
+    const identifiers = [...init.matchAll(/for \(const capability of (\w+)\)/g)].map((m) => m[1]);
+    const collections = identifiers.map((id) => {
+      const imported = new RegExp(`import \\{ ${id} \\} from '@/([^']+)'`).exec(init);
+      expect(imported, `no import found for ${id}`).not.toBeNull();
+      return imported?.[1] ?? '';
+    });
+    expect(collections.length).toBeGreaterThan(0);
+    for (const mod of collections) {
+      const declared = (unit.hashInputs ?? []).some((h) => resolve(seedDir, h).includes(mod));
+      expect(declared, `hashInputs is missing ${mod}`).toBe(true);
+    }
   });
 });
