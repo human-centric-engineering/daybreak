@@ -1,4 +1,4 @@
-# Issue backlog — phased plan (2026-08-08, amended 2026-08-14)
+# Issue backlog — phased plan (2026-08-08, amended 2026-08-14 and 2026-09-10)
 
 The first real leaf (`reclaim-your-week`) has been building on Daybreak since the
 Sunrise v0.8.0 sync, and has filed **ten issues** against this repo. In parallel,
@@ -31,6 +31,24 @@ distributable; v1.3 makes it usable by the app that took the distribution).
 > 3. **t-0.2's premise is half-obsolete** — the clone now has the `upstream`
 >    remote and the Sunrise tags. The ledger reconciliation itself is still
 >    entirely needed: all six stale rows still read "filed — awaiting the seam".
+
+> ### Amended 2026-09-10 — Phase 3 claimed
+>
+> Re-verified ahead of claiming **Phase 3** (28) to unblock the second leaf. Two
+> phases moved, and Phase 3 gained four findings:
+>
+> 1. **Phase 1 shipped** (#204 / #205 / #206, merged 2026-08-15 → 2026-08-18) and
+>    was never reconciled onto [`plan.md`](./plan.md), so **Phase 4 read
+>    `blocked → 26` for three weeks after its gate had opened.** Both rows
+>    corrected; Phase 1 logged retroactively in the work-completed log.
+> 2. **Every Phase 3 code claim still holds** — re-checked file by file, with the
+>    evidence recorded per task below.
+> 3. **Four corrections to Phase 3's own resolutions**, all in t-3.3 / t-3.4: a
+>    coupled boundary check #157 must update too, and three ways t-3.4's proposed
+>    shape is wrong as written.
+> 4. **#234 is an eleventh leaf issue**, filed after the 2026-08-14 amendment.
+>    Left unphased deliberately — it belongs with the `defaults.test.ts` /
+>    seam-coupling thread, not with these four.
 
 ---
 
@@ -302,6 +320,42 @@ Add `createJourney(userId, graphSlug, contextKey)` to
 `lib/framework/facilitation/journey/` (barrel-exported), idempotent on the natural
 key, as the counterpart to `applyJourneyTransition`.
 
+**Verified 2026-09-10.** `grep userJourney.create` over the tree returns exactly
+two hits, both smoke scripts (`scripts/smoke/engine.ts:57`,
+`scripts/smoke/erasure.ts:121`); `journey/queries.ts` exports five reads and no
+write. **This is an escape, not a decision:** `f-journey-state` shipped the three
+tables deliberately "without a writer (that is `f-engine`)", and `f-engine` then
+shipped the _transition_ writer only. The gap is visible in `getJourney`'s own
+docblock — "`null` if they have not started it (**no writer yet**…)".
+
+**Four decisions, taken rather than left to the build:**
+
+1. **Guard on `canRead`, do not invent `canWrite`.** `lib/framework/shared/access.ts`
+   exposes only `canRead` / `subjectScope`, and every existing framework write
+   guards on `canRead` (`applyJourneyTransition` via `assembleJourneyContext`).
+   A second guard vocabulary here would have to be re-unified when #367's
+   ownership resolver lands. Same seam, same default-deny.
+2. **Idempotent upsert on `@@unique([userId, graphSlug, contextKey])`**, returning
+   the existing row rather than throwing. A double-submitted "start" is the
+   expected client behaviour, and the natural key already _is_ the identity of a
+   run — two calls with the same `contextKey` are asking for the same journey.
+3. **Caller supplies `contextKey`; the framework does not mint one.** This is the
+   more general of the two shapes: a leaf that wants a fresh run per call passes
+   its own id, and a leaf with one journey per map passes nothing and gets the
+   `""` sentinel. A `startJourney()` that minted keys would foreclose the first
+   case. **This is also the `contextKey ↔ runId` identity Phase 2 t-2.2 depends
+   on** — it resolves a run by matching `UserJourney.contextKey`, so the two
+   tasks must agree, and this is where it is settled.
+4. **No `journey.started` event, for now.** The stream is the source of truth
+   (F10), so an event is arguable — but `f-engagement-analytics` already dropped
+   `session.started` on hot-path cost, no consumer exists, and adding one later is
+   additive and migration-free. Recorded here so the omission reads as a decision.
+
+**Done when:** both smoke scripts create their journey through the seam rather
+than `prisma.userJourney.create` — a leaf reaching into a `framework_*` table is
+what the seam exists to prevent, and the smokes are the standing witness that it
+is the only path.
+
 ### t-3.2 · `recordNodeProgress` (#168)
 
 `UserNodeState.progress` is `Json?` and documented as "module-defined … opaque to
@@ -313,6 +367,28 @@ with a transition. The engine does not interpret it; the field is already opaque
 Use case is once-per-node beats ("show this person their week for the first
 time") that must survive a reload. The leaf added a bespoke scalar-list column for
 a concept the framework already models.
+
+**Verified 2026-09-10.** `progress` is declared on `UserNodeState`
+(`framework-facilitation.prisma:110`) and **nothing in the tree writes it** — the
+only `progress:` hits are an unrelated admin view-model and the eval runner's own
+column. **No GDPR work:** `lib/framework/privacy/export-sources.ts:298` already
+declares per-node progress as delivered nested inside the `journeys` section, so
+the disposition is settled before the first byte is written.
+
+**Three decisions to take at build (the merge semantics is the real risk):**
+
+1. **Merge or replace?** "Patch" implies a JSON merge, which Prisma cannot do
+   natively — it is read-modify-write inside `executeTransaction` (the pattern
+   `apply-event.ts` already uses), and two concurrent patches can lose an update.
+   Either narrow it with a conditional update or document the window; do not ship
+   a silent last-writer-wins merge without saying so.
+2. **Refuse when the node has no `UserNodeState` row.** Recording progress against
+   a node the subject has never entered is incoherent, and it mirrors the
+   discipline `complete` already holds ("a `complete` never _creates_ a row").
+3. **The `TransitionRequest` half touches `apply-event.ts`** — the sole-writer file
+   with the heaviest coverage in the framework (a 217-line integration test plus
+   four unit suites). It is separable from the standalone setter and should split
+   into its own PR if it grows.
 
 ### t-3.3 · ESLint exemption for non-build framework consumers (#157)
 
@@ -340,6 +416,41 @@ Its stated rationale is build-time resolution — so the exemption should track
   **restates** `aliasBan`, because `no-restricted-imports` replaces rather than
   merges.
 
+**Verified 2026-09-10.** `npx eslint --print-config
+prisma/seeds/framework/001-framework-rubric-judge.ts` confirms a seed file
+receives both `aliasBan` and `frameworkBan` today. The gap is **latent, not
+theoretical**: no seed imports `@/lib/framework` yet (Daybreak's own framework
+seed imports core only), so the first thing to trip it is either a leaf config
+seed or **t-3.4's own boot seed**. Dropping the seed globs into `ignores` leaves
+Sunrise's root block applying, so `aliasBan` survives — confirmed against the
+root block's own globs, not assumed.
+
+**Correction 1 — the route half has a coupled second check the issue does not
+mention.** `scripts/boundary/check.ts` `isCoreSource()` scans `lib`, `app`,
+`components`, `prisma/schema` for the framework-coined tokens `moduleSlug`,
+`nodeKey`, `moduleId`, `dataSlot`, and its own docblock is explicit: this
+allowlist **mirrors** the framework-tier globs in
+`lib/framework/eslint.config.mjs`, and a path added to one must be added to the
+other. A leaf route at `app/api/v1/app/**` calling
+`resolveModuleSurface({ moduleSlug, nodeKey })` would clear the ESLint ban and
+then **fail `npm run framework:boundary` in the CI lint job**. So the route half
+is a two-file change. The seed half is not affected — `prisma/seeds` is outside
+the scan's roots.
+
+**Correction 2 — be honest about who the route half unblocks.** Exempting the
+reserved namespaces (`app/api/v1/app/**`, `app/(protected)/app/**`,
+`app/admin/app/**`) does **not** help Reclaim Your Week, which uses
+`programme/**` and keeps its own `lib/app/eslint.config.mjs` override either way.
+It helps a leaf that adopts the reserved namespaces. That is the right trade —
+Daybreak cannot take leaf vocabulary into a framework-owned config — but the
+`building-on-daybreak.md` note must say plainly that the reserved namespaces are
+the path with no override, and the leaf seam is the supported path for everyone
+else, so a leaf can choose knowingly.
+
+**The boundary fixture stays unexempted.** `scripts/boundary/fixtures/**` is what
+proves the ban still bites; widening `ignores` past it would turn the whole check
+green and silent.
+
 ### t-3.4 · Framework boot before leaf seeds (#158)
 
 `db:seed` / `db:reset` / CI never boot the app, so `initFramework() →
@@ -365,6 +476,45 @@ _after_ `app-*/`; that is fine (it depends on core only), but the new directory
 must be `_framework/`, not `framework/`, or the ordering fails silently.
 
 Depends on **t-3.3** (the new seed imports `@/lib/framework`).
+
+**Verified 2026-09-10.** The ordering claim holds under execution, not just
+under ASCII reasoning: `['001-system-owner.ts', '_framework/000-framework-boot.ts',
+'app-reclaim/002-x.ts', 'framework/001-rubric.ts'].sort()` puts the core seeds
+first, `_framework/` second, `app-*/` third. `runSeeds` sorts relative paths and
+`SEED_FILE_PATTERN` constrains only the basename, so the directory name is free.
+
+**Three corrections — the resolution as written does not survive the details.**
+
+1. **Do not boot through `initApp()`.** `lib/app/bootstrap.ts` wraps _both_
+   `initFramework()` and `syncFramework()` in try/catch that **logs and
+   continues** — deliberately, so a framework boot failure degrades the server
+   gracefully rather than killing `instrumentation.register()`. In a seed that
+   behaviour is a defect: a failed sync would mark the unit applied, and the
+   leaf's next seed would fail with a mystifying "no `Module` row". The seed path
+   needs a **throwing** sequence.
+2. **`syncFrameworkForSeed()` cannot compose the leaf.** `leafBan` forbids
+   `lib/framework/** → @/lib/app/**`, so a helper living in the framework tier
+   cannot call `initLeafApp()` — and without it the registry holds no leaf modules
+   and `syncFramework()` would reconcile a half-empty registry. The **seed unit**
+   is the composer: it sits in `prisma/`, which is subject to neither ban, so it
+   may import `@/lib/framework` (after t-3.3) _and_ `@/lib/app/leaf-bootstrap`,
+   exactly as `lib/app/bootstrap.ts` does. The exported helper covers the two
+   framework halves only.
+3. **A seed unit runs _once ever_, so the helper is load-bearing, not a
+   convenience.** `applySeed` skips any unit whose source hash matches its
+   `SeedHistory` row, so the boot seed re-runs only when its own source changes.
+   Fresh DB, `db:reset` and CI are all fine (empty history). The case that breaks
+   is an **incremental `db:seed` on an existing dev DB after a leaf adds a
+   module**: the boot seed is skipped, the new `Module` row is never synced, and
+   the leaf's new seed fails. The leaf's own seed unit — whose hash _does_ change
+   when the leaf edits it — calling `syncFrameworkForSeed()` at the top is what
+   closes that hole. Ship both halves and document this as the reason, rather
+   than framing the export as something smoke scripts happen to want.
+
+**Done when:** a `db:reset` on a clean database leaves `framework_module` and the
+framework capability rows populated with no leaf action at all, and the failure
+mode in correction 1 is proven — a sync failure fails the seed run loudly rather
+than recording it as applied.
 
 ---
 
@@ -549,15 +699,18 @@ Phase 0  ──▶ t-0.1 #160 registry realm      (leaf-blocking; independent)
              t-0.2 ledger reconciliation    (docs; makes Phase 1 obvious)
              t-0.3 #539 merge-base repair   (independent; MUST precede the CI guard)
 
-Phase 1  ──▶ t-1.1 #411 · t-1.2 #398 · t-1.3 #415 · t-1.4 #416 · t-1.5 #410
-             (5 deletions, parallelisable — t-1.1 and t-1.2 gate Phase 4)
+Phase 1  ──▶ SHIPPED (#204 / #205 / #206) — t-1.1 #411 · t-1.2 #398 · t-1.3 #415
+             · t-1.4 #416 · t-1.5 #410. Phase 4's gate is open.
 
 Phase 2  ──▶ t-2.1 #156+#162  ──▶  t-2.2 #167        (strict chain)
 
-Phase 3  ──▶ t-3.1 #159 · t-3.2 #168 (independent)
-             t-3.3 #157  ──▶  t-3.4 #158              (strict chain)
+Phase 3  ──▶ IN FLIGHT (Simon Holmes) — three PRs, ordered by leaf impact:
+             PR A = t-3.1 #159   (independent; the largest leaf unblock)
+             PR B = t-3.3 #157 ──▶ t-3.4 #158  (strict chain, one PR)
+             PR C = t-3.2 #168   (independent; splits again if t-3.2's
+                                  TransitionRequest half grows)
 
-Phase 4  ──▶ t-4.1 #169  (needs t-1.1 + t-1.2)
+Phase 4  ──▶ t-4.1 #169  (t-1.1 + t-1.2 landed — UNBLOCKED)
              t-4.2 #161  (independent)
 
 Phase 5  ──▶ its one carry-now row IS t-0.3; the rest is ledger hygiene —
