@@ -229,8 +229,11 @@ export function isCoreSource(rel: string): boolean {
 
   // ── Leaf tier — reserved surfaces, empty in Sunrise and in Daybreak ───────
   if (rel.startsWith('lib/app/')) return false; // leaf lib surface (built on framework)
+  if (rel.startsWith('components/app/')) return false; // leaf components (#157)
   if (rel.startsWith('app/api/v1/app/')) return false; // leaf consumer routes (#157)
   if (rel.startsWith('app/(protected)/app/')) return false; // leaf authenticated pages (#157)
+  if (rel.startsWith('app/(public)/app/')) return false; // leaf public pages (#157)
+  if (rel.startsWith('app/(auth)/app/')) return false; // leaf auth-flow pages (#157)
   if (rel.startsWith('app/admin/app/')) return false; // leaf admin pages (#157)
 
   // ── By filename ───────────────────────────────────────────────────────────

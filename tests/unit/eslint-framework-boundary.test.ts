@@ -31,6 +31,7 @@ import { ESLint } from 'eslint';
 
 const FRAMEWORK_BAN = '@/lib/framework';
 const ALIAS_BAN = '../*';
+const LEAF_BAN = '@/lib/app';
 
 interface RestrictedImportsOptions {
   patterns?: { group?: string[] }[];
@@ -95,11 +96,14 @@ describe('exemptions — the tiers that legitimately import the framework', () =
     ['a framework boot seed', 'prisma/seeds/_framework/000-framework-boot.ts'],
     ['a framework seed', 'prisma/seeds/framework/001-framework-rubric-judge.ts'],
     ['a leaf seed', 'prisma/seeds/app-reclaim/002-reclaim-surface.ts'],
-    // #157, rationale 2 — the reserved leaf route namespaces, which DO ship in a
-    // build but exist only in a leaf, and a leaf always has a framework tier.
+    // #157, rationale 2 — the reserved leaf surfaces, which DO ship in a build but
+    // exist only in a leaf, and a leaf always has a framework tier.
     ['a leaf API route', 'app/api/v1/app/runs/route.ts'],
     ['a leaf authenticated page', 'app/(protected)/app/dashboard/page.tsx'],
+    ['a leaf public page', 'app/(public)/app/landing/page.tsx'],
+    ['a leaf auth-flow page', 'app/(auth)/app/onboarding/page.tsx'],
     ['a leaf admin page', 'app/admin/app/settings/page.tsx'],
+    ['a leaf component', 'components/app/run-card.tsx'],
   ])('allows @/lib/framework in %s', async (_label, filePath) => {
     expect(await bannedGroupsFor(filePath)).not.toContain(FRAMEWORK_BAN);
   });
@@ -138,5 +142,30 @@ describe('the boundary fixture', () => {
     // The paired half: prove the ignore is scoped to the fixtures directory rather
     // than to `scripts/` at large.
     await expect(eslint.isPathIgnored('scripts/boundary/check.ts')).resolves.toBe(false);
+  });
+});
+
+describe('exempting a path must not cost it the LEAF ban too', () => {
+  // The subtle half of `ignores`: it removes a path from the ban block ENTIRELY,
+  // so the path falls through to Sunrise's root block — which carries `aliasBan`
+  // and nothing else. A framework-tier file exempted only that way would silently
+  // lose `leafBan` and could import `@/lib/app`, inverting the tier order with
+  // nothing to flag it. Framework-tier seeds are therefore also named in the
+  // framework-tier block's `files`.
+  it.each([
+    ['the framework itself', 'lib/framework/facilitation/journey/create.ts'],
+    ['a framework boot seed', 'prisma/seeds/_framework/000-framework-boot.ts'],
+    ['a framework seed', 'prisma/seeds/framework/001-framework-rubric-judge.ts'],
+  ])('keeps the leaf ban on %s (framework tier)', async (_label, filePath) => {
+    expect(await bannedGroupsFor(filePath)).toContain(LEAF_BAN);
+  });
+
+  it.each([
+    // The leaf surface may import itself — `@/lib/app` is the leaf's OWN code.
+    ['a leaf seed', 'prisma/seeds/app-reclaim/002-reclaim-surface.ts'],
+    ['a leaf API route', 'app/api/v1/app/runs/route.ts'],
+    ['a leaf component', 'components/app/run-card.tsx'],
+  ])('does not impose the leaf ban on %s (leaf tier)', async (_label, filePath) => {
+    expect(await bannedGroupsFor(filePath)).not.toContain(LEAF_BAN);
   });
 });

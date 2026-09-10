@@ -30,8 +30,9 @@ process.
 - **A leaf can now import `@/lib/framework` from the reserved namespaces and from
   its own seeds, with no configuration.** The core → framework import ban exempts
   three more groups (#157):
-  - **Reserved leaf routes** — `app/api/v1/app/**`, `app/(protected)/app/**`,
-    `app/admin/app/**`. These *do* ship in a build, but the ban's build-time
+  - **Reserved leaf surfaces** — `app/api/v1/app/**`, `app/(protected)/app/**`,
+    `app/(public)/app/**`, `app/(auth)/app/**`, `app/admin/app/**`, and
+    `components/app/**`. These *do* ship in a build, but the ban's build-time
     rationale is about a fork with **no** `lib/framework/` folder, and these paths
     exist only in a leaf — which always has a framework tier beneath it. Same
     reasoning that already exempts `lib/app/**`.

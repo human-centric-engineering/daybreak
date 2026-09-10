@@ -106,7 +106,10 @@ Sunrise and Daybreak both keep these empty for you, and they are already exempt:
 | ------------------------ | ------------------------ |
 | Consumer API routes      | `app/api/v1/app/**`      |
 | Authenticated pages      | `app/(protected)/app/**` |
+| Public pages             | `app/(public)/app/**`    |
+| Auth-flow pages          | `app/(auth)/app/**`      |
 | Admin pages              | `app/admin/app/**`       |
+| React components         | `components/app/**`      |
 | Server-side registration | `lib/app/**`             |
 | Your seeds               | `prisma/seeds/app-*/**`  |
 

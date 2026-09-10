@@ -257,7 +257,10 @@ describe('isCoreSource', () => {
     // without exempting it here just moves the failure to this scan.
     ['leaf consumer routes', 'app/api/v1/app/runs/route.ts'],
     ['leaf authenticated pages', 'app/(protected)/app/dashboard/page.tsx'],
+    ['leaf public pages', 'app/(public)/app/landing/page.tsx'],
+    ['leaf auth-flow pages', 'app/(auth)/app/onboarding/page.tsx'],
     ['leaf admin pages', 'app/admin/app/settings/page.tsx'],
+    ['leaf components', 'components/app/run-card.tsx'],
   ])('exempts %s (leaf tier)', (_label, rel) => {
     expect(isCoreSource(rel)).toBe(false);
   });
