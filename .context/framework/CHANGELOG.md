@@ -25,6 +25,28 @@ process.
 
 ## [Unreleased]
 
+### Added
+
+- **`createJourney(viewer, key, scope?)`** — the seam that starts a journey
+  (`lib/framework/facilitation/journey/create.ts`, barrel-exported). Until now
+  nothing in the framework created a `UserJourney`: `applyEvent` is the sole writer
+  of journey *state* and requires an existing `journeyId`, and `getJourney` returned
+  `null` for a journey nobody could start — so a leaf beginning a run had to write
+  the `framework_user_journey` row itself. It is the counterpart to
+  `applyJourneyTransition`: **create the journey, then transition it.**
+  - **Idempotent** on the natural key `(userId, graphSlug, contextKey)` — a second
+    start returns the existing row with its original `startedAt`, including under a
+    concurrent race.
+  - **`canRead`-guarded** against the journey's owner before any write, like the
+    journey reads; no new access vocabulary.
+  - The **caller supplies `contextKey`** (`''` is the default, context-free
+    journey); the framework never mints one. This is also the `contextKey` ↔ run
+    identity that per-run slot provenance will resolve against.
+  - It deliberately does **not** validate `graphSlug` against a published map —
+    `graphSlug` is a plain label by design, and the engine takes its graph as an
+    input. A journey started against an unpublished slug is inert rather than
+    rejected, so publish the map first.
+
 ## [0.2.0] — 2026-09-07
 
 > **Second tagged Daybreak release, and the first a leaf actually merges** — 0.1.0
