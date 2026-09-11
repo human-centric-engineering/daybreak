@@ -52,7 +52,7 @@
  */
 
 import { readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 
 import type { SeedUnit } from '@/prisma/runner';
 import { syncFrameworkForSeed } from '@/lib/framework/seed';
@@ -89,7 +89,14 @@ const CAPABILITY_DIRS = [
  */
 function capabilitySources(): string[] {
   return CAPABILITY_DIRS.flatMap((dir) =>
-    readdirSync(join(__dirname, dir))
+    // RECURSIVE. A non-recursive read would miss a capability in a nested
+    // subdirectory — reintroducing, one level down, exactly the "covers less than
+    // it claims" defect this function exists to fix. No such subdirectory exists
+    // today; the point is that adding one must not silently reopen the hole.
+    // Returned names use `/` separators on POSIX and `\` on Windows, so they are
+    // normalised before being joined into a relative path the runner can resolve.
+    readdirSync(join(__dirname, dir), { recursive: true })
+      .map((name) => String(name).split(sep).join('/'))
       .filter((name) => name.endsWith('.ts'))
       .sort()
       .map((name) => `${dir}/${name}`)

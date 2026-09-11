@@ -162,7 +162,11 @@ describe('the boot seed re-runs when the framework changes', () => {
 
     const nonBarrel: string[] = [];
     for (const dir of dirs) {
-      for (const name of readdirSync(join(process.cwd(), dir))) {
+      // Recursive, matching the seed. A non-recursive read here would pass while
+      // the seed silently missed a nested capability — the guard going blind in
+      // exactly the way the thing it guards would.
+      for (const entry of readdirSync(join(process.cwd(), dir), { recursive: true })) {
+        const name = String(entry);
         if (!name.endsWith('.ts')) continue;
         const abs = join(process.cwd(), dir, name);
         expect(declared.has(abs), `hashInputs is missing ${dir}/${name}`).toBe(true);
