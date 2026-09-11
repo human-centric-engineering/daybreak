@@ -193,3 +193,25 @@ describe('permitting a heading must not exempt it from the OTHER rules', () => {
     );
   });
 });
+
+describe('a truncated parse stops the cross-heading rules', () => {
+  it('does not report a duplicate heading about a file it stopped reading', () => {
+    // `checkChangelogStructure` returns early on truncation so no cross-heading rule
+    // draws a conclusion from a partial set. The appended duplicate pass had no such
+    // guard, so an unclosed code fence produced "### Platform appears twice" about a
+    // file read a third of the way through — confident nonsense, which is exactly
+    // what the upstream early-return exists to suppress.
+    const truncated = `${source}\n\n\`\`\`ts\nconst unclosed = true;\n`;
+
+    const violations = checkFrameworkChangelogStructure(
+      truncated,
+      DAYBREAK_VERSION,
+      checkChangelogStructure,
+      parseChangelog
+    );
+
+    expect(violations.some((v) => v.message.includes('appears twice'))).toBe(false);
+    // …and it still reports the fence itself, which is the actionable finding.
+    expect(violations.length).toBeGreaterThan(0);
+  });
+});

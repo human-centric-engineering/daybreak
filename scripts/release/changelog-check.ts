@@ -27,8 +27,10 @@ import {
   formatVerdict,
   CHANGELOG_PATH,
   type BarrelDelta,
+  type ChangelogViolation,
 } from '@/scripts/release/lib';
 import { diffExports, readBarrelExports, type BarrelExports } from '@/scripts/ci/exports-diff';
+import { checkReleaseHistoryPreserved } from '@/scripts/ci/changelog-structure';
 
 /**
  * Resolve a base revision that actually EXISTS in this checkout.
@@ -209,10 +211,15 @@ function readFrameworkBarrels(rev: string | null): BarrelExports[] | null {
   try {
     listing =
       rev === null
-        ? execFileSync('git', ['ls-files', '--', 'lib/framework'], {
-            encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'ignore'],
-          })
+        ? // `--others --exclude-standard` unions in UNTRACKED files. Without it a
+          // brand-new `lib/framework/<module>/index.ts` — the largest possible new
+          // surface — was invisible while an uncommitted EDIT to an existing barrel
+          // was caught, which contradicted this function's own docblock.
+          execFileSync(
+            'git',
+            ['ls-files', '--cached', '--others', '--exclude-standard', '--', 'lib/framework'],
+            { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }
+          )
         : execFileSync('git', ['ls-tree', '-r', '--name-only', rev, '--', 'lib/framework'], {
             encoding: 'utf8',
             stdio: ['ignore', 'pipe', 'ignore'],
@@ -222,9 +229,21 @@ function readFrameworkBarrels(rev: string | null): BarrelExports[] | null {
   }
 
   const barrels: BarrelExports[] = [];
-  for (const path of listing.split('\n').filter((p) => p.endsWith('/index.ts'))) {
+  for (const path of [...new Set(listing.split('\n').filter((p) => p.endsWith('/index.ts')))]) {
     const text = read(path);
-    if (text === null) continue;
+    if (text === null) {
+      // RECORDED, not dropped. Dropping it conflates "could not look" with "does
+      // not exist", and `diffExports` then reads every symbol as added (a finding
+      // that is not Daybreak's) or as REMOVED … breaking for any leaf (a false
+      // alarm about a breaking change). Sunrise's own reader hit this and returns
+      // an empty-with-a-marker entry for the same reason.
+      barrels.push({ file: path, symbols: [], unresolvedStars: [path] });
+      logger.warn(
+        `  PARTIAL  ${path} could not be read at ${rev ?? 'the working tree'} — ` +
+          'treated as exporting nothing, so its symbols may read as added or removed.'
+      );
+      continue;
+    }
     const parsed = readBarrelExports(text, resolveSibling, dirname(path));
     if (parsed.unresolvedStars.length > 0) {
       logger.warn(
@@ -235,6 +254,94 @@ function readFrameworkBarrels(rev: string | null): BarrelExports[] | null {
     barrels.push({ file: path, symbols: parsed.symbols, unresolvedStars: parsed.unresolvedStars });
   }
   return barrels;
+}
+
+/**
+ * True when this looks like a CI run.
+ *
+ * `!== undefined && !== ''` was wrong: several toolchains and plenty of developer
+ * shells export `CI=false` deliberately to mean "not CI", and that took the
+ * hard-fail branch — a changelog-hygiene guard blocking someone on an odd local
+ * checkout, which is the one thing the local SKIP exists to avoid.
+ */
+function isCI(): boolean {
+  const value = (process.env.CI ?? '').toLowerCase();
+  return value !== '' && value !== 'false' && value !== '0' && value !== 'off';
+}
+
+/**
+ * True when the resolved base IS this commit — a diff against yourself.
+ *
+ * On a `push` to `main`, `origin/main` exists and equals `HEAD`, so `merge-base`
+ * returns `HEAD`, the diff is empty, and the guard printed a confident
+ * `OK … no public-surface change`. The docblock above singled that out as part of
+ * the defect being repaired and then did not repair it — nothing detected it. A
+ * direct push adding a framework export was still waved through with a green tick.
+ *
+ * There is no honest verdict here: the branch's changes are already in the base, so
+ * "nothing changed since the base" is true and useless. Reported as a skip rather
+ * than a pass, and in CI as a failure like every other "could not look".
+ */
+function baseIsHead(base: string): boolean {
+  try {
+    const [a, b] = ['HEAD', base].map((rev) =>
+      execFileSync('git', ['rev-parse', `${rev}^{commit}`], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim()
+    );
+    return a === b;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Has a released section been deleted or rewritten? (#239, append-only history.)
+ *
+ * **Lives here rather than in the structure test because it needs TWO revisions.**
+ * Structure is a property of one file and is asserted in
+ * `tests/unit/scripts/release/changelog-structure.test.ts`; history is a property
+ * of a change, so it needs git and belongs in the guard that already has it.
+ *
+ * It is the one rule that catches Sunrise's #550 shape: deleting a
+ * `## [0.1.0]` heading leaves a file that is still perfectly well-formed, so every
+ * structural rule passes while a release's notes have silently gone. VERSIONING.md
+ * claimed this was covered before it was — the claim is what prompted building it.
+ *
+ * `skipped` is surfaced, not swallowed: upstream documents it as "not a softer kind
+ * of pass", and returning `[]` for it would be indistinguishable from "checked,
+ * nothing deleted" — the precise failure the check exists to prevent.
+ */
+function historyViolations(base: string): {
+  violations: ChangelogViolation[];
+  skipped: string | null;
+} {
+  const show = (rev: string): string | null => {
+    try {
+      return execFileSync('git', ['show', `${rev}:${CHANGELOG_PATH}`], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+    } catch {
+      return null;
+    }
+  };
+
+  const baseSource = show(base);
+  if (baseSource === null) {
+    return { violations: [], skipped: `${CHANGELOG_PATH} not present at ${base}` };
+  }
+
+  let headSource: string;
+  try {
+    headSource = readFileSync(join(process.cwd(), CHANGELOG_PATH), 'utf8');
+  } catch {
+    return { violations: [], skipped: `${CHANGELOG_PATH} unreadable in the working tree` };
+  }
+
+  const result = checkReleaseHistoryPreserved(baseSource, headSource);
+  return { violations: [...result.violations], skipped: result.skipped };
 }
 
 function barrelDeltas(): BarrelDelta[] | null {
@@ -262,12 +369,24 @@ function main(): void {
   logger.info('Daybreak changelog guard (f-release t-3)...');
 
   const files = changedFiles();
+  const deltas = barrelDeltas();
 
-  if (files === null) {
-    const against = BASE_REF ?? 'any usable base revision';
-    const detail =
-      `cannot determine changed files against ${against} (shallow clone or missing ref) ` +
-      '— guard not evaluated.';
+  // ONE inconclusive path, covering every way this run can fail to have an answer.
+  // Previously only `files === null` hard-failed in CI; `deltas === null` logged
+  // PARTIAL and then passed `[]`, which `lib.ts` documents as "surface unchanged" —
+  // so an unreadable barrel set produced a confident `OK … no public-surface
+  // change` about a surface never looked at. The same defect this branch exists to
+  // remove, applied to one of the two inputs and not the other.
+  const blockers = [
+    files === null ? `changed files against ${BASE_REF ?? 'any usable base revision'}` : null,
+    deltas === null ? 'the lib/framework barrel surface at the merge-base' : null,
+    BASE_REF !== null && baseIsHead(BASE_REF)
+      ? `a base distinct from HEAD (${BASE_REF} IS this commit, so the diff is empty)`
+      : null,
+  ].filter((b): b is string => b !== null);
+
+  if (blockers.length > 0) {
+    const detail = `could not determine ${blockers.join('; ')} — guard not evaluated.`;
 
     // **In CI this is a FAILURE, not a skip.** Passing here is what made this
     // guard inert for its whole life: the SKIP printed into a step nobody reads on
@@ -275,7 +394,7 @@ function main(): void {
     // that cannot look must not report a pass in the one place it is the only
     // backstop. Locally it still warns and passes — a developer on an odd checkout
     // should not be blocked by a guard about changelog hygiene.
-    if (process.env.CI !== undefined && process.env.CI !== '') {
+    if (isCI()) {
       logger.error(
         `  FAIL  ${detail}\n` +
           '        Running in CI, where a skip is indistinguishable from a pass. ' +
@@ -288,15 +407,25 @@ function main(): void {
     process.exit(0);
   }
 
-  const deltas = barrelDeltas();
-  if (deltas === null) {
-    logger.warn(
-      `  PARTIAL  could not read barrels at the merge-base with ${BASE_REF} — ` +
-        'the lib/framework export surface was NOT checked. Path rules still applied.'
+  // Non-null past the guard above; narrowed explicitly rather than asserted, so a
+  // future edit that adds a blocker without returning still type-checks honestly.
+  if (files === null || deltas === null || BASE_REF === null) return;
+
+  const history = historyViolations(BASE_REF);
+  if (history.skipped !== null) {
+    logger.warn(`  PARTIAL  append-only history not checked — ${history.skipped}.`);
+  }
+  if (history.violations.length > 0) {
+    logger.error(
+      `Released sections of ${CHANGELOG_PATH} were changed:\n` +
+        history.violations.map((v) => `  • ${CHANGELOG_PATH}:${v.line}  ${v.message}`).join('\n') +
+        '\n\nA shipped release’s notes are a record, not a draft. Correct it in ' +
+        '`## [Unreleased]` instead.'
     );
+    process.exit(1);
   }
 
-  const verdict = checkChangelog(files, deltas ?? []);
+  const verdict = checkChangelog(files, deltas);
 
   if (!verdict.violation) {
     const detail = verdict.triggers.length

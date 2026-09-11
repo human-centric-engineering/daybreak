@@ -269,17 +269,18 @@ export function checkFrameworkChangelogStructure(
   source: string,
   daybreakVersion: string,
   checkStructure: (source: string, options: { sunriseVersion: string }) => ChangelogViolation[],
-  parse: (source: string) => { categories: readonly CategoryHeading[] }
+  parse: (source: string) => { categories: readonly CategoryHeading[]; truncation?: unknown }
 ): ChangelogViolation[] {
   // Which LINES carry a heading Daybreak permits. Keyed by line rather than by
   // label parsed back out of the rendered message: a heading whose own label
   // contains `" is not` produced a message the lazy regex mis-parsed, so
   // `### Platform" is not` extracted `Platform`, was accepted, and suppressed its
   // own violation. A heading cannot lie about which line it is on.
+  // Parsed ONCE. It was called twice on the same source, which is wasteful and,
+  // worse, invites the two call sites to disagree about truncation.
+  const parsed = parse(source);
   const permittedLines = new Set(
-    parse(source)
-      .categories.filter((c) => isPermittedCategory(c.label))
-      .map((c) => c.line)
+    parsed.categories.filter((c) => isPermittedCategory(c.label)).map((c) => c.line)
   );
 
   const kept = checkStructure(source, { sunriseVersion: daybreakVersion })
@@ -295,7 +296,14 @@ export function checkFrameworkChangelogStructure(
         : v
     );
 
-  return [...kept, ...duplicatePermittedCategories(parse(source).categories)];
+  // A truncated parse means we do not have the full set of headings, and every
+  // cross-heading rule below reasons across that set. `checkChangelogStructure`
+  // returns early for exactly this reason — an unclosed code fence made it report
+  // "duplicate ### Platform" about a file it stopped reading a third of the way in.
+  // The fence violation is already in `kept` and says what to fix.
+  if (parsed.truncation) return kept;
+
+  return [...kept, ...duplicatePermittedCategories(parsed.categories)];
 }
 
 /**
