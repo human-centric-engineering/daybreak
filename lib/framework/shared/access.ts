@@ -137,14 +137,23 @@ export async function canRead(
  * makes `canRead` **narrower** for a subject (a tenancy deny, say), the write is
  * refused too, instead of a stale write grant outliving the read it depends on.
  *
- * **Every journey write now routes through here** (#242 closed the last gap).
- * Three call sites, and they are the complete set: `createJourney` (#159),
- * `recordNodeProgress` (#168) and `applyJourneyTransition` (`f-guidance`). The
- * last of those needs `canRead` as well — it cannot validate a transition without
- * loading the subject's graph, node states and slots — so it holds both guards
- * rather than swapping one for the other.
+ * **Every journey write that takes a VIEWER routes through here** (#242 closed the
+ * last gap): `createJourney` (#159), `recordNodeProgress` (#168) and
+ * `applyJourneyTransition` (`f-guidance`). The last of those needs `canRead` as
+ * well — it cannot validate a transition without loading the subject's graph, node
+ * states and slots — so it holds both guards rather than swapping one for the
+ * other.
  *
- * A fourth write added later must guard here too. Nothing enforces that
+ * **That is not the same as "every writer of `framework_journey_event`."**
+ * `recordModuleEngagement` (`engagement/record-engagement.ts`) also writes that
+ * table and holds no predicate, because it takes a bare `userId` rather than a
+ * viewer and is contractually non-throwing (fire-and-forget from a request path),
+ * so a guard cannot refuse anything there. It is safe today by **call-site
+ * convention** — all three callers bind `userId` to the authenticated actor — not
+ * by this seam. It is barrel-exported, so a leaf passing a foreign `userId` has
+ * nothing to stop it. Filed as #251.
+ *
+ * A future write that DOES take a viewer must guard here. Nothing enforces that
  * mechanically; `tests/unit/lib/framework/shared/access.test.ts` pins what the
  * predicate DOES, not who remembers to call it.
  */
