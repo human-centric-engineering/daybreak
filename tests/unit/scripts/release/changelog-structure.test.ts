@@ -19,7 +19,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { checkChangelogStructure } from '@/scripts/ci/changelog-structure';
+import { checkChangelogStructure, parseChangelog } from '@/scripts/ci/changelog-structure';
 import {
   checkFrameworkChangelogStructure,
   isPermittedCategory,
@@ -35,7 +35,8 @@ describe('the framework changelog is structurally valid', () => {
     const violations = checkFrameworkChangelogStructure(
       source,
       DAYBREAK_VERSION,
-      checkChangelogStructure
+      checkChangelogStructure,
+      parseChangelog
     );
 
     expect(
@@ -55,7 +56,8 @@ describe('the filter removes ONLY category violations', () => {
     const kept = checkFrameworkChangelogStructure(
       source,
       DAYBREAK_VERSION,
-      checkChangelogStructure
+      checkChangelogStructure,
+      parseChangelog
     );
 
     const keptKeys = new Set(kept.map((v) => `${v.line}:${v.message}`));
@@ -110,7 +112,8 @@ describe('the check can still report', () => {
     const violations = checkFrameworkChangelogStructure(
       broken,
       DAYBREAK_VERSION,
-      checkChangelogStructure
+      checkChangelogStructure,
+      parseChangelog
     );
 
     expect(violations.length).toBeGreaterThan(0);
@@ -118,7 +121,12 @@ describe('the check can still report', () => {
   });
 
   it('reports the version mismatch against DAYBREAK_VERSION, not the platform', () => {
-    const violations = checkFrameworkChangelogStructure(source, '99.0.0', checkChangelogStructure);
+    const violations = checkFrameworkChangelogStructure(
+      source,
+      '99.0.0',
+      checkChangelogStructure,
+      parseChangelog
+    );
 
     const versionFinding = violations.find((v) => v.message.includes('99.0.0'));
     expect(versionFinding, 'expected a version-mismatch violation').toBeDefined();
@@ -127,5 +135,61 @@ describe('the check can still report', () => {
     expect(versionFinding?.message).toContain('DAYBREAK_VERSION');
     expect(versionFinding?.message).not.toContain('SUNRISE_VERSION');
     expect(versionFinding?.message).not.toContain('sunrise-version.ts');
+  });
+});
+
+describe('permitting a heading must not exempt it from the OTHER rules', () => {
+  const check = (text: string) =>
+    checkFrameworkChangelogStructure(
+      text,
+      DAYBREAK_VERSION,
+      checkChangelogStructure,
+      parseChangelog
+    );
+
+  it('still catches a duplicated ### Platform in one release section', () => {
+    // The gap this closes: Sunrise's category loop `return`s after pushing "not a
+    // Keep a Changelog category", so a non-canonical label never reaches the
+    // duplicate check below it. Filtering that violation out removed the only rule
+    // that ever looked at these headings — permitting a heading accidentally
+    // exempted it from the split-section rule entirely.
+    //
+    // A leaf scanning a release for what the Sunrise sync changed reads the first
+    // `### Platform` block and stops. 0.2.0's notes record fixing exactly this,
+    // by hand.
+    const doubled = source.replace('### Platform', '### Platform\n\n- first block\n\n### Platform');
+
+    const violations = check(doubled);
+
+    expect(violations.some((v) => v.message.includes('appears twice'))).toBe(true);
+  });
+
+  it('catches a duplicated ⚠️ action-required heading too', () => {
+    const marker = '### ⚠️ Changed — action required for existing leaf forks';
+    const doubled = source.replace(marker, `${marker}\n\n- a\n\n${marker}`);
+
+    expect(check(doubled).some((v) => v.message.includes('appears twice'))).toBe(true);
+  });
+
+  it('does not invent a duplicate across DIFFERENT release sections', () => {
+    // `### Platform` legitimately appears in 0.1.0 and 0.2.0. Keying on the label
+    // alone rather than on (section, label) would report the real file as broken.
+    expect(check(source).some((v) => v.message.includes('appears twice'))).toBe(false);
+  });
+
+  it('cannot be suppressed by a heading whose own label mimics the message', () => {
+    // The filter used to parse the label back out of Sunrise's rendered message
+    // with a lazy `/^"### (.*?)" is not/`. A heading of `Platform" is not` produced
+    // `"### Platform" is not" is not a Keep a Changelog category…`, the regex
+    // extracted `Platform`, and the violation was dropped — content in the
+    // changelog suppressing a check over the changelog. Keyed on line number now,
+    // and a heading cannot lie about which line it is on.
+    const crafted = source.replace('### Added', '### Platform" is not');
+
+    const violations = check(crafted);
+
+    expect(violations.some((v) => v.message.includes('is not a Keep a Changelog category'))).toBe(
+      true
+    );
   });
 });

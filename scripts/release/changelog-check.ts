@@ -20,7 +20,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { logger } from '@/lib/logging';
 import {
   checkChangelog,
@@ -30,8 +30,84 @@ import {
 } from '@/scripts/release/lib';
 import { diffExports, readBarrelExports, type BarrelExports } from '@/scripts/ci/exports-diff';
 
-/** The base ref to diff against. CI sets it; locally we fall back to origin/main. */
-const BASE_REF = process.env.CHANGELOG_BASE_REF ?? 'origin/main';
+/**
+ * Resolve a base revision that actually EXISTS in this checkout.
+ *
+ * The previous version was `process.env.CHANGELOG_BASE_REF ?? 'origin/main'` with
+ * a docblock asserting "CI sets it". **Nothing set it** — a repo-wide grep found
+ * that variable in exactly one place, the line that read it. And CI's lint job
+ * checks out at `actions/checkout@v7`'s default depth of 1, which configures no
+ * `refs/remotes/origin/main` on a pull_request event. So `git merge-base
+ * origin/main HEAD` failed, `changedFiles()` returned `null`, and the guard took
+ * its SKIP branch and exited 0 — on every PR, since it shipped.
+ *
+ * It was worse than inert on `push` to `main`, where `origin/main` exists and
+ * equals `HEAD`: the diff is empty and it printed a confident
+ * `OK … no public-surface change`. A false pass reads exactly like a real one.
+ *
+ * Sunrise's own adjacent steps solved this long ago and say why — `ci.yml` uses
+ * `git cat-file -e 'HEAD^' || git fetch --no-tags --depth=2 …` then `--base HEAD^`,
+ * because "`origin/main` depends on the refspec checkout happened to configure".
+ * This guard is fork-owned and reached through `app:ci-checks`, which takes no
+ * arguments and no env, so it does that work itself rather than asking for an edit
+ * to a Sunrise-owned workflow.
+ *
+ * ## Why NOT `HEAD^`, which is what the Sunrise steps beside it use
+ *
+ * Those checks are whole-FILE (is the changelog well-formed; did history change),
+ * so any base works. This one is a DIFF gate over the branch. With `HEAD^` it sees
+ * only the last commit, so a seam change in commit 1 with no entry anywhere passes
+ * the moment commit 3 is docs-only — a narrower window wearing the same green tick,
+ * which is the failure this whole fix is about. Tried it, watched it pass on a
+ * branch it should have failed, and removed it.
+ *
+ * So: an explicit `CHANGELOG_BASE_REF`, then a real `origin/main`, then ONE attempt
+ * to fetch enough history to have one. If none of that works there is no honest
+ * answer, and the caller turns that into a CI failure rather than a pass.
+ */
+function resolveBaseRef(): string | null {
+  const exists = (rev: string): boolean => {
+    try {
+      execFileSync('git', ['rev-parse', '--verify', '--quiet', `${rev}^{commit}`], {
+        stdio: ['ignore', 'ignore', 'ignore'],
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const explicit = process.env.CHANGELOG_BASE_REF;
+  if (explicit !== undefined && explicit !== '') return exists(explicit) ? explicit : null;
+
+  if (exists('origin/main')) return 'origin/main';
+
+  // CI checks out at depth 1 with no `origin/main` refspec. Fetch it, deepening a
+  // shallow clone first — `merge-base` needs shared history, and a shallow fetch of
+  // main into a shallow HEAD can share no commit at all.
+  try {
+    const shallow =
+      execFileSync('git', ['rev-parse', '--is-shallow-repository'], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim() === 'true';
+
+    execFileSync(
+      'git',
+      shallow
+        ? ['fetch', '--no-tags', '--unshallow', 'origin', 'main']
+        : ['fetch', '--no-tags', 'origin', 'main'],
+      { stdio: ['ignore', 'ignore', 'ignore'] }
+    );
+  } catch {
+    /* fall through — null is a CI failure, not a pass */
+  }
+
+  if (exists('origin/main')) return 'origin/main';
+  return exists('FETCH_HEAD') ? 'FETCH_HEAD' : null;
+}
+
+const BASE_REF = resolveBaseRef();
 
 /**
  * Files changed on this branch relative to the merge-base with `BASE_REF`.
@@ -43,6 +119,7 @@ const BASE_REF = process.env.CHANGELOG_BASE_REF ?? 'origin/main';
  */
 function changedFiles(): string[] | null {
   try {
+    if (BASE_REF === null) return null;
     const mergeBase = execFileSync('git', ['merge-base', BASE_REF, 'HEAD'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -111,6 +188,17 @@ function readFrameworkBarrels(rev: string | null): BarrelExports[] | null {
     if (!specifier.startsWith('@/')) return null;
     const base = specifier.slice(2);
     for (const candidate of [`${base}.ts`, `${base}/index.ts`]) {
+      // Containment check BEFORE reading. `join()` silently normalises `..` away,
+      // so `@/../../etc/hosts` resolved and read a file outside the repo on the
+      // working-tree pass while `git show <sha>:../..` refused on the base pass.
+      // The traversal needs commit access and is bounded, but the ASYMMETRY is the
+      // useful half: the same specifier resolving at HEAD and not at base makes
+      // those symbols look newly ADDED, so the guard reports a change that is not
+      // Daybreak's and cannot be explained. A guard that invents findings is a
+      // guard people learn to bypass.
+      const abs = resolve(root, candidate);
+      if (abs !== root && !abs.startsWith(root + sep)) continue;
+
       const text = read(candidate);
       if (text !== null) return { text, dir: dirname(candidate) };
     }
@@ -151,6 +239,7 @@ function readFrameworkBarrels(rev: string | null): BarrelExports[] | null {
 
 function barrelDeltas(): BarrelDelta[] | null {
   try {
+    if (BASE_REF === null) return null;
     const mergeBase = execFileSync('git', ['merge-base', BASE_REF, 'HEAD'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -175,13 +264,27 @@ function main(): void {
   const files = changedFiles();
 
   if (files === null) {
-    // Skip, loudly, and pass. A developer running this on a branch with no
-    // merge-base should not be blocked, but the reason is printed so a silent
-    // CI skip is never mistaken for a clean run.
-    logger.warn(
-      `  SKIP  cannot determine changed files against ${BASE_REF} ` +
-        '(shallow clone or missing ref) — guard not evaluated.'
-    );
+    const against = BASE_REF ?? 'any usable base revision';
+    const detail =
+      `cannot determine changed files against ${against} (shallow clone or missing ref) ` +
+      '— guard not evaluated.';
+
+    // **In CI this is a FAILURE, not a skip.** Passing here is what made this
+    // guard inert for its whole life: the SKIP printed into a step nobody reads on
+    // a green build, and every ungated public-surface change merged. A control
+    // that cannot look must not report a pass in the one place it is the only
+    // backstop. Locally it still warns and passes — a developer on an odd checkout
+    // should not be blocked by a guard about changelog hygiene.
+    if (process.env.CI !== undefined && process.env.CI !== '') {
+      logger.error(
+        `  FAIL  ${detail}\n` +
+          '        Running in CI, where a skip is indistinguishable from a pass. ' +
+          'Ensure the checkout has history (fetch-depth) or set CHANGELOG_BASE_REF.'
+      );
+      process.exit(1);
+    }
+
+    logger.warn(`  SKIP  ${detail}`);
     process.exit(0);
   }
 

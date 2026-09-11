@@ -268,16 +268,22 @@ export function isPermittedCategory(label: string): boolean {
 export function checkFrameworkChangelogStructure(
   source: string,
   daybreakVersion: string,
-  checkStructure: (source: string, options: { sunriseVersion: string }) => ChangelogViolation[]
+  checkStructure: (source: string, options: { sunriseVersion: string }) => ChangelogViolation[],
+  parse: (source: string) => { categories: readonly CategoryHeading[] }
 ): ChangelogViolation[] {
-  return checkStructure(source, { sunriseVersion: daybreakVersion })
-    .filter((v) => {
-      if (!v.message.includes(NOT_A_CATEGORY)) return true;
-      const label = /^"### (.*?)" is not/u.exec(v.message)?.[1];
-      // An unparseable message is KEPT, not dropped. Dropping it would turn an
-      // upstream rewording into silence about a real violation.
-      return label === undefined || !isPermittedCategory(label);
-    })
+  // Which LINES carry a heading Daybreak permits. Keyed by line rather than by
+  // label parsed back out of the rendered message: a heading whose own label
+  // contains `" is not` produced a message the lazy regex mis-parsed, so
+  // `### Platform" is not` extracted `Platform`, was accepted, and suppressed its
+  // own violation. A heading cannot lie about which line it is on.
+  const permittedLines = new Set(
+    parse(source)
+      .categories.filter((c) => isPermittedCategory(c.label))
+      .map((c) => c.line)
+  );
+
+  const kept = checkStructure(source, { sunriseVersion: daybreakVersion })
+    .filter((v) => !(v.message.includes(NOT_A_CATEGORY) && permittedLines.has(v.line)))
     .map((v) =>
       v.message.includes('SUNRISE_VERSION')
         ? {
@@ -288,6 +294,56 @@ export function checkFrameworkChangelogStructure(
           }
         : v
     );
+
+  return [...kept, ...duplicatePermittedCategories(parse(source).categories)];
+}
+
+/**
+ * Second `### Platform` in one release section, and friends.
+ *
+ * **This exists because permitting a heading accidentally exempted it from a
+ * different rule.** Sunrise's category loop pushes the "not a Keep a Changelog
+ * category" violation and then `return`s, so a non-canonical label never reaches
+ * the duplicate check below it. Filtering that violation out therefore removed the
+ * only thing that ever looked at these headings — the split-section rule silently
+ * did not apply to the three Daybreak added, including the action-required one.
+ *
+ * The failure it allows is not cosmetic: a leaf scanning a release for what the
+ * Sunrise sync changed reads the first `### Platform` block and stops. 0.2.0's own
+ * notes record consolidating duplicate `###` headings, found by hand.
+ *
+ * Re-applied here rather than left to upstream, because the exemption is ours.
+ */
+function duplicatePermittedCategories(
+  categories: readonly CategoryHeading[]
+): ChangelogViolation[] {
+  const seen = new Map<string, number>();
+  const violations: ChangelogViolation[] = [];
+
+  for (const category of categories) {
+    if (!isPermittedCategory(category.label)) continue;
+    const key = `${category.sectionLine}\u0000${category.label}`;
+    const first = seen.get(key);
+    if (first === undefined) {
+      seen.set(key, category.line);
+      continue;
+    }
+    violations.push({
+      line: category.line,
+      message:
+        `"### ${category.label}" appears twice in the same release section ` +
+        `(already at line ${first}). A reader stops at the first block — merge them.`,
+    });
+  }
+
+  return violations;
+}
+
+/** Mirrors `CategoryHeading` from `@/scripts/ci/changelog-structure`. */
+export interface CategoryHeading {
+  line: number;
+  label: string;
+  sectionLine: number;
 }
 
 /** Mirrors `ChangelogViolation` from `@/scripts/ci/changelog-structure`. */
