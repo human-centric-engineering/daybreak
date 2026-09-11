@@ -137,11 +137,16 @@ export async function canRead(
  * makes `canRead` **narrower** for a subject (a tenancy deny, say), the write is
  * refused too, instead of a stale write grant outliving the read it depends on.
  *
- * **Not yet the only write guard.** `applyJourneyTransition` still reaches its
- * write authorization through `assembleJourneyContext` → `getJourney` → `canRead`,
- * so the state-transition path carries the widening risk this function pins for
- * creation. Routing it through here is filed as #242; it is a change to
- * `f-guidance`, not to this seam.
+ * **Every journey write now routes through here** (#242 closed the last gap).
+ * Three call sites, and they are the complete set: `createJourney` (#159),
+ * `recordNodeProgress` (#168) and `applyJourneyTransition` (`f-guidance`). The
+ * last of those needs `canRead` as well — it cannot validate a transition without
+ * loading the subject's graph, node states and slots — so it holds both guards
+ * rather than swapping one for the other.
+ *
+ * A fourth write added later must guard here too. Nothing enforces that
+ * mechanically; `tests/unit/lib/framework/shared/access.test.ts` pins what the
+ * predicate DOES, not who remembers to call it.
  */
 export async function canWrite(
   viewer: JourneyViewer,

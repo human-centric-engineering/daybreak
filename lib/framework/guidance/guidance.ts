@@ -10,7 +10,8 @@
  * turns those into a structured result.
  */
 
-import type { JourneyViewer, AccessScope } from '@/lib/framework/shared/access';
+import { canWrite, type JourneyViewer, type AccessScope } from '@/lib/framework/shared/access';
+import { ForbiddenError } from '@/lib/api/errors';
 import type { JourneyKey } from '@/lib/framework/facilitation/journey/queries';
 import {
   computeAvailability,
@@ -121,11 +122,43 @@ export interface TransitionRequest {
 }
 
 /**
- * Ask the engine to apply a journey transition (the sole write path). Assembles the same
- * read context and hands it to `applyEvent`, which validates the move and — on success —
- * writes the event + projection in one transaction, or returns a `Rejection` (with the
- * node's lock reasons) that never touches the DB. `null` when the journey has not started
- * (nothing to transition). The subject is `key.userId`, `canRead`-guarded by the assembler.
+ * Ask the engine to apply a journey transition (the sole write path for journey
+ * *lifecycle* state). Assembles the same read context and hands it to `applyEvent`, which
+ * validates the move and — on success — writes the event + projection in one transaction,
+ * or returns a `Rejection` (with the node's lock reasons) that never touches the DB.
+ * `null` when the journey has not started (nothing to transition).
+ *
+ * ## Two guards, deliberately (#242)
+ *
+ * This needs **both**, because it genuinely does both things:
+ *
+ * - the **read** is `canRead`, applied by {@link assembleJourneyContext} — the transition
+ *   cannot be validated without loading the graph, node states and slots for the subject;
+ * - the **write** is {@link canWrite}, applied here.
+ *
+ * Until #242 the write borrowed the read's authorization, which was fine only by
+ * coincidence: `canRead` is documented as delegating to Sunrise #367's ownership resolver
+ * once it lands, widening `own → team → all`. That widening is about *reading* a cohort.
+ * The day it is wired, every viewer who could merely read a cohort's journeys would have
+ * silently gained the right to drive state transitions for those subjects — writing
+ * `UserNodeState` projections and appending `JourneyEvent` rows on their behalf, with no
+ * diff to this file and no test in the suite failing. `canWrite` pins the write grant to
+ * self-or-admin-support, so widening it becomes a visible edit to `shared/access.ts`.
+ *
+ * **This changes nothing today.** The two predicates are value-identical until #367 lands,
+ * so no caller's behaviour moves; the point is that the widening can no longer reach here
+ * by omission. That is also why the test for it is structural rather than behavioural —
+ * no input can distinguish the two.
+ *
+ * **The guard runs BEFORE the assembler**, which is not where the issue proposed it ("an
+ * explicit `canWrite` check on the write half, before `applyEvent` is called"). Placing it
+ * after would let a viewer who may not write still trigger six reads — the published
+ * graph, the journey, node states, slot heads, `now` and the module list — before being
+ * refused. Nothing is lost by checking first: `canWrite` *composes* `canRead`, so anything
+ * it admits the assembler would admit too. This also matches the sibling write seams
+ * (`createJourney`, `recordNodeProgress`), which both refuse before touching the database.
+ *
+ * @throws {ForbiddenError} when `viewer` may not write for `key.userId`.
  */
 export async function applyJourneyTransition(
   viewer: JourneyViewer,
@@ -133,6 +166,10 @@ export async function applyJourneyTransition(
   move: TransitionRequest,
   scope?: AccessScope
 ): Promise<ApplyEventResult | null> {
+  if (!(await canWrite(viewer, key.userId, scope))) {
+    throw new ForbiddenError('Not permitted to transition this journey');
+  }
+
   const context = await assembleJourneyContext(viewer, key, scope);
   if (context === null) return null;
 
