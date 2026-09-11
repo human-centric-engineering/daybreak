@@ -153,8 +153,9 @@ process.
 
   **`registerLeaf` is not optional for you.** Omit it and `syncFramework()`
   reconciles a registry `initLeafApp()` never populated — so your new `Module` row
-  is *still* never created and the seed fails with exactly the error this paragraph
-  promises to fix. See [`building-on-daybreak.md`](./building-on-daybreak.md).
+  is *still* never created. This seed does **not** fail when that happens: it exits
+  0, having written the framework's own capability rows. What fails is your *next*
+  seed, the one that expects the module row to exist. See [`building-on-daybreak.md`](./building-on-daybreak.md).
 
 - **A leaf can now import `@/lib/framework` from the reserved namespaces and from
   its own seeds, with no configuration.** The core → framework import ban exempts

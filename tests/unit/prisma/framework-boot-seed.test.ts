@@ -139,44 +139,44 @@ describe('the boot seed re-runs when the framework changes', () => {
     }
   });
 
-  it('covers every capability SOURCE file, not just the barrels (#245)', async () => {
+  it('covers every file in the framework tree, not a guess about which ones matter (#245)', async () => {
     const unit = (await import('@/prisma/seeds/_framework/000-framework-boot')).default;
     const seedDir = join(SEEDS, '_framework');
-    // The barrels alone caught a capability being ADDED — that edits `index.ts`.
-    // They missed an EDIT to one that already exists, which is the more common
-    // change and just as consequential: `syncFrameworkCapabilities()` propagates
-    // `name`, `description` and the parameter schema to the `ai_capability` row,
-    // so editing `get-state.ts` changes what the row should say while touching no
-    // barrel — seed skipped, row silently stale on every existing dev database.
-    //
-    // Asserted against the real directories rather than a hard-coded list, so a
-    // capability added tomorrow is covered without editing this test — and a
-    // revert to barrels-only fails here rather than going unnoticed.
-    const declared = new Set((unit.hashInputs ?? []).map((h) => resolve(seedDir, h)));
-    const dirs = [
-      'lib/framework/data-slots/capabilities',
-      'lib/framework/guidance/capabilities',
-      'lib/framework/engagement/capabilities',
-      'lib/framework/facilitation/emergence/capabilities',
-    ];
 
-    const nonBarrel: string[] = [];
-    for (const dir of dirs) {
-      // Recursive, matching the seed. A non-recursive read here would pass while
-      // the seed silently missed a nested capability — the guard going blind in
-      // exactly the way the thing it guards would.
-      for (const entry of readdirSync(join(process.cwd(), dir), { recursive: true })) {
-        const name = String(entry);
-        if (!name.endsWith('.ts')) continue;
-        const abs = join(process.cwd(), dir, name);
-        expect(declared.has(abs), `hashInputs is missing ${dir}/${name}`).toBe(true);
-        if (name !== 'index.ts') nonBarrel.push(`${dir}/${name}`);
-      }
+    // Three progressively-wrong guesses preceded this, and the test is written
+    // against the tree so a fourth is impossible:
+    //
+    //   1. the four capability BARRELS  — caught a capability being added, missed
+    //      every later edit to one;
+    //   2. every capability SOURCE file — missed the constants those files build
+    //      their schemas from (`SLOT_SOURCE_TYPE` in `data-slots/vocabulary.ts`
+    //      feeds `fill-slot`'s `enum`, and is in neither list);
+    //   3. a non-recursive read of those directories — missed anything nested.
+    //
+    // `syncFrameworkCapabilities()` propagates `name`, `description` and the
+    // parameter schema to the `ai_capability` row, so any of those misses leaves
+    // the row silently stale on an existing dev database, which is the whole
+    // failure `hashInputs` exists to prevent.
+    const declared = new Set((unit.hashInputs ?? []).map((h) => resolve(seedDir, h)));
+    const root = join(process.cwd(), 'lib', 'framework');
+
+    const found: string[] = [];
+    for (const entry of readdirSync(root, { recursive: true })) {
+      const name = String(entry);
+      if (!name.endsWith('.ts')) continue;
+      found.push(name);
+      expect(declared.has(join(root, name)), `hashInputs is missing lib/framework/${name}`).toBe(
+        true
+      );
     }
 
-    // Guard the guard: if these directories ever held nothing but barrels, every
-    // assertion above would pass while proving nothing about the case this exists
-    // for. There are 12 non-barrel capability files today.
-    expect(nonBarrel.length).toBeGreaterThan(5);
+    // Guard the guard: an empty or tiny walk would make every assertion above pass
+    // while proving nothing. Asserted as a floor rather than an exact count,
+    // because a count is a stale witness waiting to happen — the previous version
+    // of this test shipped one that was already wrong.
+    expect(found.length).toBeGreaterThan(100);
+    // And the transitive case specifically, by name, since it is the one a
+    // narrower rule would drop first.
+    expect(declared.has(join(root, 'data-slots', 'vocabulary.ts'))).toBe(true);
   });
 });

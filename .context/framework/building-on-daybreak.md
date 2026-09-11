@@ -220,10 +220,15 @@ Omit it and the failure is **silent, not loud**: Daybreak's framework tier regis
 no modules of its own, so without your hook the registry is _empty_, and the
 reconcile treats an empty registry as a deliberate no-op — it returns before the
 retire pass rather than mass-unregistering on what might be a registration that
-never ran. So nothing is written and nothing is removed. The symptom you will
-actually see is **a missing `Module` row and no error message**, with
-`no registered modules — nothing to sync` in the log. Look for that, not for rows
-marked removed.
+never ran. So no module row is written and none is removed.
+
+**The rest of the sync still runs, which is what makes this confusing.**
+`syncFrameworkCapabilities()` does not depend on the module registry, so the
+framework's own `ai_capability` rows appear exactly as they should and the seed
+exits 0. It is easy to conclude from that the sync worked. The symptom to look for
+is narrower: **a missing `Module` row, no error message**, and
+`no registered modules — nothing to sync` in the log. Not rows marked removed, and
+not a failing seed.
 
 `syncFrameworkForSeed()` throws where the server-boot bridge logs and continues —
 deliberately. A seed that silently failed to establish the framework would be

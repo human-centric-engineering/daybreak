@@ -28,7 +28,10 @@
  * `no registered modules — nothing to sync`.
  *
  * That is the symptom to look for: **a missing `Module` row and no error** — not
- * rows flagged as removed. This comment used to say the reconcile "actively flags
+ * rows flagged as removed, and not a failing seed. Note the rest of the sync is
+ * unaffected: `syncFrameworkCapabilities()` does not consult the module registry,
+ * so the framework's own `ai_capability` rows are written as usual and the run
+ * looks healthy. This comment used to say the reconcile "actively flags
  * partially-registered modules as removed", which sent a reader hunting for
  * retired rows that do not exist. It becomes true only once the framework tier
  * registers modules of its own, which makes the registry genuinely *partial*
