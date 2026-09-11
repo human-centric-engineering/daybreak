@@ -214,9 +214,16 @@ them, or those warnings will outnumber your actual output. They are harmless —
 last registration is identical to the first.
 
 **Pass `registerLeaf`.** It runs between framework registration and the database
-reconcile, which is the only correct position: the reconcile does not just write
-what it finds, it treats modules missing from the registry as **removed**. Omit the
-hook in a process that has leaf modules and the sync will do exactly that.
+reconcile, which is the only correct position.
+
+Omit it and the failure is **silent, not loud**: Daybreak's framework tier registers
+no modules of its own, so without your hook the registry is _empty_, and the
+reconcile treats an empty registry as a deliberate no-op — it returns before the
+retire pass rather than mass-unregistering on what might be a registration that
+never ran. So nothing is written and nothing is removed. The symptom you will
+actually see is **a missing `Module` row and no error message**, with
+`no registered modules — nothing to sync` in the log. Look for that, not for rows
+marked removed.
 
 `syncFrameworkForSeed()` throws where the server-boot bridge logs and continues —
 deliberately. A seed that silently failed to establish the framework would be

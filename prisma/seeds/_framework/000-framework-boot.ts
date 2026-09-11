@@ -51,9 +51,50 @@
  *     (below) and re-runs itself when they change.
  */
 
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
+
 import type { SeedUnit } from '@/prisma/runner';
 import { syncFrameworkForSeed } from '@/lib/framework/seed';
 import { initLeafApp } from '@/lib/app/leaf-bootstrap';
+
+/**
+ * The framework's capability source directories, relative to this file.
+ *
+ * Enumerated rather than listed file-by-file, because the failure this closes is
+ * an EDIT to an existing capability — a changed slug, description or parameter
+ * schema, all of which `syncFrameworkCapabilities()` propagates to the
+ * `ai_capability` row. Naming only the barrels caught a capability being *added*
+ * (which edits `index.ts`) and missed every later edit to it.
+ */
+const CAPABILITY_DIRS = [
+  '../../../lib/framework/data-slots/capabilities',
+  '../../../lib/framework/guidance/capabilities',
+  '../../../lib/framework/engagement/capabilities',
+  '../../../lib/framework/facilitation/emergence/capabilities',
+];
+
+/**
+ * Every `.ts` file in {@link CAPABILITY_DIRS}, sorted, as paths relative to this
+ * file — the shape `hashInputs` takes.
+ *
+ * **Sorted deliberately.** `readdirSync` order is filesystem-dependent, and the
+ * runner hashes these in the order given, so an unsorted list would produce a
+ * different hash on a different machine and re-run the seed for no reason.
+ *
+ * Throws at import time if a directory is missing. The runner imports this module
+ * before hashing, so that surfaces as a loud seed failure rather than a silently
+ * shorter hash input — which is the whole failure mode this mechanism exists to
+ * prevent.
+ */
+function capabilitySources(): string[] {
+  return CAPABILITY_DIRS.flatMap((dir) =>
+    readdirSync(join(__dirname, dir))
+      .filter((name) => name.endsWith('.ts'))
+      .sort()
+      .map((name) => `${dir}/${name}`)
+  );
+}
 
 const unit: SeedUnit = {
   name: 'framework-boot',
@@ -68,17 +109,20 @@ const unit: SeedUnit = {
   // database, and the tool cannot be granted to an agent, with nothing to edit to
   // fix it short of touching this file.
   //
-  // `index.ts` covers a new capability GROUP (it is where each is registered); the
-  // four collections cover a new capability inside an existing group, which does
-  // not touch `index.ts`. Adding a fifth group means editing `index.ts` AND adding
-  // its collection here.
-  hashInputs: [
-    '../../../lib/framework/index.ts',
-    '../../../lib/framework/data-slots/capabilities/index.ts',
-    '../../../lib/framework/guidance/capabilities/index.ts',
-    '../../../lib/framework/engagement/capabilities/index.ts',
-    '../../../lib/framework/facilitation/emergence/capabilities/index.ts',
-  ],
+  // `index.ts` covers a new capability GROUP (it is where each is registered);
+  // every capability SOURCE FILE covers the rest — a capability added inside an
+  // existing group (which does not touch `lib/framework/index.ts`) and, the case
+  // the barrels alone missed, an EDIT to a capability that already exists.
+  //
+  // That last one is not theoretical: `syncFrameworkCapabilities()` propagates
+  // `name`, `description` and the parameter schema to the `ai_capability` row on
+  // change, so editing `data-slots/capabilities/get-state.ts` changes what the row
+  // should say — while touching no barrel, so the seed was skipped and the row
+  // silently went stale on every existing dev database.
+  //
+  // Adding a fifth group still means editing `lib/framework/index.ts` AND adding
+  // its directory to CAPABILITY_DIRS above.
+  hashInputs: ['../../../lib/framework/index.ts', ...capabilitySources()],
   async run({ logger }) {
     // Throws on failure rather than logging and continuing — the difference from
     // `initApp()`, and the point of the seed-specific entry point. A sync that

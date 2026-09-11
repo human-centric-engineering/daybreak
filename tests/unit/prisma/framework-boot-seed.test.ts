@@ -138,4 +138,41 @@ describe('the boot seed re-runs when the framework changes', () => {
       expect(declared, `hashInputs is missing ${mod}`).toBe(true);
     }
   });
+
+  it('covers every capability SOURCE file, not just the barrels (#245)', async () => {
+    const unit = (await import('@/prisma/seeds/_framework/000-framework-boot')).default;
+    const seedDir = join(SEEDS, '_framework');
+    // The barrels alone caught a capability being ADDED — that edits `index.ts`.
+    // They missed an EDIT to one that already exists, which is the more common
+    // change and just as consequential: `syncFrameworkCapabilities()` propagates
+    // `name`, `description` and the parameter schema to the `ai_capability` row,
+    // so editing `get-state.ts` changes what the row should say while touching no
+    // barrel — seed skipped, row silently stale on every existing dev database.
+    //
+    // Asserted against the real directories rather than a hard-coded list, so a
+    // capability added tomorrow is covered without editing this test — and a
+    // revert to barrels-only fails here rather than going unnoticed.
+    const declared = new Set((unit.hashInputs ?? []).map((h) => resolve(seedDir, h)));
+    const dirs = [
+      'lib/framework/data-slots/capabilities',
+      'lib/framework/guidance/capabilities',
+      'lib/framework/engagement/capabilities',
+      'lib/framework/facilitation/emergence/capabilities',
+    ];
+
+    const nonBarrel: string[] = [];
+    for (const dir of dirs) {
+      for (const name of readdirSync(join(process.cwd(), dir))) {
+        if (!name.endsWith('.ts')) continue;
+        const abs = join(process.cwd(), dir, name);
+        expect(declared.has(abs), `hashInputs is missing ${dir}/${name}`).toBe(true);
+        if (name !== 'index.ts') nonBarrel.push(`${dir}/${name}`);
+      }
+    }
+
+    // Guard the guard: if these directories ever held nothing but barrels, every
+    // assertion above would pass while proving nothing about the case this exists
+    // for. There are 12 non-barrel capability files today.
+    expect(nonBarrel.length).toBeGreaterThan(5);
+  });
 });

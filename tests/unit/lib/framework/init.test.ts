@@ -55,6 +55,26 @@ describe('initFramework', () => {
   });
 });
 
+describe('the framework tier registers no MODULES of its own', () => {
+  it('leaves the module registry empty, which is what makes registerLeaf load-bearing', async () => {
+    // A WITNESS for prose, not a behavioural requirement (#245). `lib/framework/seed.ts`
+    // and `building-on-daybreak.md` both tell a leaf that omitting `registerLeaf`
+    // produces a SILENT failure — a missing `Module` row and no error — rather than
+    // rows flagged as removed. That is only true while this list is empty:
+    // `syncRegisteredModules()` no-ops on an EMPTY registry but does run its retire
+    // pass on a PARTIAL one.
+    //
+    // So the day Daybreak registers a framework module here, both documents flip from
+    // right to wrong with nothing else failing. This test is what fails instead. If it
+    // does, do not delete it — update the prose it guards, then update this test's
+    // expectation to match.
+    const { getRegisteredModules } = await import('@/lib/framework/modules/registry');
+    initFramework();
+
+    expect(getRegisteredModules()).toEqual([]);
+  });
+});
+
 describe('loadModuleContext (unregistered slug)', () => {
   it('resolves to the "not available yet" body when the slug is not a registered module', async () => {
     // No modules are registered in this init-only test, so any slug is unknown.
