@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { z } from 'zod';
 
 vi.mock('@/lib/orchestration/chat/context-builder', () => ({
   registerContextContributor: vi.fn(),
@@ -68,10 +69,34 @@ describe('the framework tier registers no MODULES of its own', () => {
     // right to wrong with nothing else failing. This test is what fails instead. If it
     // does, do not delete it — update the prose it guards, then update this test's
     // expectation to match.
-    const { getRegisteredModules } = await import('@/lib/framework/modules/registry');
+    const { getRegisteredModules, registerModule, __resetModuleRegistryForTests } =
+      await import('@/lib/framework/modules/registry');
+
+    // POSITIVE CONTROL FIRST. Without it this whole test is unfalsifiable in the
+    // one direction that matters: `expect(...).toEqual([])` passes just as happily
+    // when `getRegisteredModules()` is BROKEN and always returns `[]` as when the
+    // registry is genuinely empty — verified by stubbing it to `return []`, which
+    // left this green. A witness that cannot report a positive is not a witness.
+    //
+    // So: prove the read can see a module, then clear it and ask the real question.
+    __resetModuleRegistryForTests();
+    registerModule({
+      slug: 'probe-control',
+      name: 'Probe',
+      description: 'positive control for this test only',
+      configSchema: z.object({}),
+    });
+    expect(
+      getRegisteredModules().map((m) => m.slug),
+      'getRegisteredModules() cannot see a registered module — the assertion below is vacuous'
+    ).toEqual(['probe-control']);
+    __resetModuleRegistryForTests();
+
     initFramework();
 
     expect(getRegisteredModules()).toEqual([]);
+    // No cleanup needed after this point: the assertion above IS that the registry
+    // is empty, and the probe was cleared before `initFramework()` ran.
   });
 });
 
