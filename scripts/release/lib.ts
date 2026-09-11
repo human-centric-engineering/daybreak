@@ -28,10 +28,31 @@
  *     breaks a leaf, and it is exactly what 0.1.0 had to announce)
  *   - `prisma/schema/framework-*.prisma` (published model shapes)
  *   - `lib/daybreak-version.ts` (the version contract itself)
+ *   - **the exported symbol set of any `lib/framework/**\/index.ts` barrel**
+ *     (#239 gap 3, below)
  *
- * The rest of the public surface relies on the written rule plus review. This is
- * a deliberate floor, not the whole ceiling — documented here so nobody later
- * mistakes the gate's silence for "no changelog needed".
+ * # The fourth rule is not a path rule, and that is the point
+ *
+ * The three above ask "did this file change". The fourth asks "did the set of
+ * symbols a leaf can import change" — computed, not guessed. That distinction is
+ * what this docblock previously said was unavailable, and it was wrong: gating
+ * `lib/framework/**` by PATH would indeed fire on every internal refactor, but
+ * `scripts/ci/exports-diff.ts` already diffs barrels symbol-by-symbol, and
+ * `check-exports.ts` already exports the git-backed readers. So the gate can ask
+ * the precise question.
+ *
+ * That closes the case the issue opened with: `createJourney` was added to two
+ * barrels, `check:exports` reported it, and `framework:changelog` said "no
+ * public-surface change". The entry got written because a human read one tool and
+ * decided — not because anything gated it.
+ *
+ * An internal refactor that moves code without changing what a barrel exports
+ * still does not trip this. A rename shows as one removal plus one addition,
+ * which is correct: it breaks every leaf importing the old name.
+ *
+ * The rest of the public surface still relies on the written rule plus review —
+ * an exported value that is not barrel-exported is not seen here. Still a floor,
+ * just a higher one.
  */
 
 /** The changelog a public-surface change must touch. */
@@ -77,20 +98,67 @@ export interface ChangelogVerdict {
   changelogTouched: boolean;
 }
 
+/** One barrel's symbol delta, as `scripts/ci/exports-diff.ts` reports it. */
+export interface BarrelDelta {
+  file: string;
+  added: readonly string[];
+  removed: readonly string[];
+}
+
+/**
+ * The barrel deltas that constitute a framework public-surface change (#239).
+ *
+ * Only `lib/framework/**` barrels: `lib/app/*` is the leaf's own surface (already
+ * covered by a path rule above), and core's barrels are Sunrise's to announce.
+ * A delta with nothing added and nothing removed is not a change — it is a barrel
+ * whose file moved without its exports moving, which is exactly the internal
+ * refactor this must not fire on.
+ */
+export function frameworkBarrelChanges(deltas: readonly BarrelDelta[]): BarrelDelta[] {
+  return deltas.filter(
+    (d) => d.file.startsWith('lib/framework/') && (d.added.length > 0 || d.removed.length > 0)
+  );
+}
+
+/** Render one barrel delta as the reason shown in the failure message. */
+export function barrelReason(delta: BarrelDelta): string {
+  const parts: string[] = [];
+  if (delta.added.length > 0) parts.push(`+${delta.added.join(', +')}`);
+  // Stated separately and first in the sentence, because a removal is BREAKING
+  // for any leaf importing the name while an addition merely wants announcing.
+  if (delta.removed.length > 0) {
+    parts.unshift(`REMOVED ${delta.removed.join(', ')} (breaking for any leaf importing them)`);
+  }
+  return `a lib/framework barrel's exported symbols changed — ${parts.join('; ')}`;
+}
+
 /**
  * Decide whether `changedFiles` needs a changelog entry it does not have.
  *
  * Pure: give it a list of repo-relative paths, get a verdict. No git, no fs.
  */
-export function checkChangelog(changedFiles: readonly string[]): ChangelogVerdict {
+export function checkChangelog(
+  changedFiles: readonly string[],
+  barrelDeltas: readonly BarrelDelta[] = []
+): ChangelogVerdict {
   const changelogTouched = changedFiles.includes(CHANGELOG_PATH);
 
-  const triggers = changedFiles
+  const pathTriggers = changedFiles
     .filter((path) => !isExempt(path))
     .flatMap((path) => {
       const rule = GATED_SURFACE.find((r) => r.test(path));
       return rule ? [{ path, reason: rule.reason }] : [];
     });
+
+  // Defaulted to `[]` so every existing caller and test keeps its meaning: no
+  // deltas supplied is "nothing known about the surface", not "surface unchanged".
+  // The wrapper is what knows the difference, and it says so when it cannot look.
+  const surfaceTriggers = frameworkBarrelChanges(barrelDeltas).map((d) => ({
+    path: d.file,
+    reason: barrelReason(d),
+  }));
+
+  const triggers = [...pathTriggers, ...surfaceTriggers];
 
   return {
     violation: triggers.length > 0 && !changelogTouched,

@@ -148,11 +148,19 @@ into a workflow.
    sentences that were true when written, because it removes and moves things
    other prose cites as evidence. Nothing automated catches this: type-check and
    lint do not read prose, and `check:changelog-drift` **does not read this file
-   at all** — it is hardcoded to the root `CHANGELOG.md`
+   at all** — it is hardcoded to the root `CHANGELOG.md`, and running it here needs
+   a one-line upstream change rather than a fork copy of ~100 lines of git plumbing
    ([#239](https://github.com/human-centric-engineering/daybreak/issues/239)).
    Even once it does, it correlates _identifiers_, which here often do not change
    — `/api/health` still exists, it just no longer carries what a docblock says it
    does.
+
+   **What #239 DID add** is a structure check on this changelog — headings,
+   ordering, `[Unreleased]` placement, append-only history — run by
+   `tests/unit/scripts/release/changelog-structure.test.ts` on every test run. That
+   catches a malformed release section, which is what 0.2.0 had to fix by hand. It
+   does not, and cannot, catch prose that is well-formed and untrue. This step is
+   still the only thing that does.
 
    Three places, in this order:
 
