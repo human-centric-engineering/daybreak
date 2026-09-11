@@ -7,7 +7,8 @@
  *
  * Every entry point returns `null` for "nothing to guide" (no published map / journey not
  * started) and propagates `ForbiddenError` from the `canRead`-guarded reads — the capability
- * turns those into a structured result.
+ * turns those into a structured result. `applyJourneyTransition` additionally ORIGINATES a
+ * `ForbiddenError` from its own `canWrite` guard, before any read runs (#242).
  */
 
 import { canWrite, type JourneyViewer, type AccessScope } from '@/lib/framework/shared/access';
@@ -157,6 +158,16 @@ export interface TransitionRequest {
  * refused. Nothing is lost by checking first: `canWrite` *composes* `canRead`, so anything
  * it admits the assembler would admit too. This also matches the sibling write seams
  * (`createJourney`, `recordNodeProgress`), which both refuse before touching the database.
+ *
+ * **A cost that arrives with #367, recorded now so it is a decision and not a
+ * surprise.** An accepted transition evaluates `canRead` three times: once inside
+ * `canWrite` here, then again in `getJourney` and `getNodeStates` inside the assembler.
+ * That is free today — the predicate is two string comparisons. Once #367 makes it an
+ * async, DB-backed resolver it is three round-trips per write, two of them inside the
+ * assembler's `Promise.all`. The fix then is to thread the decision through the assembler
+ * rather than to drop this guard; dropping it is what reopens the widening hole. Whoever
+ * wires #367 should read the `canWrite` note in `shared/access.ts` first — the
+ * upstream-asks ledger row for #367 says so too.
  *
  * @throws {ForbiddenError} when `viewer` may not write for `key.userId`.
  */
