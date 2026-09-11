@@ -52,9 +52,11 @@ process.
     trips it as one removal plus one addition, which is correct — it breaks every
     leaf importing the old name.
 
-  **If your leaf pins `appAlwaysRunTests` in its `defaults.test.ts` row**, that
-  list gained a second Daybreak entry (the changelog structure test) and your
-  pinned row needs updating — the bridge-above-the-leaf-seam case in #234.
+  **If your leaf pins `lib/app/ci.ts`'s lists in its `defaults.test.ts` row**, both
+  gained a second Daybreak entry — `appAlwaysRunTests` the changelog structure
+  test, and `appCoverageExclusions` the guard's own CLI wrapper — so your pinned
+  row needs updating. That is the bridge-above-the-leaf-seam case in #234, and this
+  is the first change to exercise it.
 
   Still outstanding: the **drift** check (a bullet that was true when written and
   falsified by a later commit on the same branch) does not yet run against this
