@@ -466,6 +466,7 @@ const SEAM_DEFAULTS: SeamDefault[] = [
       ]);
       expect(appAlwaysRunTests.map((entry) => entry.path)).toEqual([
         'tests/unit/prisma/framework-boot-seed.test.ts',
+        'tests/unit/scripts/release/changelog-structure.test.ts',
       ]);
     },
   },

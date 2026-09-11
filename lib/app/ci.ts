@@ -211,6 +211,14 @@ export const appAlwaysRunTests: AppAlwaysRunTest[] = [
       'or renaming one — the change that breaks the ordering, silently — reaches this test ' +
       'by no import chain.',
   },
+  {
+    path: 'tests/unit/scripts/release/changelog-structure.test.ts',
+    reason:
+      'reads `.context/framework/CHANGELOG.md` off disk to check its structure (#239). Nothing ' +
+      'imports a changelog, so the edit that breaks it — a release cut, a mis-typed `###` — ' +
+      'reaches this test by no import chain. It is the only thing checking that file: Sunrise’s ' +
+      'own structure check is hardcoded to the root CHANGELOG.md.',
+  },
   // The leaf tier's own whole-tree tests (reserved-empty in Daybreak).
   ...leafAlwaysRunTests,
 ];
