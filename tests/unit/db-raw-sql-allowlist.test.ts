@@ -119,8 +119,8 @@ const ALLOWLIST: ReadonlyArray<{ file: string; calls: number; why: string }> = [
   // table (the boundary check `npm run framework:boundary` holds that line).
   // These rows are a fork edit to a Sunrise-owned test, and have to be: the
   // allowlist is a literal with no seam a fork can register through — the same
-  // shape as the `logCost` roster in cost-log-fk-attribution.test.ts. See
-  // .context/framework/upstream-asks.md.
+  // shape as the `logCost` roster in cost-log-fk-attribution.test.ts. Filed as
+  // Sunrise #799; ledger row in .context/framework/upstream-asks.md.
   {
     file: 'lib/framework/facilitation/journey/progress.ts',
     calls: 1,

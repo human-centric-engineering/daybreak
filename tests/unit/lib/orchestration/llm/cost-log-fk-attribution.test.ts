@@ -316,8 +316,9 @@ const ALLOWED_CALL_SITES: readonly string[] = [
   // the service-account row in the sweep step).
   //
   // This row is a fork edit to a Sunrise-owned test, and it has to be: the
-  // roster is a literal list with no seam a fork can register through. Filed —
-  // see .context/framework/upstream-asks.md.
+  // roster is a literal list with no seam a fork can register through. Filed
+  // as Sunrise #799 (a `lib/app/ci.ts` list, like appOwnerlessSurfaceExceptions);
+  // ledger row in .context/framework/upstream-asks.md.
   'lib/framework/facilitation/evaluation/supervise.ts | agentId=— | conversationId=conversationId | workflowExecutionId=— | userId=actorUserId',
   // The workflow LLM runner attributes to the execution; no agent is involved.
   'lib/orchestration/engine/llm-runner.ts | agentId=— | conversationId=— | workflowExecutionId=ctx.executionId | userId=ctx.userId',
