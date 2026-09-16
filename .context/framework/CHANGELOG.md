@@ -25,6 +25,43 @@ process.
 
 ## [Unreleased]
 
+### Added
+
+- **`leafOwnerlessSurfaceExceptions` in `lib/app/leaf-ci.ts`** — the third list the
+  leaf CI seam carries, mirroring the `appOwnerlessSurfaceExceptions` Sunrise 0.12.0
+  added to `lib/app/ci.ts`. Sunrise's new always-run test
+  (`tests/unit/scripts/ci/ownerless-surfaces.test.ts`) names every file under
+  `app/`, `lib/` and `components/` that reads `AiWorkflowExecution`,
+  `AiConversation` or `AiMessage` outside the `lib/orchestration/access/` helpers —
+  **including yours, the moment it exists**. Import the helper if the read is an
+  admin surface; otherwise declare the file here with a `disposition` and a reason
+  of at least 20 characters (a `'known-gap'` must also carry `tracking`). Shipped
+  empty for you.
+
+  Daybreak's framework tier declares **five**, all `'by-design'`: the evaluation
+  family (`conversation.ts`, `recent-conversations.ts`, `turns.ts` — scoped by
+  framework *surface*, not by owner, because a framework thread is always
+  user-owned and the sweep has no caller), the module workflow-binding dispatcher
+  (a row→workflow trigger, the scheduler's shape), and the framework's Art. 15
+  manifest (keyed on the subject). None is a gap awaiting a fix; the reasons are
+  on the entries.
+
+  **If your `defaults.test.ts` pins `lib/app/ci.ts`'s lists**, that row now also
+  pins `appOwnerlessSurfaceExceptions` to those five paths, and the `leaf-ci.ts`
+  row asserts the new leaf list is `[]`. Pin your values; don't delete either row
+  (#234).
+
+### Changed
+
+- **The framework conversation supervisor now attributes its judge-model cost rows
+  to the actor.** `superviseConversation()` writes `AiCostLog.userId` from
+  `actorUserId` — the admin on the supervise route, or the execution's user /
+  service account in `framework_eval_sweep` — alongside the `conversationId` it
+  already wrote. The column is Sunrise 0.12.0's (#708, `onDelete: SetNull`), so
+  erasing the actor detaches the row rather than deleting it, and the actor's
+  Art. 15 export now lists the spend their review caused. No caller change: both
+  callers already passed a real `User.id`.
+
 ## [0.3.0] — 2026-09-11
 
 > **Third tagged Daybreak release. Additive, plus one fix you want.** Nothing a leaf
