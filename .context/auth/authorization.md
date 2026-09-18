@@ -994,8 +994,12 @@ minting one already requires a platform admin with a browser session, and
 `app/api/v1/user/api-keys/route.ts` documents why that check deliberately asks
 `isPlatformAdmin` rather than `canAdminister`.
 
-Keys do not bind an org yet, so "an org-bound key can never carry `admin`" is
-**not** something this seam enforces today. It arrives with the org axis.
+"An org-bound key can never carry `admin`" holds at mint and at the guard
+(§106): an `admin` key is stored with no org and refused when asked for from
+inside a customer org, and both guards refuse a key that carries an org
+before the policy is asked (`withAdminAuth` at its scope floor, `withAuth`
+through `enterApiKeyOrg`) — so a fork's policy cannot widen it. See
+[`tenancy/identity.md`](../tenancy/identity.md#credentials).
 
 ---
 

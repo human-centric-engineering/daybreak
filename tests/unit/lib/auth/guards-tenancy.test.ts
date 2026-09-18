@@ -213,7 +213,7 @@ describe('the resolver header', () => {
 
 describe('the API-key source', () => {
   it('an admin-scoped key enters no org: the handler runs outside any context', async () => {
-    vi.mocked(resolveApiKey).mockResolvedValue(apiKey(['admin'], OTHER));
+    vi.mocked(resolveApiKey).mockResolvedValue(apiKey(['admin'], null));
     const { handler, seen } = probe();
 
     await handler(request());
@@ -221,6 +221,22 @@ describe('the API-key source', () => {
     expect(seen[0].context).toBeNull();
     expect(seen[0].principal).not.toHaveProperty('orgId');
     expect(mockFindUnique).not.toHaveBeenCalled();
+  });
+
+  it('withAuth refuses an org-bound admin key too — the same row the withAdminAuth floor refuses (t-673)', async () => {
+    // Without this the row would be 403 on every admin route and admitted on
+    // every other, running with NO org scope at all.
+    vi.mocked(resolveApiKey).mockResolvedValue(apiKey(['admin'], OTHER));
+    const { handler, seen } = probe();
+
+    const res = await handler(request());
+
+    expect(res.status).toBe(403);
+    expect(seen).toEqual([]);
+    expect(logger.warn).toHaveBeenCalledWith(
+      'tenancy: refused to enter an org for a request',
+      expect.objectContaining({ guard: 'withAuth', refused: 'bound-admin-key' })
+    );
   });
 
   it('a key with no org enters the install org at single, as its owner would', async () => {
@@ -257,15 +273,40 @@ describe('the API-key source', () => {
   });
 
   it('withAdminAuth enters no org for an admin key, by the same rule', async () => {
-    vi.mocked(resolveApiKey).mockResolvedValue(apiKey(['admin'], OTHER));
+    vi.mocked(resolveApiKey).mockResolvedValue(apiKey(['admin'], null));
     let context: TenantContext | null | undefined;
 
-    await withAdminAuth(() => {
+    const res = await withAdminAuth(() => {
       context = getTenantContext();
       return ok();
     })(request());
 
+    expect(res.status).toBe(200);
     expect(context).toBeNull();
+  });
+
+  it('withAdminAuth refuses an org-bound key whatever its scopes — the floor the seam promised (t-673)', async () => {
+    // Mint forbids `admin` + org and the backfill leaves admin keys unbound,
+    // so no honest row has both; a row that does is refused here, before the
+    // policy is asked, rather than admitted to every org's admin surface.
+    const seen: (TenantContext | null)[] = [];
+    const handler = withAdminAuth(() => {
+      seen.push(getTenantContext());
+      return ok();
+    });
+
+    vi.mocked(resolveApiKey).mockResolvedValue(apiKey(['admin'], OTHER));
+    expect((await handler(request())).status).toBe(403);
+    vi.mocked(resolveApiKey).mockResolvedValue(apiKey(['admin'], INSTALL_ORG_ID));
+    expect((await handler(request())).status).toBe(403);
+    vi.mocked(resolveApiKey).mockResolvedValue(apiKey(['chat'], OTHER));
+    expect((await handler(request())).status).toBe(403);
+
+    expect(seen).toEqual([]);
+    // And the control: the same key with no org is the platform credential.
+    vi.mocked(resolveApiKey).mockResolvedValue(apiKey(['admin'], null));
+    expect((await handler(request())).status).toBe(200);
+    expect(seen).toEqual([null]);
   });
 });
 
