@@ -104,19 +104,33 @@ describe('canAdminister — the org arm', () => {
     await expect(policy.canAdminister(PLATFORM_ADMIN, null, {})).resolves.toBe(true);
   });
 
-  it('the org role does not leak into the API-key path: a narrow key in an org is still a narrow key', async () => {
+  it('an API key never takes the org arm: a narrow key is narrower than its owner, whatever org role rode in on it', async () => {
+    // t-671 let a chat key held by an org OWNER administer that org's rows.
+    // t-672's security review showed why not: `enterApiKeyOrg` projects the
+    // OWNER's platform role onto a key at `single`, so a chat key minted by
+    // a platform admin arrived at the install org as OWNER and could read
+    // the whole roster where the same key is refused every admin route.
+    // A key's standing is its scopes; only an `admin` key administers, and
+    // it does so through `administersEverything`, not here.
     const key: AuthorizationPrincipal = {
       ...ORG_OWNER,
       credential: 'api-key',
       scopes: ['chat'],
     };
-    // The org arm reads orgRole regardless of credential — a chat key held by
-    // an org OWNER may administer that org's rows, which is what "the key
-    // enters the org it was minted in" means. What it must NOT reach is
-    // anything outside that org.
-    await expect(policy.canAdminister(key, ORG_ROW, { org: ORG })).resolves.toBe(true);
+    await expect(policy.canAdminister(key, ORG_ROW, { org: ORG })).resolves.toBe(false);
+    await expect(policy.canRead(key, readTargetFor(ORG_ROW), { org: ORG })).resolves.toBe(false);
     await expect(policy.canAdminister(key, null, { org: ORG })).resolves.toBe(false);
     await expect(policy.canAdminister(key, OTHER_ORG_ROW, { org: ORG })).resolves.toBe(false);
+
+    // The control: the same principal as a session IS admitted, so the
+    // refusal above is the credential, not the fixture.
+    await expect(policy.canAdminister(ORG_OWNER, ORG_ROW, { org: ORG })).resolves.toBe(true);
+    // And an admin key still administers everything, through the scope.
+    const adminKey: AuthorizationPrincipal = { ...key, scopes: ['admin'] };
+    await expect(policy.canAdminister(adminKey, ORG_ROW, { org: ORG })).resolves.toBe(true);
+    await expect(policy.canRead(adminKey, readTargetFor(ORG_ROW), { org: ORG })).resolves.toBe(
+      true
+    );
   });
 });
 
@@ -186,8 +200,10 @@ describe('byte-identical: with no org-carrying resource, org facts change no ans
     orgId: INSTALL_ORG_ID,
     orgRole: p.role === 'ADMIN' ? 'OWNER' : 'MEMBER',
   });
-  // Every question a core route can ask today: none of these resources
-  // carries an orgId, because no core resolver names one until §107.
+  // Every question a core route other than the org members routes can ask:
+  // none of these resources carries an orgId — no core ADMIN resolver names
+  // one until §107, and the members routes (t-672) are the org arm's
+  // intended callers, covered by their own tests rather than swept here.
   const resources: (AuthorizationResource | null)[] = [
     null,
     { kind: 'thing', id: 't1', ownerId: 'user-1' },

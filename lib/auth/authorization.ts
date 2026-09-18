@@ -472,22 +472,39 @@ function administersEverything(viewer: AuthorizationPrincipal): boolean {
  * The org arm of the default policy, and everything it does NOT grant is the
  * point: an org OWNER/ADMIN administers rows that carry THEIR org and nothing
  * else. A `null` resource, or one without an `orgId`, grants nothing — those
- * are the platform-ops surfaces (every core admin route today, since no core
+ * are the platform-ops surfaces (every core admin route: no core admin
  * resolver names an org until §107), which stay platform-only: the control-
  * plane split in the tenancy playbook. And both sides must be present:
  * `resource.orgId === viewer.orgId` with both `undefined` is `true`, which is
  * the trap the fork seam's docblock warns about, so the comparison is guarded
- * on the resource side explicitly.
+ * on the resource side explicitly. And it is a **session** grant: an API-key
+ * principal never takes this arm, whatever org role the entry projected
+ * onto it — a key's standing is its scopes, and `administersEverything` is
+ * where those are read.
  *
- * Byte-identical at `single` by construction and by test: with no org-carrying
- * resource in core, this arm cannot fire on any existing route, and
- * `authorization.test.ts` asserts every existing case answers the same with
- * and without org facts on the principal.
+ * The core routes that DO name an org are the org members routes
+ * (`app/api/v1/orgs/[id]/members/**`, §106 t-672): `{ kind: 'org', id,
+ * orgId }`, no `ownerId`, so this arm is what admits an org's own OWNER/ADMIN
+ * to its roster while they act in it. Byte-identical at `single` still, by
+ * construction and by test: on the install org the OWNER set is the
+ * platform-admin set (the install-org role follows the platform role), so
+ * this arm admits exactly whom `administersEverything` admits there; on every
+ * other core route no resource carries an org, and `authorization.test.ts`
+ * asserts every existing case answers the same with and without org facts on
+ * the principal.
  */
 function administersOrgOf(
   viewer: AuthorizationPrincipal,
   resource: AuthorizationResource | null
 ): boolean {
+  // A credential is narrower than its owner (#542), and none of the API-key
+  // scopes mean "administer the org": `enterApiKeyOrg` projects the OWNER's
+  // platform role onto a key at `single`, so without this a `chat` key
+  // minted by a platform admin would read the install org's roster where the
+  // same key is refused every admin route. An `admin` key is already admitted
+  // by `administersEverything`; any other key gets no org-level grant until
+  // a scope for it exists.
+  if (viewer.credential === 'api-key') return false;
   if (!resource?.orgId || !viewer.orgId) return false;
   return resource.orgId === viewer.orgId && orgAdministers(viewer.orgRole);
 }

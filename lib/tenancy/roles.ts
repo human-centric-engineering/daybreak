@@ -48,8 +48,24 @@ export const DEFAULT_ORG_ROLE = 'MEMBER' as const;
  */
 export const ORG_OWNER_ROLE = 'OWNER' as const;
 
-/** Administers the org without the OWNER's standing — may not remove the last OWNER. */
+/**
+ * Administers the org without the OWNER's standing: manages MEMBERs and
+ * ADMINs, but may not grant OWNER, change an OWNER's role or remove an
+ * OWNER (`lib/tenancy/lifecycle.ts` enforces it).
+ */
 export const ORG_ADMIN_ROLE = 'ADMIN' as const;
+
+/**
+ * Every `Org.status` value — the org's lifecycle (§106 t-672). `SUSPENDED`
+ * members are refused where a request enters the org (`lib/tenancy/entry.ts`);
+ * the install org is never suspended. A Prisma enum for the same reason
+ * `OrgRole` is, and `tests/unit/lib/tenancy/roles.test.ts` asserts the two
+ * agree.
+ */
+export const ORG_STATUSES = ['ACTIVE', 'SUSPENDED'] as const;
+
+/** A known `Org.status` value. */
+export type OrgStatus = (typeof ORG_STATUSES)[number];
 
 /**
  * Is `value` an org role this install knows about?
@@ -65,8 +81,9 @@ export function isOrgRole(value: unknown): value is OrgRole {
  * Does this org role administer the org — manage members, settings, and
  * (once §106 t-671 lands) satisfy the authorization policy's org arm?
  *
- * OWNER and ADMIN both do; the difference between them is standing, not
- * capability: only an OWNER cannot be removed as the org's last one. Takes a
+ * OWNER and ADMIN both do. The difference between them is standing: only an
+ * OWNER may confer or revoke OWNER, and the last OWNER cannot be removed —
+ * rules the lifecycle applies, not this predicate. Takes a
  * bare role rather than a membership row so the one predicate serves a Prisma
  * row, a session claim and a test fixture alike. Null-safe for the same reason
  * `isPlatformAdmin` is — several call sites read through an optional
