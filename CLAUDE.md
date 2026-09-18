@@ -21,11 +21,15 @@
 > §9 upstream sync) and [`.context/framework/README.md`](./.context/framework/README.md)
 > (the three-tier model + ownership table).
 >
-> **Building or picking up a framework feature?** Start with
+> **Building or picking up a framework feature?** The board lives in the **HCE Hub**
+> (Daybreak project, slug `daybreak` — see the `hce-hub:bootstrap` block below): claim,
+> plan, start, complete and ship are Hub tool calls, and `next_task` tells you what's
+> claimable. The repo-side rhythm is still
 > [`.context/framework/planning/building-a-feature.md`](./.context/framework/planning/building-a-feature.md)
-> — the operational flow (plan-first → per-task gate loop → close-out) — and the
-> [board in `plan.md`](./.context/framework/planning/plan.md) for what's claimable. This saves
-> you the learning curve the first features went through.
+> (plan-first → per-task gate loop → close-out); it saves you the learning curve the
+> first features went through. [`plan.md`](./.context/framework/planning/plan.md) beside it
+> is the pre-Hub markdown board, kept as history — it stopped moving at the Hub import
+> (Hub feature §33 `f-planning-docs`); the spec `framework-architecture.md` stays in the repo.
 >
 > **Three tiers: Sunrise → Daybreak → app.** Apps are built by forking **Daybreak**,
 > not Sunrise. So Daybreak applies Sunrise's fork discipline _one level up_: it owns the
@@ -97,16 +101,19 @@
 > `db:migrate:dev` to apply newly-merged Sunrise migrations. See
 > [`CUSTOMIZATION.md` §9](./CUSTOMIZATION.md).
 >
-> ### The "HCE Hub" block below is Sunrise's, not Daybreak's
+> ### The `hce-hub:bootstrap` block below is Daybreak's
 >
-> Sunrise 0.12.0 added a `hce-hub:bootstrap` block under "MCP Integration" that
-> names **Sunrise** (slug `sunrise`) as "this project". It is Sunrise-owned text
-> describing Sunrise's own Hub project, and it is inert here — its own opening
-> sentence says to skip it when no `hce-hub` MCP server is configured for the
-> checkout, and Daybreak configures none. Daybreak's planning system of record is
-> the board in [`.context/framework/planning/plan.md`](./.context/framework/planning/plan.md)
-> and the flow in `building-a-feature.md` beside it. Do not claim, plan or ship
-> Daybreak work through Sunrise's Hub project.
+> Sunrise 0.12.0 ships a `hce-hub:bootstrap` block under "MCP Integration" that, upstream,
+> names **Sunrise** (slug `sunrise`) as "this project". In this repo that block has been
+> **regenerated for Daybreak** (slug `daybreak`, project id `cmu701e28000404jjuljax1k4`)
+> with the Hub's `get_project_bootstrap` tool — its own marker comment says to do exactly
+> that, so it is a designed regenerate-in-place seam, not a platform edit. The Hub is
+> Daybreak's planning system of record; do not claim, plan or ship Daybreak work through
+> Sunrise's Hub project. The Sunrise-owned intro paragraph just above the markers (skip the
+> section when no `hce-hub` server is configured) is still Sunrise's text and still true —
+> Daybreak configures the server in `.mcp.json`. On an upstream sync, resolve any conflict
+> inside the markers by keeping Daybreak's block, then re-run `get_project_bootstrap` if
+> the Hub's wording has moved on.
 
 Instructions for Claude Code when working in this repository.
 
@@ -175,7 +182,7 @@ Use for external library docs: `resolve-library-id` → `query-docs`. Essential 
 
 ## This project is coordinated through the HCE Hub
 
-**Sunrise** · slug `sunrise` · project id `cmtd5heg2001804ky8pgo6odx` · host platform: Sunrise (the platform)
+**Daybreak** · slug `daybreak` · project id `cmu701e28000404jjuljax1k4` · host platform: Sunrise (fork)
 
 The Hub is this project's **system of record** for planning and delivery.
 Claiming, planning, starting, completing and shipping are Hub tool calls over
@@ -200,7 +207,7 @@ is the current version; this repo deliberately does not restate it, because a
 copy is the thing that goes stale.
 
 - `hub://process/core` · HCE process — core. **Read its `read.judgement` section first.**
-- `hub://process/sunrise-platform` · HCE process — working in Sunrise.
+- `hub://process/sunrise-fork` · HCE process — building on Sunrise.
 
 Every rule is addressable by the id printed beside its heading (`fp1`,
 `flow.gates`, `read.judgement`). Cite them by id rather than re-explaining
@@ -214,15 +221,15 @@ Five lines, duplicated here on purpose because they almost never change:
 2. **Reconcile** the plan against the actual tree before sizing anything.
 3. **Plan** it into tasks, each with a done-when provable _at merge_.
 4. **Build**, look at it yourself, then run the gates, and open the PR last.
-5. **Close out** the feature, recording decisions as you make them.
+5. **Close out** the feature — a decision is recorded when it stops moving: planning rulings at planning, task decisions at that task's merge, very few at ship.
 
 ### Gates
 
 In this order. Read **exit codes**, not piped output — a pipeline that swallows
 a failure reports success.
 
-1. `/pre-pr` — the platform's own checklist (`npm run validate` plus a scoped
-   test run and the anti-pattern scans), including the public-surface checks.
+1. `/pre-pr` — this repo's own checklist (`npm run validate` plus a scoped
+   test run and the anti-pattern scans).
 2. `/security-review`
 3. `/code-review`
 4. `npm run format`
