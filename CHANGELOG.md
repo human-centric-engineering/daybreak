@@ -18,6 +18,35 @@ release process.
 
 ### Added
 
+- **Every tenant-owned row knows its org** (multi-tenancy §107, first
+  schema task). One migration, `20260919200000_tenant_owned_org_id`, adds a
+  nullable `orgId` + `org Org? @relation(onDelete: Cascade)` (`SetNull` on
+  `AiCostLog`, a billing record) + `@@index` to
+  the 38 tenant-owned published models that did not yet carry one — every
+  agent, conversation, message, knowledge, workflow, evaluation, experiment,
+  webhook and cost row, child tables included (no join-based policies; the
+  column is what everything derives from) — and backfills every existing row
+  to the install org. `NOT NULL` is a later staged migration. `Org` gains a
+  back-relation per model. New `lib/tenancy/classification.ts`:
+  `SYSTEM_MODELS`, `GLOBAL_CONFIG_MODELS`, `classifyModels()` and
+  `tenantOwnedModels()` (model → table, derived from the generated client at
+  runtime — the roster the row-isolation policies, drift probes and enable
+  script will read). Every one of the 38 has a disposition in
+  `lib/privacy/org-sources.ts` (36 `export` — withholding the signing secrets on
+  `AiWebhookSubscription` and `AiWorkflowTrigger`, an execution's `leaseToken`,
+  and an event hook's secret and custom header values via `toSafeHook`;
+  `AiMessageEmbedding` and `AiWorkflowExecutionLeaseEvent` excluded with
+  reasons), so an org export now carries 42 sections. **Fork note:** a new
+  `tests/unit/lib/tenancy/model-classification.test.ts` fails by name on any
+  model — yours included — that neither carries `orgId` nor sits on an
+  allowlist; add the column (the shape is in
+  `.context/tenancy/identity.md`) or classify it deliberately, never by
+  deleting from an allowlist. Behaviour at `TENANCY_MODE=single` is
+  unchanged. Nothing writes the column until the data-layer chokepoint
+  lands (§107's next task), so a row created after this migration carries
+  `NULL`; the org export — the only reader so far — treats `NULL` as the
+  install org's at `single` and strictly at `multi`, where
+  `db:tenancy:enable` will backfill before enforcing.
 - **Every install has an org, and every user belongs to one** (multi-tenancy
   §106, first task). Two published model interfaces in a new
   `prisma/schema/tenancy.prisma`: `Org` (`slug`, `name`, `status`
