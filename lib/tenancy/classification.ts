@@ -32,8 +32,6 @@
  * @see lib/privacy/org-sources.ts — what an org receives from each tenant-owned model
  */
 
-import { prisma } from '@/lib/db/client';
-
 /**
  * System rows: they decide or record tenancy rather than belong to a tenant.
  * `OrgMembership` carries `orgId` but is the join that *decides* which org a
@@ -83,7 +81,10 @@ export type GlobalConfigModel = (typeof GLOBAL_CONFIG_MODELS)[number];
 export interface RuntimeDataModelField {
   name: string;
   kind: 'scalar' | 'object' | 'enum' | 'unsupported';
+  /** The scalar type, or for a relation (`kind: 'object'`) the target model. */
   type: string;
+  /** Present on relation fields; the two ends of a relation share it. */
+  relationName?: string;
 }
 export interface RuntimeDataModelModel {
   fields: RuntimeDataModelField[];
@@ -108,6 +109,54 @@ export function readRuntimeDataModel(client: unknown): RuntimeDataModel {
     );
   }
   return rdm as RuntimeDataModel;
+}
+
+/**
+ * Read the schema text the generated client embeds for its query compiler.
+ * `_engineConfig.inlineSchema` is, like `_runtimeDataModel`, undocumented;
+ * the classification test pins it to `prisma/schema/*.prisma` on every run.
+ */
+export function readInlineSchema(client: unknown): string {
+  const text = (client as { _engineConfig?: { inlineSchema?: unknown } })._engineConfig
+    ?.inlineSchema;
+  if (typeof text !== 'string' || text.length === 0) {
+    throw new Error(
+      'Prisma client exposes no _engineConfig.inlineSchema; the tenancy chokepoint cannot tell which relations carry their foreign key'
+    );
+  }
+  return text;
+}
+
+const MODEL_OPEN = /^model\s+(\w+)\s*\{/;
+const FK_RELATION = /^\s*(\w+)\s+\w+\??\s+@relation\([^)]*\bfields:\s*\[/;
+
+/**
+ * For every model, the relation fields whose foreign key lives on that model
+ * — `@relation(fields: [...])`. These are the fields Prisma's *checked*
+ * create input carries in place of the scalar FK: a create naming one of
+ * them cannot also name a scalar FK such as `orgId`, and vice versa. The
+ * compact runtime data model does not record which side of a relation holds
+ * the key, so this is read from the schema text instead.
+ */
+export function foreignKeyRelations(schemaText: string): ReadonlyMap<string, ReadonlySet<string>> {
+  const out = new Map<string, Set<string>>();
+  let current: Set<string> | null = null;
+  for (const line of schemaText.split('\n')) {
+    const open = MODEL_OPEN.exec(line);
+    if (open) {
+      current = new Set();
+      out.set(open[1], current);
+      continue;
+    }
+    if (line.startsWith('}')) {
+      current = null;
+      continue;
+    }
+    if (!current) continue;
+    const fk = FK_RELATION.exec(line);
+    if (fk) current.add(fk[1]);
+  }
+  return out;
 }
 
 export interface TenantOwnedModel {
@@ -161,17 +210,25 @@ export function classifyModels(rdm: RuntimeDataModel): ModelClassification {
   return out;
 }
 
-let cached: ReadonlyMap<string, string> | undefined;
+const rosters = new WeakMap<object, ReadonlyMap<string, string>>();
 
 /**
- * Model name → table name for every tenant-owned model, derived once from the
- * application's Prisma client. This is the roster the row-isolation policies,
- * the drift probes and the enable script read; nothing hand-lists it.
+ * Model name → table name for every tenant-owned model, derived once per
+ * client (pass the application's `prisma`). This is the roster the
+ * row-isolation policies, the drift probes and the enable script read;
+ * nothing hand-lists it.
+ *
+ * The client is a parameter rather than an import: `lib/db/client.ts` reads
+ * this module to build the chokepoint, so importing the client back from here
+ * would be a cycle whose evaluation order depends on which side a script
+ * loads first.
  */
-export function tenantOwnedModels(): ReadonlyMap<string, string> {
-  if (!cached) {
-    const { tenantOwned } = classifyModels(readRuntimeDataModel(prisma));
-    cached = new Map(tenantOwned.map((m) => [m.model, m.table]));
+export function tenantOwnedModels(client: object): ReadonlyMap<string, string> {
+  let roster = rosters.get(client);
+  if (!roster) {
+    const { tenantOwned } = classifyModels(readRuntimeDataModel(client));
+    roster = new Map(tenantOwned.map((m) => [m.model, m.table]));
+    rosters.set(client, roster);
   }
-  return cached;
+  return roster;
 }

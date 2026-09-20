@@ -150,6 +150,9 @@ import { PrismaClient } from '@prisma/client';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Pool } from 'pg';
 import { env } from '@/lib/env';
+import { withTenancy, type TenancyClient } from '@/lib/db/tenancy-extension';
+import { getTenantContext, isMultiTenant } from '@/lib/tenancy/context';
+import { INSTALL_ORG_ID } from '@/lib/tenancy/constants';
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
@@ -164,15 +167,26 @@ if (env.NODE_ENV !== 'production') globalForPrisma.pool = pool;
 // Create Prisma adapter
 const adapter = new PrismaPg(pool);
 
-// Create Prisma client
-export const prisma =
+// The base client is what survives a hot reload (it owns the pool)
+const baseClient =
   globalForPrisma.prisma ??
   new PrismaClient({
     adapter,
     log: env.NODE_ENV === 'development' ? ['query', 'error', 'warn'] : ['error'],
   });
 
-if (env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+if (env.NODE_ENV !== 'production') globalForPrisma.prisma = baseClient;
+
+// The tenancy chokepoint (§107) is applied fresh on every evaluation: it
+// stamps `orgId` on every tenant-owned create and, at TENANCY_MODE=multi,
+// scopes every operation to the org the request entered. It closes over the
+// tenant context module, which a dev reload re-creates — so never retain the
+// extended client. See .context/tenancy/context.md#the-data-layer--libdbtenancy-extensionts
+export const prisma: TenancyClient = withTenancy(baseClient, {
+  isMultiTenant,
+  getTenantContext,
+  installOrgId: INSTALL_ORG_ID,
+});
 ```
 
 **Key differences from Prisma 6:**

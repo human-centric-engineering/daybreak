@@ -23,25 +23,25 @@
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 /**
  * A real generated client on a pool that never connects — `_runtimeDataModel`
  * is populated by the constructor, and no test here runs a query.
  */
-const realClient = vi.hoisted(async () => {
+const realClient = (async () => {
   const { Pool } = await import('pg');
   const { PrismaPg } = await import('@prisma/adapter-pg');
   const { PrismaClient } = await import('@prisma/client');
   const pool = new Pool({ connectionString: 'postgresql://never:connects@127.0.0.1:1/never' });
   return new PrismaClient({ adapter: new PrismaPg(pool) });
-});
-vi.mock('@/lib/db/client', async () => ({ prisma: await realClient }));
-
+})();
 const {
   SYSTEM_MODELS,
   GLOBAL_CONFIG_MODELS,
   classifyModels,
+  foreignKeyRelations,
+  readInlineSchema,
   readRuntimeDataModel,
   tenantOwnedModels,
 } = await import('@/lib/tenancy/classification');
@@ -203,8 +203,10 @@ describe('model classification', () => {
       expect(fromClient.contradictions).toEqual([]);
     });
 
-    it('tenantOwnedModels() serves that roster from the application client', () => {
-      const roster = tenantOwnedModels();
+    it('tenantOwnedModels() serves that roster from the client it is given, once', async () => {
+      const client = await realClient;
+      const roster = tenantOwnedModels(client);
+      expect(tenantOwnedModels(client)).toBe(roster);
       expect([...roster.entries()]).toEqual(fromSchema.tenantOwned.map((m) => [m.model, m.table]));
       expect(roster.get('AiAgent')).toBe('ai_agent');
       expect(roster.has('Org')).toBe(false);
@@ -212,6 +214,56 @@ describe('model classification', () => {
 
     it('throws a named error when a client has no runtime data model', () => {
       expect(() => readRuntimeDataModel({})).toThrow(/_runtimeDataModel/);
+    });
+  });
+
+  describe('which relations carry their foreign key (the checked create form)', () => {
+    it('reads the schema the client embeds, and it is the schema on disk', async () => {
+      const inline = readInlineSchema(await realClient);
+      // The generator concatenates prisma/schema/*.prisma; every model block
+      // on disk appears verbatim in what the client carries.
+      for (const file of readSchemaFiles()) {
+        for (const block of file.split(/\n(?=model )/).filter((b) => b.startsWith('model '))) {
+          expect(inline).toContain(block.trim());
+        }
+      }
+    });
+
+    it('names exactly the @relation(fields: […]) fields, per model', async () => {
+      const fk = foreignKeyRelations(readInlineSchema(await realClient));
+      expect([...fk.keys()].sort()).toEqual([...schema.keys()].sort());
+      // Both sides of the same relations, seen from each end.
+      expect([...(fk.get('AiAgentEmbedToken') ?? [])].sort()).toEqual(['agent', 'creator', 'org']);
+      expect([...(fk.get('AiAgent') ?? [])].sort()).toEqual(['creator', 'org', 'profile']);
+      expect(fk.get('AiAgent')?.has('embedTokens')).toBe(false);
+      expect(fk.get('Org')?.size).toBe(0);
+      expect(fk.get('User')?.size).toBe(0);
+      // Every FK-carrying relation on a tenant-owned model includes `org` —
+      // the field the chokepoint stamps in the checked form.
+      for (const m of fromSchema.tenantOwned) {
+        expect(fk.get(m.model)?.has('org'), `${m.model}.org should carry orgId`).toBe(true);
+      }
+    });
+
+    it('is derived from the relation attribute, not the field name', () => {
+      const text = [
+        'model Thing {',
+        '  ownerId String',
+        '  owner   User   @relation("ThingOwner", fields: [ownerId], references: [id])',
+        '  tags    Tag[]',
+        '  twin    Thing? @relation("Twin")',
+        '}',
+        'model Tag {',
+        '  things Thing[]',
+        '}',
+      ].join('\n');
+      const fk = foreignKeyRelations(text);
+      expect([...(fk.get('Thing') ?? [])]).toEqual(['owner']);
+      expect(fk.get('Tag')?.size).toBe(0);
+    });
+
+    it('throws a named error when a client embeds no schema', () => {
+      expect(() => readInlineSchema({})).toThrow(/inlineSchema/);
     });
   });
 });
