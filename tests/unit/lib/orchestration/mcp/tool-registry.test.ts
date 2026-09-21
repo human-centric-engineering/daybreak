@@ -6,7 +6,7 @@ vi.mock('@/lib/db/client', () => ({
       findMany: vi.fn(),
     },
     aiAgent: {
-      findUnique: vi.fn(),
+      findFirst: vi.fn(),
     },
     aiAgentCapability: {
       findMany: vi.fn(),
@@ -40,6 +40,7 @@ vi.mock('@/lib/orchestration/capabilities/registry', () => ({
 }));
 
 import { prisma } from '@/lib/db/client';
+import { runAsOrg } from '@/lib/tenancy/context';
 import { logger } from '@/lib/logging';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import { registerBuiltInCapabilities } from '@/lib/orchestration/capabilities/registry';
@@ -379,7 +380,7 @@ describe('callMcpTool', () => {
     vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
       makeSuccessfulParse() as never
     );
-    vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue(null);
+    vi.mocked(prisma.aiAgent.findFirst).mockResolvedValue(null);
 
     const result = await callMcpTool('search_knowledge', {}, { userId: 'user-1' });
 
@@ -396,7 +397,7 @@ describe('callMcpTool', () => {
     vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
       makeSuccessfulParse() as never
     );
-    vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue({ id: 'agent-42' } as never);
+    vi.mocked(prisma.aiAgent.findFirst).mockResolvedValue({ id: 'agent-42' } as never);
     vi.mocked(capabilityDispatcher.dispatch).mockResolvedValue({
       success: true,
       data: { answer: 'result' },
@@ -424,7 +425,7 @@ describe('callMcpTool', () => {
     vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
       makeSuccessfulParse() as never
     );
-    vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue({ id: 'agent-42' } as never);
+    vi.mocked(prisma.aiAgent.findFirst).mockResolvedValue({ id: 'agent-42' } as never);
 
     const callOrder: string[] = [];
     vi.mocked(registerBuiltInCapabilities).mockImplementation(() => {
@@ -446,7 +447,7 @@ describe('callMcpTool', () => {
     vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
       makeSuccessfulParse() as never
     );
-    vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue({ id: 'agent-1' } as never);
+    vi.mocked(prisma.aiAgent.findFirst).mockResolvedValue({ id: 'agent-1' } as never);
     vi.mocked(capabilityDispatcher.dispatch).mockResolvedValue({
       success: true,
       data: { key: 'value', count: 42 },
@@ -463,7 +464,7 @@ describe('callMcpTool', () => {
     vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
       makeSuccessfulParse() as never
     );
-    vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue({ id: 'agent-1' } as never);
+    vi.mocked(prisma.aiAgent.findFirst).mockResolvedValue({ id: 'agent-1' } as never);
     vi.mocked(capabilityDispatcher.dispatch).mockResolvedValue({
       success: false,
       error: { code: 'EXECUTION_FAILED', message: 'Something broke' },
@@ -481,7 +482,7 @@ describe('callMcpTool', () => {
     vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
       makeSuccessfulParse() as never
     );
-    vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue({ id: 'agent-1' } as never);
+    vi.mocked(prisma.aiAgent.findFirst).mockResolvedValue({ id: 'agent-1' } as never);
     vi.mocked(capabilityDispatcher.dispatch).mockResolvedValue({
       success: false,
     });
@@ -499,7 +500,7 @@ describe('callMcpTool', () => {
     vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
       makeSuccessfulParse() as never
     );
-    vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue({ id: 'agent-1' } as never);
+    vi.mocked(prisma.aiAgent.findFirst).mockResolvedValue({ id: 'agent-1' } as never);
     vi.mocked(capabilityDispatcher.dispatch).mockRejectedValue(
       new Error('Dispatcher internal error')
     );
@@ -515,7 +516,7 @@ describe('callMcpTool', () => {
     vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
       makeSuccessfulParse() as never
     );
-    vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue({ id: 'agent-1' } as never);
+    vi.mocked(prisma.aiAgent.findFirst).mockResolvedValue({ id: 'agent-1' } as never);
     vi.mocked(capabilityDispatcher.dispatch).mockResolvedValue({ success: true, data: {} });
 
     await callMcpTool('search_knowledge', undefined, { userId: 'user-1' });
@@ -532,14 +533,36 @@ describe('callMcpTool', () => {
     vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
       makeSuccessfulParse() as never
     );
-    vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue({ id: 'agent-cached' } as never);
+    vi.mocked(prisma.aiAgent.findFirst).mockResolvedValue({ id: 'agent-cached' } as never);
     vi.mocked(capabilityDispatcher.dispatch).mockResolvedValue({ success: true, data: {} });
 
     // Two calls without clearing cache — agent lookup should fire only once
     await callMcpTool('search_knowledge', {}, { userId: 'user-1' });
     await callMcpTool('search_knowledge', {}, { userId: 'user-1' });
 
-    expect(prisma.aiAgent.findUnique).toHaveBeenCalledOnce();
+    expect(prisma.aiAgent.findFirst).toHaveBeenCalledOnce();
+  });
+
+  it('caches the agent ID per org — org B never inherits org A’s mcp-system (§107 t-708)', async () => {
+    vi.mocked(prisma.mcpExposedTool.findMany).mockResolvedValue([makeExposedTool()] as never);
+    vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
+      makeSuccessfulParse() as never
+    );
+    vi.mocked(prisma.aiAgent.findFirst)
+      .mockResolvedValueOnce({ id: 'agent-org-a' } as never)
+      .mockResolvedValueOnce({ id: 'agent-org-b' } as never);
+    vi.mocked(capabilityDispatcher.dispatch).mockResolvedValue({ success: true, data: {} });
+
+    await runAsOrg('org_a', () => callMcpTool('search_knowledge', {}, { userId: 'user-1' }));
+    await runAsOrg('org_b', () => callMcpTool('search_knowledge', {}, { userId: 'user-1' }));
+    await runAsOrg('org_a', () => callMcpTool('search_knowledge', {}, { userId: 'user-1' }));
+
+    // One lookup per org, and each org dispatches under its own agent.
+    expect(prisma.aiAgent.findFirst).toHaveBeenCalledTimes(2);
+    const agentIds = vi
+      .mocked(capabilityDispatcher.dispatch)
+      .mock.calls.map((c) => (c[2] as { agentId: string }).agentId);
+    expect(agentIds).toEqual(['agent-org-a', 'agent-org-b', 'agent-org-a']);
   });
 
   it('clearMcpToolCache resets the cached agent ID', async () => {
@@ -547,7 +570,7 @@ describe('callMcpTool', () => {
     vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
       makeSuccessfulParse() as never
     );
-    vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue({ id: 'agent-1' } as never);
+    vi.mocked(prisma.aiAgent.findFirst).mockResolvedValue({ id: 'agent-1' } as never);
     vi.mocked(capabilityDispatcher.dispatch).mockResolvedValue({ success: true, data: {} });
 
     await callMcpTool('search_knowledge', {}, { userId: 'user-1' });
@@ -559,7 +582,7 @@ describe('callMcpTool', () => {
     );
     await callMcpTool('search_knowledge', {}, { userId: 'user-1' });
 
-    expect(prisma.aiAgent.findUnique).toHaveBeenCalledTimes(2);
+    expect(prisma.aiAgent.findFirst).toHaveBeenCalledTimes(2);
   });
 
   it('resolves agent by slug mcp-system', async () => {
@@ -567,12 +590,12 @@ describe('callMcpTool', () => {
     vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
       makeSuccessfulParse() as never
     );
-    vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue({ id: 'agent-sys' } as never);
+    vi.mocked(prisma.aiAgent.findFirst).mockResolvedValue({ id: 'agent-sys' } as never);
     vi.mocked(capabilityDispatcher.dispatch).mockResolvedValue({ success: true, data: {} });
 
     await callMcpTool('search_knowledge', {}, { userId: 'user-1' });
 
-    expect(prisma.aiAgent.findUnique).toHaveBeenCalledWith(
+    expect(prisma.aiAgent.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: { slug: 'mcp-system' } })
     );
   });
@@ -611,15 +634,15 @@ describe('callMcpTool: scoped agent resolution', () => {
       { query: 'x' },
       { userId: 'user-1', agentId: 'agent-scoped' }
     );
-    expect(prisma.aiAgent.findUnique).not.toHaveBeenCalled();
+    expect(prisma.aiAgent.findFirst).not.toHaveBeenCalled();
   });
 
   it('falls back to the mcp-system agent when scopedAgentId is null', async () => {
-    vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue({ id: 'agent-sys' } as never);
+    vi.mocked(prisma.aiAgent.findFirst).mockResolvedValue({ id: 'agent-sys' } as never);
 
     await callMcpTool('search_knowledge', {}, { userId: 'user-1', scopedAgentId: null });
 
-    expect(prisma.aiAgent.findUnique).toHaveBeenCalledWith(
+    expect(prisma.aiAgent.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: { slug: 'mcp-system' } })
     );
     expect(capabilityDispatcher.dispatch).toHaveBeenCalledWith(
@@ -657,7 +680,7 @@ describe('callMcpTool: scoped agent resolution', () => {
   });
 
   it('omits the scope key entirely when no scope is supplied (vanilla context unchanged)', async () => {
-    vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue({ id: 'agent-sys' } as never);
+    vi.mocked(prisma.aiAgent.findFirst).mockResolvedValue({ id: 'agent-sys' } as never);
 
     await callMcpTool('search_knowledge', {}, { userId: 'user-1' });
 
@@ -785,7 +808,7 @@ describe('callMcpTool: rich content blocks', () => {
     vi.mocked(capabilityFunctionDefinitionSchema.safeParse).mockReturnValue(
       makeSuccessfulParse() as never
     );
-    vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue({ id: 'agent-42' } as never);
+    vi.mocked(prisma.aiAgent.findFirst).mockResolvedValue({ id: 'agent-42' } as never);
   });
 
   function mkPayload(blocks: unknown[]): { contentBlocks: unknown[] } {
