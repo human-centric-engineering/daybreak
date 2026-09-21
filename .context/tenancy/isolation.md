@@ -241,10 +241,11 @@ insert is refused by `WITH CHECK` (`42501`), a cross-org update finds no row,
 and a plain connection with no GUC sees zero rows. The two-org harness and
 CI job that keep this true are §107 t-709.
 
-**Known gap until t-709:** the credential resolvers (`resolveApiKey`,
-`resolveEmbedToken`, MCP key resolution) read a tenant-owned row to learn
-the org they then enter, and the chokepoint refuses that read with no
-context — see [`context.md`](./context.md#the-data-layer--libdbtenancy-extensionts).
+The credential resolvers (`resolveApiKey`, `resolveEmbedToken`, MCP key
+resolution) read a tenant-owned row to learn the org they then enter; that
+one read runs under `runAsCredentialLookup` (t-709) — the bypass for one
+statement, logged at debug — see
+[`context.md`](./context.md#the-data-layer--libdbtenancy-extensionts).
 
 ## Proving it
 
@@ -263,6 +264,14 @@ context — see [`context.md`](./context.md#the-data-layer--libdbtenancy-extensi
 - [`tests/unit/scripts/db/`](../../tests/unit/scripts/db/) — the two
   scripts' shells: flags, DSN preference, one transaction with rollback,
   the statements the role script issues in order, exit codes.
-- Against a real database: the enable → drift-check at `multi` → enable
-  (no change) → disable → disable (no change) cycle on the dev DB, and the
-  two-org run above on a throwaway container (§107 t-707 PR body).
+- Against a real database, on every PR: CI's `smoke-multi` job
+  ([`architecture/ci.md`](../architecture/ci.md#smoke-multi--the-only-control-that-runs-a-policy-107-t-709))
+  runs the operator's sequence on a fresh pgvector container and then
+  [`scripts/smoke/tenancy-isolation.ts`](../../scripts/smoke/tenancy-isolation.ts)
+  **as the restricted role at `multi`** — two orgs with equivalent rows, and
+  as A every read path, the raw-SQL ones included, answers none of B's
+  (`npm run smoke:tenancy-isolation` locally, against a THROWAWAY database
+  only). It is the one control that actually runs a policy: widening one to
+  `USING (true)` fails 5 of its checks, dropping one fails its first create.
+  The single-mode `smoke` job asserts the other half — `pg_class` shows RLS
+  neither enabled nor forced on every tenant-owned table at `single`.
