@@ -8,7 +8,10 @@ org a query runs for, and how the setter reaches Postgres — is
 [`context.md`](./context.md#the-data-layer--libdbtenancy-extensionts); the
 column the policies read is [`identity.md`](./identity.md); the design record
 with the measurements behind each rule is the Spike register in
-[`multi-tenancy-design.md`](../architecture/multi-tenancy-design.md#spike-register).
+[`multi-tenancy-design.md`](../architecture/multi-tenancy-design.md#spike-register);
+the operator's walkthrough that puts this page's pieces in order, with what
+does not yet work at `multi`, is the
+[playbook](../architecture/multi-tenancy.md#enabling-it-end-to-end).
 
 **At `TENANCY_MODE=single` none of this is active**, and that is by
 construction rather than by branch: the policies exist but are dormant, no
@@ -123,9 +126,15 @@ registration. What it does:
 state gets no statement; a second run prints "no change". Exit codes: `0`
 done or nothing to do; `1` the database did not reach the requested state;
 `2` could not run (no DSN, connection refused, a table the migrations have
-not created). Mode-agnostic: it does not read `TENANCY_MODE`. Enabling at
-`single` is safe — the chokepoint issues no setter there, so the app would
-see no rows, which is why you run it only when you mean it.
+not created — and the refusal above, a tenant-owned table with no
+`org_isolation` policy, which exits `2` too: nothing was attempted).
+Mode-agnostic: it does not read `TENANCY_MODE`. Enabling at `single` is
+pointless and, on most installs, an outage: the chokepoint issues no setter
+there, so every role under the policies — a restricted app role, or a plain
+`NOBYPASSRLS` owner under `FORCE` — sees no rows and fails every write;
+only a superuser or a `BYPASSRLS` owner (`postgres`, `neondb_owner`) is
+exempt and sees no symptom. Run it only when you mean it; `disable` undoes
+it.
 
 It connects with **`MIGRATE_DATABASE_URL`** when set, else `DATABASE_URL`:
 `ALTER TABLE` needs the owner, and at `multi` `DATABASE_URL` is the
