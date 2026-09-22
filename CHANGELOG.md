@@ -434,6 +434,53 @@ release process.
   unchanged for every honest row: an unbound or install-org credential
   resolves to the install org exactly as before.
 
+### Fixed
+
+- **Four process-global caches stopped mixing orgs** (multi-tenancy §108
+  t-712). All four are behaviour changes at `TENANCY_MODE=multi` only; at
+  `single` there is one org and none of them changes anything. The event-hook
+  cache (`lib/orchestration/hooks/registry.ts`) was one process-wide
+  `Map<eventType, CachedHook[]>` holding tenant-owned `AiEventHook` rows, so
+  whichever org refreshed it had **its** hooks dispatched for every org for
+  the next 60 seconds — org B's event POSTed its payload to org A's URL,
+  signed with org A's secret, while B's own hooks never fired. It is now
+  keyed by org; `invalidateHookCache()` still clears every partition, and at
+  `multi` an `emitHookEvent` from a call stack that entered no org — or one
+  running as the audited system scope, where the RLS bypass would otherwise
+  fan a single event out to every org's webhook — logs and dispatches nothing
+  rather than reading wide (at `single` the context is the install org, so
+  nothing changes). And the MCP per-key rate-limit override
+  cache (`lib/orchestration/mcp/protocol-handler.ts`) is keyed by API key id,
+  which is unique across orgs — but it was *filled* inside whichever org's
+  request triggered the refresh, and `McpApiKey` is tenant-owned, so every
+  other org's `rateLimitOverride` was silently dropped for five minutes. The
+  read now runs under the audited system scope, behind an in-flight latch and
+  a failure backoff so a burst — or a failing database — cannot turn that
+  audit line into noise. And the chat prompt-context
+  cache (`lib/orchestration/chat/context-builder.ts`) keyed on
+  `(type, id, userId)`, all three of which a request supplies — the built-in
+  `pattern` type keys by a pattern *number* over tenant-owned
+  `AiKnowledgeChunk` rows, and a fork's registered contributor is handed the
+  caller's own `type`/`id` — so a user who belongs to two orgs could open
+  `pattern:3` in one and, inside the 60-second TTL, be served that org's
+  knowledge content in the other org's system prompt. The key now carries the
+  org first, and a call under the audited system scope is refused outright
+  rather than served a body merged from every org's rows.
+  `invalidateContext` builds the same key, so call it inside the org whose
+  entry you mean to drop. And the MCP system-agent cache
+  (`lib/orchestration/mcp/tool-registry.ts`) resolved `mcp-system` by **slug**,
+  which §107 t-708 made unique *per org* and therefore shared *across* them:
+  under the bypass that lookup answers from an arbitrary org, so it now
+  refuses the system scope rather than caching the answer under a sentinel.
+  An install at `single` is unaffected by any of the
+  four, and multi-tenancy remains the opt-in capability the
+  playbook's
+  [what you do not yet get](./.context/architecture/multi-tenancy.md#what-you-get-at-multi-and-what-you-do-not-yet)
+  describes; the new
+  [`lib/tenancy/process-state.ts`](./lib/tenancy/process-state.ts) manifest
+  and its scanner test are what found them, and are what a fork editing a
+  platform module under `lib/` will meet if it adds process-global state.
+
 ## [0.12.1] — 2026-09-17
 
 > **Alpha release.** Eighteenth tagged Sunrise release. **PATCH bump** — one

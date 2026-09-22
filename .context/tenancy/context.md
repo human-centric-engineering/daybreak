@@ -355,6 +355,56 @@ that does not own the tables — on Neon the deploy role has `BYPASSRLS` and
 is never subject to a policy. The policies, the switch, the role split and
 the drift probes are [`isolation.md`](./isolation.md).
 
+## Adding process-global state — the one review step the context cannot cover
+
+`runAsOrg` scopes a query. It does not scope a `Map`. A module-level holder
+outlives the scope that filled it, so **a cache filled inside org A and read
+inside org B is a cross-tenant read that every control on this page allows**:
+the query that filled it was correctly scoped, and the read that served it
+was not a query at all.
+
+So when a change adds module-level mutable state anywhere in `lib/` — a
+cache, a registry, a counter, a latch, a `globalThis` bag — the review step
+is one question, and the answer goes in
+[`lib/tenancy/process-state.ts`](../../lib/tenancy/process-state.ts) as a row:
+
+> **If two orgs used this install, could one org's entry be served to the
+> other?**
+
+- **No, the key is unique across orgs** (a cuid, a credential id) —
+  `row-keyed`, and name the key. Say so if the holder has a shared size cap:
+  that is a noisy-neighbour question, not an isolation one.
+- **No, it is partitioned by org** — `org-keyed`.
+- **No, nothing tenant-derived goes in** — `no-tenant-data` for code
+  registrations and latches, `global-config` for a cache of rows the
+  classification says have no org.
+- **Yes, and that is right** — `shared-by-decision`, with what it protects
+  and the trigger that should make someone revisit it.
+- **Yes, and it is not right** — that is a defect, not a posture. Fix it, or
+  file the task and name it in the row.
+
+**And ask it of the fill query, not just the key.** A cache can be keyed
+correctly and still be filled wrongly. The test is what the query that
+populates it _filters on_: an id unique across orgs (a cuid `findUnique`)
+answers the same under `runAsSystem` as under an org scope, so a
+system-scoped fill is harmless. Anything two orgs share — an event type, a
+per-org-unique **slug**, a number — answers from an arbitrary org, or from
+all of them, once `app.bypass_rls` is on. Three caches in `lib/` had that
+shape and all three now refuse the system scope rather than caching under a
+sentinel (§108 t-712).
+
+`tests/unit/lib/tenancy/process-state.test.ts` fails on a holder with no row
+and on a row whose holder has gone, so for the shapes it can see the step
+cannot be skipped. **It cannot see a holder built by a factory it does not
+know by name** — `const limiter = createRateLimiter(...)` is state, and
+nothing in that syntax says so — which is why the list of stateful factories
+in the test is hand-kept and why this step is written as a question rather
+than as "run the tests". And even where it does fire, the test only checks
+that an answer exists. **Which answer is right is this
+question, and it is the reviewer's.** A cache keyed by a slug, a name or any
+other label two orgs can both use is the shape to look for; it is what took
+the event-hook cache a minute of every org dispatching one org's webhooks.
+
 ## Proving it
 
 - [`tests/unit/lib/tenancy/context.test.ts`](../../tests/unit/lib/tenancy/context.test.ts)
@@ -389,6 +439,13 @@ the drift probes are [`isolation.md`](./isolation.md).
   org admin on the roster.
 - [`tests/unit/lib/tenancy/resolver.test.ts`](../../tests/unit/lib/tenancy/resolver.test.ts)
   — the registry, including a throwing resolver answering `null`.
+- [`tests/unit/lib/tenancy/process-state.test.ts`](../../tests/unit/lib/tenancy/process-state.test.ts)
+  — the posture manifest against the `lib/` tree, both directions, preceded by
+  a block of self-tests proving the scanner can report before a clean result
+  is trusted (each one is a shape that fooled an earlier version of it).
+- [`tests/unit/lib/orchestration/hooks/registry.tenancy.test.ts`](../../tests/unit/lib/orchestration/hooks/registry.tenancy.test.ts)
+  — two orgs through the real context: each dispatches its own hook, signed
+  with its own secret, verified against the real signing scheme.
 
 ## Related
 

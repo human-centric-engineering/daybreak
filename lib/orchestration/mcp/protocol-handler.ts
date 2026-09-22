@@ -6,6 +6,9 @@
  * prompts) with scope checking, rate limiting, and audit logging.
  *
  * Platform-agnostic: no Next.js imports.
+ *
+ * Tenancy posture: row-keyed — `keyRateLimitCache` by MCP API key id,
+ * refreshed under the system scope (lib/tenancy/process-state.ts).
  */
 
 import { logger } from '@/lib/logging';
@@ -675,17 +678,59 @@ function extractResourceUri(request: JsonRpcRequest): string | undefined {
   return undefined;
 }
 
-/** Placeholder — override rate limit from McpApiKey.rateLimitOverride */
+/**
+ * Per-key rate-limit overrides from `McpApiKey.rateLimitOverride`, keyed by
+ * key id — unique across orgs, so one process-wide map is correct.
+ *
+ * Filling it is the part that is not (§108 t-712). The refresh is kicked off
+ * from `getKeyRateLimit` on the request path, so it inherited whichever org
+ * that request was running as, and `McpApiKey` is tenant-owned: at `multi` the
+ * map then held one org's overrides and every other org's key fell back to the
+ * default limit for the next five minutes — silently, and differently
+ * depending on who happened to refresh it. The read is genuinely global, so it
+ * takes the audited system scope, exactly as the maintenance tick's idle-gate
+ * horizon does.
+ */
 let keyRateLimitCache = new Map<string, number | null>();
 let keyRateLimitCacheAt = 0;
+/**
+ * The refresh in flight, if any.
+ *
+ * `getKeyRateLimit` kicks the refresh off without awaiting it, and the
+ * freshness stamp is only written when it resolves — so without this latch
+ * every request arriving during a refresh starts another one. That was a
+ * duplicate query before; now each duplicate is an audited RLS bypass with an
+ * `info` line, and a burst at a five-minute boundary would produce N of them,
+ * drowning the signal that log exists to give (`lib/tenancy/context.ts`).
+ * Same shape as `model-registry-db-hydrate.ts`.
+ */
+let keyRateLimitRefresh: Promise<void> | null = null;
+/**
+ * The earliest a failed refresh may be retried.
+ *
+ * The freshness stamp is only written on success, so without this a failing
+ * query is re-attempted by EVERY request — the latch dedupes concurrent
+ * refreshes, not serial ones — and each attempt is an audited bypass with its
+ * own `info` line. A pool exhausted for a minute under load would emit one
+ * per request, which is the drowning the latch exists to prevent, arriving by
+ * the other door. Thirty seconds rather than the full TTL: a transient blip
+ * should not cost five minutes of every org's overrides.
+ */
+let keyRateLimitRetryAt = 0;
 const KEY_RATE_CACHE_TTL = 5 * 60 * 1000;
+const KEY_RATE_FAILURE_BACKOFF_MS = 30 * 1000;
 
 async function loadKeyRateLimits(): Promise<void> {
   const { prisma } = await import('@/lib/db/client');
-  const keys = await prisma.mcpApiKey.findMany({
-    where: { isActive: true, rateLimitOverride: { not: null } },
-    select: { id: true, rateLimitOverride: true },
-  });
+  const { runAsSystem } = await import('@/lib/tenancy/context');
+  const keys = await runAsSystem(
+    'mcp: per-key rate-limit overrides, which are keyed by a key id and read for every org',
+    () =>
+      prisma.mcpApiKey.findMany({
+        where: { isActive: true, rateLimitOverride: { not: null } },
+        select: { id: true, rateLimitOverride: true },
+      })
+  );
   const map = new Map<string, number | null>();
   for (const k of keys) {
     map.set(k.id, k.rateLimitOverride);
@@ -694,9 +739,45 @@ async function loadKeyRateLimits(): Promise<void> {
   keyRateLimitCacheAt = Date.now();
 }
 
+/**
+ * Test-only: forget the overrides so the next lookup refreshes.
+ *
+ * The cache is module state with a five-minute TTL, so without this a test
+ * asserting on the refresh depends on being the first in its file to reach
+ * this code path.
+ */
+export function __resetKeyRateLimitCacheForTests(): void {
+  keyRateLimitCache = new Map<string, number | null>();
+  keyRateLimitCacheAt = 0;
+  keyRateLimitRefresh = null;
+  keyRateLimitRetryAt = 0;
+}
+
+/**
+ * Start a refresh unless one is already running, and never reject.
+ *
+ * The caller cannot await this — the limit is wanted now, from whatever the
+ * cache holds — so a database failure here has nowhere to go but a log line.
+ * Before this it had nowhere to go at all: an unhandled rejection.
+ */
+function refreshKeyRateLimits(): void {
+  if (keyRateLimitRefresh || Date.now() < keyRateLimitRetryAt) return;
+  keyRateLimitRefresh = loadKeyRateLimits()
+    .catch((err: unknown) => {
+      keyRateLimitRetryAt = Date.now() + KEY_RATE_FAILURE_BACKOFF_MS;
+      logger.warn('MCP per-key rate-limit overrides could not be refreshed', {
+        error: err instanceof Error ? err.message : String(err),
+        retryInMs: KEY_RATE_FAILURE_BACKOFF_MS,
+      });
+    })
+    .finally(() => {
+      keyRateLimitRefresh = null;
+    });
+}
+
 function getKeyRateLimit(apiKeyId: string): number | null {
   if (Date.now() - keyRateLimitCacheAt > KEY_RATE_CACHE_TTL) {
-    void loadKeyRateLimits();
+    refreshKeyRateLimits();
   }
   return keyRateLimitCache.get(apiKeyId) ?? null;
 }

@@ -45,7 +45,11 @@ vi.mock('@/lib/db/client', () => ({
   },
 }));
 
-import { handleMcpRequest, McpProtocolError } from '@/lib/orchestration/mcp/protocol-handler';
+import {
+  handleMcpRequest,
+  McpProtocolError,
+  __resetKeyRateLimitCacheForTests,
+} from '@/lib/orchestration/mcp/protocol-handler';
 import { listMcpTools, callMcpTool } from '@/lib/orchestration/mcp/tool-registry';
 import {
   listMcpResources,
@@ -68,6 +72,9 @@ import {
 } from '@/types/mcp';
 import type { McpRateLimiter } from '@/lib/orchestration/mcp/rate-limiter';
 import type { McpServerState } from '@/lib/orchestration/mcp/types';
+import { prisma } from '@/lib/db/client';
+import { logger } from '@/lib/logging';
+import { getTenantContext, runAsOrg, type TenantContext } from '@/lib/tenancy/context';
 
 function makeAuth(overrides: Partial<McpAuthContext> = {}): McpAuthContext {
   return {
@@ -174,6 +181,105 @@ describe('handleMcpRequest', () => {
       const req = makeRequest({ id: undefined, method: 'notifications/unknown' });
       const result = await handleMcpRequest(req, { auth, session, serverState, rateLimiter });
       expect(result).toBeNull();
+    });
+  });
+
+  describe('the per-key rate-limit override cache (§108 t-712)', () => {
+    it("reads every org's keys under the audited system scope, not the caller's org", async () => {
+      __resetKeyRateLimitCacheForTests();
+      const scopes: (TenantContext | null)[] = [];
+      vi.mocked(prisma.mcpApiKey.findMany).mockImplementation(() => {
+        scopes.push(getTenantContext());
+        return Promise.resolve([]) as never;
+      });
+
+      // The cache is keyed by API key id, which is unique across orgs, so one
+      // process-wide map is right — but it used to be FILLED inside whichever
+      // org's request happened to trigger the refresh, and `McpApiKey` is
+      // tenant-owned. Every other org's key then fell back to the global limit
+      // until the next refresh.
+      await runAsOrg('cmorg00000000000000000orga', async () => {
+        await handleMcpRequest(makeRequest({ method: 'ping' }), {
+          auth,
+          session,
+          serverState,
+          rateLimiter,
+        });
+      });
+
+      await vi.waitFor(() => expect(scopes).toHaveLength(1));
+      expect(scopes[0]).toEqual({ orgId: null, source: 'system' });
+    });
+
+    it('starts one refresh for a burst, not one per request', async () => {
+      __resetKeyRateLimitCacheForTests();
+      let release!: () => void;
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      vi.mocked(prisma.mcpApiKey.findMany).mockImplementation(
+        () => blocked.then(() => []) as never
+      );
+
+      // The stamp is only written when the refresh resolves, so without the
+      // in-flight latch each of these starts its own audited bypass.
+      for (let i = 0; i < 5; i++) {
+        await handleMcpRequest(makeRequest({ method: 'ping' }), {
+          auth,
+          session,
+          serverState,
+          rateLimiter,
+        });
+      }
+
+      // The refresh reaches the database through two dynamic imports, so wait
+      // for the first call, then let every other pending chain settle before
+      // counting. Asserting "1" the moment one arrives would pass without the
+      // latch too, because the other four are still in flight.
+      await vi.waitFor(() => expect(prisma.mcpApiKey.findMany).toHaveBeenCalled());
+      for (let i = 0; i < 5; i++) await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(prisma.mcpApiKey.findMany).toHaveBeenCalledTimes(1);
+      release();
+    });
+
+    it('logs a failed refresh instead of leaving an unhandled rejection', async () => {
+      __resetKeyRateLimitCacheForTests();
+      vi.mocked(prisma.mcpApiKey.findMany).mockRejectedValue(new Error('pool exhausted'));
+
+      await handleMcpRequest(makeRequest({ method: 'ping' }), {
+        auth,
+        session,
+        serverState,
+        rateLimiter,
+      });
+
+      await vi.waitFor(() =>
+        expect(logger.warn).toHaveBeenCalledWith(
+          'MCP per-key rate-limit overrides could not be refreshed',
+          expect.objectContaining({ error: 'pool exhausted' })
+        )
+      );
+    });
+
+    it('backs off after a failure instead of retrying on every request', async () => {
+      __resetKeyRateLimitCacheForTests();
+      vi.mocked(prisma.mcpApiKey.findMany).mockRejectedValue(new Error('pool exhausted'));
+
+      // The freshness stamp is only written on success, so without a backoff
+      // every one of these starts its own audited bypass and logs a warn.
+      for (let i = 0; i < 4; i++) {
+        await handleMcpRequest(makeRequest({ method: 'ping' }), {
+          auth,
+          session,
+          serverState,
+          rateLimiter,
+        });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      }
+
+      expect(prisma.mcpApiKey.findMany).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
     });
   });
 
