@@ -19,7 +19,13 @@
  * work (running / pending / awaiting-approval executions; queued /
  * running / in-progress eval runs and sessions) is never pruned by age.
  *
- * Called by the unified maintenance tick endpoint.
+ * **Two sweeps, two tenant scopes (§108 t-711).** `enforceRetentionPolicies`
+ * prunes tenant-owned tables and runs once per org inside that org's scope
+ * (the `retention` platform job); `enforceSystemRetentionPolicies` prunes the
+ * two system audit tables — `AiAdminAuditLog`, `McpAuditLog`, neither of
+ * which has an org — and runs once under the audited system scope (the
+ * `auditLogRetention` job). Per org they would have run N times over the
+ * same rows. Both are driven by the unified maintenance tick.
  */
 
 import { prisma } from '@/lib/db/client';
@@ -37,25 +43,35 @@ export interface RetentionResult {
   hookDeliveriesDeleted: number;
   /** Number of cost log rows pruned. */
   costLogsDeleted: number;
-  /** Number of admin audit log rows pruned. */
-  auditLogsDeleted: number;
   /** Number of terminal workflow executions pruned (cascades steps/dispatches/lease events/cost logs). */
   executionsDeleted: number;
   /** Number of terminal evaluation sessions pruned (cascades logs). */
   evaluationSessionsDeleted: number;
   /** Number of terminal evaluation runs pruned (cascades cases). */
   evaluationRunsDeleted: number;
+}
+
+/** What the system-scoped audit sweep reports. */
+export interface SystemRetentionResult {
+  /** Number of admin audit log rows pruned. */
+  auditLogsDeleted: number;
   /** Number of MCP audit-log rows pruned. */
   mcpAuditLogsDeleted: number;
 }
 
 /**
  * Enforce retention policies for all agents that have `retentionDays` set,
- * then prune old webhook deliveries and cost logs per global settings.
+ * then prune old webhook deliveries, cost logs, executions and evaluation
+ * history per global settings.
  *
  * For each agent, deletes conversations whose `updatedAt` is older than
  * `now - retentionDays`. Cascade deletes handle messages, embeddings,
  * and cost logs.
+ *
+ * Every table this sweep touches is tenant-owned, so it runs inside an org
+ * scope — once per org at `multi`, where the policies confine each prune to
+ * that org's rows; the two system audit tables are
+ * {@link enforceSystemRetentionPolicies}' job.
  */
 export async function enforceRetentionPolicies(): Promise<RetentionResult> {
   const agents = await prisma.aiAgent.findMany({
@@ -85,9 +101,15 @@ export async function enforceRetentionPolicies(): Promise<RetentionResult> {
     }
   }
 
-  // One settings read for the whole sweep. Each prune below would otherwise
-  // fetch the same singleton row again — eight round-trips for six columns
-  // (#442). Passing the windows explicitly is what makes them stop.
+  // One settings read per sweep. Each prune below would otherwise fetch the
+  // same singleton row again — eight round-trips for six columns (#442).
+  // Passing the windows explicitly is what makes them stop. At `multi` the
+  // sweep itself runs once per org (§108), so this read — and the coherence
+  // warning under it — repeat per org: the windows are global, so every org
+  // reads the same row and any warning says the same thing N times. Hoisting
+  // them above the iteration would mean passing them through the job
+  // registry, which is a wider seam change than one indexed singleton read an
+  // hour is worth.
   const windows = await loadRetentionWindows();
 
   warnOnIncoherentRetention(windows);
@@ -98,10 +120,8 @@ export async function enforceRetentionPolicies(): Promise<RetentionResult> {
   );
   const hookResult = await pruneHookDeliveries(windows.webhookRetentionDays);
   const costLogResult = await pruneCostLogs(windows.costLogRetentionDays);
-  const auditLogResult = await pruneAuditLogs(windows.auditLogRetentionDays);
   const executionResult = await pruneExecutions(windows.executionRetentionDays);
   const evaluationResult = await pruneEvaluationData(windows.evaluationRetentionDays);
-  const mcpAuditResult = await pruneMcpAuditLogs();
 
   return {
     deleted: totalDeleted,
@@ -109,10 +129,32 @@ export async function enforceRetentionPolicies(): Promise<RetentionResult> {
     webhookDeliveriesDeleted: webhookResult.deleted,
     hookDeliveriesDeleted: hookResult.deleted,
     costLogsDeleted: costLogResult.deleted,
-    auditLogsDeleted: auditLogResult.deleted,
     executionsDeleted: executionResult.deleted,
     evaluationSessionsDeleted: evaluationResult.sessionsDeleted,
     evaluationRunsDeleted: evaluationResult.runsDeleted,
+  };
+}
+
+/**
+ * Prune the two system audit tables — the admin audit log per
+ * `auditLogRetentionDays`, the MCP audit log per
+ * `McpServerConfig.auditRetentionDays`.
+ *
+ * Neither table carries an org (`SYSTEM_MODELS` in
+ * `lib/tenancy/classification.ts`), so this runs once, under the audited
+ * system scope, rather than once per org with the tenant sweep.
+ *
+ * Each prune resolves its own window here, which the tenant sweep's hoisted
+ * `loadRetentionWindows()` exists to avoid (#442). It is not the same shape:
+ * that was eight prunes re-reading one settings row inside a single sweep;
+ * this is one prune reading one column, once an hour, and the column is no
+ * longer in the tenant sweep's select.
+ */
+export async function enforceSystemRetentionPolicies(): Promise<SystemRetentionResult> {
+  const auditLogResult = await pruneAuditLogs();
+  const mcpAuditResult = await pruneMcpAuditLogs();
+  return {
+    auditLogsDeleted: auditLogResult.deleted,
     mcpAuditLogsDeleted: mcpAuditResult.deleted,
   };
 }
@@ -397,12 +439,18 @@ function warnOnIncoherentRetention(windows: RetentionWindows): void {
   );
 }
 
-/** The six global retention windows, in days. `null` = that class is never pruned. */
+/**
+ * The global retention windows the TENANT sweep needs, in days. `null` = that
+ * class is never pruned.
+ *
+ * `auditLogRetentionDays` is deliberately absent: the admin audit log moved to
+ * {@link enforceSystemRetentionPolicies} (§108), so selecting it here would
+ * read a column this sweep never uses.
+ */
 export interface RetentionWindows {
   webhookRetentionDays: number | null;
   webhookDlqRetentionDays: number | null;
   costLogRetentionDays: number | null;
-  auditLogRetentionDays: number | null;
   executionRetentionDays: number | null;
   evaluationRetentionDays: number | null;
 }
@@ -411,7 +459,6 @@ const NO_RETENTION_WINDOWS: RetentionWindows = {
   webhookRetentionDays: null,
   webhookDlqRetentionDays: null,
   costLogRetentionDays: null,
-  auditLogRetentionDays: null,
   executionRetentionDays: null,
   evaluationRetentionDays: null,
 };
@@ -420,7 +467,7 @@ const NO_RETENTION_WINDOWS: RetentionWindows = {
  * Read all six retention windows in **one** query.
  *
  * `resolveRetentionDays` reads the same singleton row once per prune, which cost
- * a sweep seven or eight round-trips to fetch six columns (#442). This is a
+ * a sweep seven or eight round-trips to fetch a handful of columns (#442). This is a
  * hoist, not a cache: every prune already takes an explicit window as its first
  * parameter, the sweep just never passed one.
  *
@@ -436,7 +483,6 @@ export async function loadRetentionWindows(): Promise<RetentionWindows> {
         webhookRetentionDays: true,
         webhookDlqRetentionDays: true,
         costLogRetentionDays: true,
-        auditLogRetentionDays: true,
         executionRetentionDays: true,
         evaluationRetentionDays: true,
       },
@@ -446,7 +492,6 @@ export async function loadRetentionWindows(): Promise<RetentionWindows> {
       webhookRetentionDays: row.webhookRetentionDays ?? null,
       webhookDlqRetentionDays: row.webhookDlqRetentionDays ?? null,
       costLogRetentionDays: row.costLogRetentionDays ?? null,
-      auditLogRetentionDays: row.auditLogRetentionDays ?? null,
       executionRetentionDays: row.executionRetentionDays ?? null,
       evaluationRetentionDays: row.evaluationRetentionDays ?? null,
     };
