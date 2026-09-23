@@ -383,8 +383,62 @@ release process.
   [`agent-visibility.md`](./.context/orchestration/agent-visibility.md#org-binding-106)
   and [`mcp.md`](./.context/orchestration/mcp.md#api-key-lifecycle).
 
+### Security
+
+- **`GET /api/v1/mcp` now refuses a session that is not the
+  authenticated key's** (multi-tenancy §108 t-716), with the same
+  `SESSION_NOT_FOUND` 404 that `POST` and `DELETE` have always returned for
+  one. It is the path that attaches the SSE listener and it was the only one
+  not re-checking the key, so a caller holding any valid MCP key could open the
+  stream with another key's — at `multi`, another org's — `Mcp-Session-Id` and
+  receive that session's `notifications/message`, `resources/updated` and
+  `progress` pushes, while the rightful owner stopped receiving them, since the
+  sink registry is keyed by session id and a second registration replaces the
+  first. A client that was passing a session id it does not own was already
+  getting nothing useful; one passing its own is unaffected.
+  Two further properties of the same check. It uses a **non-mutating** lookup
+  (the new `McpSessionManager.peekSession`), so refusing a session no longer
+  refreshes it — previously, polling `GET` or `DELETE` with another key's session
+  id kept that session from ever expiring, which at `multi` is one org holding
+  another org's session open. And if the session is terminated or evicted in the
+  window between the check and the platform pulling the response body, the SSE
+  stream now **closes** rather than staying open with an unwired notification
+  channel: the client sees the close and re-`initialize`s instead of waiting on a
+  keepalive-healthy connection that can never deliver.
+
 ### Changed
 
+- **An MCP session belongs to the org whose key opened it** (multi-tenancy §108
+  t-716). `McpSession` (`types/mcp.ts`) gains a **required** `orgId: string | null`,
+  stamped by `createSession` from the tenant context. `GET /api/v1/admin/orchestration/mcp/sessions`
+  returns it and, at `TENANCY_MODE=multi`, returns only the reading org's
+  sessions; `DELETE …/mcp/sessions/:id` refuses another org's id with its
+  ordinary 404, indistinguishable from an unknown one. At `single` both behave
+  exactly as before. Previously, at `multi` with `MCP_SESSION_MODE=stateful`, an
+  org admin read every other org's session ids, `apiKeyId`s and activity times
+  and could terminate any of them. An MCP log line **broadcast** from one org would
+  also reach every org's open SSE stream, since `lib/orchestration/mcp/log-emitter.ts`
+  builds its targets from the same list — latent rather than live, because
+  `emitMcpLog` has no caller in the platform and is reachable only by a fork
+  using that documented API. A **targeted** `emitMcpLog(sessionId, …)` is
+  unaffected in either direction: it resolves that one session directly, so it
+  still delivers when called from a `runAsSystem` job, a detached timer or a
+  platform credential, none of which shares the session's org. Terminating or
+  evicting a session now also drops its SSE sink, so a force-terminated client
+  stops receiving pushes — though its stream is not closed.
+  **Breaking for a fork that calls `broadcastMcpResourceUpdated(uri)`**: it now
+  takes a required second argument, `'this-org' | 'every-org'` (the exported
+  type `McpResourceAudience`), as does `McpSessionManager.getSubscribers`. There
+  is deliberately no default. Every org's sessions subscribe to the same
+  `sunrise://…` URI, so who is subscribed does not decide who should be told:
+  pass `'this-org'` when tenant-owned contents changed (an agent, a workflow, a
+  knowledge document) and `'every-org'` when the `McpExposedResource` definition
+  did, since that row is global config. Either default would be wrong for half
+  the callers, and wrong invisibly — a notification that never arrives looks
+  exactly like nothing having happened. The three `list_changed` broadcasts are
+  unchanged and still reach every org, for the same reason: their subjects
+  (`McpExposedTool`, `McpExposedPrompt`, `McpExposedResource`, and `AiCapability`
+  for the tools ping) are all global config. A fork constructing an `McpSession` literal must add `orgId`.
 - **The admin Logs page shows only the reading org's lines** (multi-tenancy
   §108 t-714). `LogEntry` (`types/admin.ts`) gains `orgId?: string | null`,
   stamped by `addLogEntry` from the tenant context, and `getLogEntries` —

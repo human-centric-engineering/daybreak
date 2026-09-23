@@ -411,14 +411,14 @@ async function handlePost(request: NextRequest, auth: McpAuthContext): Promise<R
 
 export async function GET(request: NextRequest): Promise<Response> {
   try {
-    return await withMcpKey(request, () => handleGet(request));
+    return await withMcpKey(request, (auth) => handleGet(request, auth));
   } catch (error) {
     return handleAPIError(error);
   }
 }
 
 /** The SSE notification stream, opened inside the key's org scope. */
-async function handleGet(request: NextRequest): Promise<Response> {
+async function handleGet(request: NextRequest, auth: McpAuthContext): Promise<Response> {
   const serverState = await getMcpServerConfig();
   if (!serverState.isEnabled) {
     return jsonRpcErrorResponse(JsonRpcErrorCode.SERVER_DISABLED, 'MCP server is disabled', 503);
@@ -453,6 +453,32 @@ async function handleGet(request: NextRequest): Promise<Response> {
   const sessionId = request.headers.get(MCP_SESSION_HEADER);
   const sessionManager = getMcpSessionManager();
 
+  // A session id is not a capability: the key is (§108 t-716). POST and DELETE
+  // have always re-checked that the named session belongs to the authenticated
+  // key; this path did not, and it is the path that attaches a LISTENER. A
+  // caller with any valid MCP key could open GET with another key's — at
+  // `multi`, another ORG's — session id and have that session's
+  // `notifications/message`, `resources/updated` and `progress` pushes
+  // delivered to it, while the rightful owner silently stopped receiving them,
+  // because `sseListeners` is a Map keyed by session id and the second
+  // registration replaces the first.
+  //
+  // Which is also why it belongs in this change rather than in a follow-up:
+  // scoping who a notification is ADDRESSED to means nothing while the sink
+  // for an address can belong to someone else. Refused the same way DELETE
+  // refuses a foreign session, so the two are indistinguishable.
+  if (sessionId) {
+    // `peekSession`, not `getSession`: a lookup whose answer may be "refuse"
+    // must not refresh the session's activity as a side effect. `getSession`
+    // bumps `lastActivityAt` BEFORE the caller can compare the key, so polling
+    // this endpoint with someone else's session id kept that session from ever
+    // expiring — at `multi`, one org holding another org's session open.
+    const existing = sessionManager.peekSession(sessionId);
+    if (!existing || existing.apiKeyId !== auth.apiKeyId) {
+      return jsonRpcErrorResponse(JsonRpcErrorCode.SESSION_NOT_FOUND, 'Session not found', 404);
+    }
+  }
+
   // SSE notification stream with server-push notifications
   async function* notificationStream(): AsyncIterable<{ type: string; data?: string }> {
     yield { type: 'connected' };
@@ -473,7 +499,7 @@ async function handleGet(request: NextRequest): Promise<Response> {
     request.signal.addEventListener('abort', onAbort, { once: true });
 
     if (sessionId) {
-      sessionManager.registerSseListener(sessionId, (notification) => {
+      const attached = sessionManager.registerSseListener(sessionId, (notification) => {
         queue.push({
           type: 'notification',
           data: JSON.stringify(notification),
@@ -483,6 +509,12 @@ async function handleGet(request: NextRequest): Promise<Response> {
           resolve = null;
         }
       });
+      // The ownership check above ran before this Response was returned; the
+      // platform pulls the body afterwards, so the session can be terminated or
+      // evicted in between (§108 t-716). Ending the generator closes the stream,
+      // which tells the client to re-`initialize` — better than parking on the
+      // queue for ever behind a keepalive that makes the connection look healthy.
+      if (!attached) return;
     }
 
     try {
@@ -546,7 +578,9 @@ function handleDelete(request: NextRequest, auth: McpAuthContext): Response {
   }
 
   const sessionManager = getMcpSessionManager();
-  const session = sessionManager.getSession(sessionId);
+  // `peekSession` for the same reason as GET above: this lookup's answer may be
+  // a refusal, and refusing should not extend the session it refused.
+  const session = sessionManager.peekSession(sessionId);
   if (session && session.apiKeyId !== auth.apiKeyId) {
     return jsonRpcErrorResponse(JsonRpcErrorCode.SESSION_NOT_FOUND, 'Session not found', 404);
   }

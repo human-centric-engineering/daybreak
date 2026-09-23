@@ -58,9 +58,15 @@ const mockServerState = {
 const mockSessionManager = {
   createSession: vi.fn(() => mockSession),
   getSession: vi.fn(() => mockSession),
+  // The non-mutating lookup the ownership checks use (§108 t-716) — GET and
+  // DELETE must not refresh a session's activity while deciding to refuse it.
+  peekSession: vi.fn(() => mockSession),
   destroySession: vi.fn(() => true),
   markInitialized: vi.fn(),
-  registerSseListener: vi.fn(),
+  // Reports whether it attached, so the SSE generator can close a stream it
+  // could not wire up (§108 t-716). Defaulting this to `undefined` made every
+  // GET test fail closed — the mock has to answer the real signature.
+  registerSseListener: vi.fn((_id: string, _sink: (notification: unknown) => void) => true),
   unregisterSseListener: vi.fn(),
 };
 
@@ -130,6 +136,7 @@ import {
   getMcpSessionManager,
   logMcpAudit,
 } from '@/lib/orchestration/mcp';
+import { sseResponse } from '@/lib/api/sse';
 import { POST, GET, DELETE } from '@/app/api/v1/mcp/route';
 import { logger } from '@/lib/logging';
 import { getTenantContext, type TenantContext } from '@/lib/tenancy/context';
@@ -202,6 +209,7 @@ beforeEach(() => {
   });
   mockSessionManager.createSession.mockReturnValue(mockSession);
   mockSessionManager.getSession.mockReturnValue(mockSession);
+  mockSessionManager.peekSession.mockReturnValue(mockSession);
   mockSessionManager.destroySession.mockReturnValue(true);
   vi.mocked(getMcpSessionManager).mockReturnValue(mockSessionManager as never);
 });
@@ -347,6 +355,28 @@ describe('POST /mcp', () => {
     expect(response.status).toBe(200);
     expect(response.headers.get(MCP_SESSION_HEADER)).toBe(mockSession.id);
     expect(mockSessionManager.createSession).toHaveBeenCalledOnce();
+  });
+
+  it('mints the session INSIDE the key’s org scope (§108 t-716)', async () => {
+    // The wiring half of the stamp. `createSession` reads the org from the
+    // tenant context rather than taking it as an argument (the mislabel rule
+    // t-714 set for `addLogEntry`), so what has to be true here is that the
+    // transport has already entered the key's org by the time it is called.
+    // The manager's own tests prove the stamp given a scope; this proves the
+    // scope. Neither alone is the property, and the manager is mocked in this
+    // file so the stamp itself is not observable here.
+    let orgAtCall: string | null | undefined;
+    mockSessionManager.createSession.mockImplementation(() => {
+      orgAtCall = getTenantContext()?.orgId ?? null;
+      return mockSession;
+    });
+
+    await POST(makePostRequest(makeRpcRequest('initialize')));
+
+    expect(orgAtCall).toBe(mockAuthContext.orgId);
+    // Not merely "some org": the key's own, and mockAuthContext.orgId is
+    // deliberately not the install org, so a fallback would read differently.
+    expect(orgAtCall).not.toBeNull();
   });
 
   it('returns 429 when max sessions exceeded on initialize', async () => {
@@ -617,6 +647,11 @@ describe('GET /mcp', () => {
     mockSessionManager.registerSseListener.mockImplementation(
       (_id: string, cb: (notification: unknown) => void) => {
         notificationCallback = cb;
+        // `true` because that is the contract since §108 t-716 — the generator
+        // closes the stream on a falsy answer. A stub returning `undefined`
+        // ended this generator before its first notification, which is the mock
+        // being unrealistic rather than the code being wrong.
+        return true;
       }
     );
 
@@ -739,6 +774,97 @@ describe('GET /mcp', () => {
 // DELETE tests
 // ─────────────────────────────────────────────────────────────────────────────
 
+describe('GET /mcp — whose stream the caller may attach to (§108 t-716)', () => {
+  // A session id is not a capability; the key is. POST and DELETE have always
+  // re-checked that a named session belongs to the authenticated key, and this
+  // path — the one that attaches a LISTENER — did not. With any valid MCP key a
+  // caller could open GET with another key's session id and receive that
+  // session's `notifications/message`, `resources/updated` and `progress`
+  // pushes, while the rightful owner silently stopped receiving them, because
+  // `sseListeners` is keyed by session id and the second registration replaces
+  // the first.
+  //
+  // Scoping who a notification is ADDRESSED to is worth nothing while the sink
+  // for an address can belong to someone else, which is why this sits in t-716
+  // rather than in a follow-up.
+
+  it('refuses another key’s session with 404 and attaches nothing', async () => {
+    vi.mocked(mockSessionManager.peekSession).mockReturnValue({
+      ...mockSession,
+      apiKeyId: 'a-different-key',
+    });
+
+    const response = await GET(makeGetRequest({ [MCP_SESSION_HEADER]: mockSession.id }));
+
+    expect(response.status).toBe(404);
+    const body = await parseJson<{ error: { code: number } }>(response);
+    expect(body.error.code).toBe(JsonRpcErrorCode.SESSION_NOT_FOUND);
+    // No STREAM was opened — asserted on `sseResponse`, not on
+    // `registerSseListener`. The first version of this test asserted the
+    // listener was not registered and could not fail: `registerSseListener`
+    // runs inside the async generator, which `sseResponse` is mocked to capture
+    // without iterating, so it is never called in a test that does not drive it
+    // by hand — including on the success path. The `no_arg_called` suppression I
+    // put on it hid exactly that.
+    expect(sseResponse).not.toHaveBeenCalled();
+    expect(capturedIterable).toBeNull();
+  });
+
+  it('refuses an unknown session the same way, so the two are indistinguishable', async () => {
+    vi.mocked(mockSessionManager.peekSession).mockReturnValue(null as never);
+
+    const foreign = await GET(makeGetRequest({ [MCP_SESSION_HEADER]: mockSession.id }));
+    const unknown = await GET(makeGetRequest({ [MCP_SESSION_HEADER]: 'no-such-session' }));
+
+    expect(foreign.status).toBe(unknown.status);
+    expect(await parseJson<{ error: { code: number } }>(foreign)).toEqual(
+      await parseJson<{ error: { code: number } }>(unknown)
+    );
+  });
+
+  it('ends the stream when the session vanished before the body was pulled', async () => {
+    // The check runs in handleGet and the registration happens later, when the
+    // platform pulls the body — so an admin terminate or the eviction sweep can
+    // land in between. The generator has to END, closing the stream so the
+    // client re-`initialize`s, rather than parking on its queue behind a
+    // keepalive that makes the connection look healthy for ever.
+    vi.mocked(mockSessionManager.peekSession).mockReturnValue(mockSession);
+    mockSessionManager.registerSseListener.mockReturnValue(false);
+
+    const response = await GET(makeGetRequest({ [MCP_SESSION_HEADER]: mockSession.id }));
+
+    expect(response.status).toBe(200);
+    const iterator = capturedIterable![Symbol.asyncIterator]();
+    expect(await iterator.next()).toEqual({ value: { type: 'connected' }, done: false });
+    // The second pull would suspend for ever if the generator ignored the
+    // failure; it returns instead.
+    expect(await iterator.next()).toMatchObject({ done: true });
+  });
+
+  it('attaches for the caller’s own session', async () => {
+    // The population check, and it has to drive the generator to be one: the
+    // refusals above would pass for free if GET never attached a listener at
+    // all, so this asserts the sink really is registered for a legitimate
+    // caller. Two `next()` calls, the same way the other GET tests reach it —
+    // the first yields `connected`, the second runs as far as
+    // `registerSseListener` and then parks on the queue.
+    vi.mocked(mockSessionManager.peekSession).mockReturnValue(mockSession);
+
+    const response = await GET(makeGetRequest({ [MCP_SESSION_HEADER]: mockSession.id }));
+
+    expect(response.status).toBe(200);
+    expect(capturedIterable).not.toBeNull();
+    const iterator = capturedIterable![Symbol.asyncIterator]();
+    await iterator.next();
+    void iterator.next();
+
+    expect(mockSessionManager.registerSseListener).toHaveBeenCalledWith(
+      mockSession.id,
+      expect.any(Function)
+    );
+  });
+});
+
 describe('DELETE /mcp', () => {
   it('returns 401 JSON-RPC error when authentication fails', async () => {
     vi.mocked(authenticateMcpRequest).mockResolvedValue(null);
@@ -761,7 +887,7 @@ describe('DELETE /mcp', () => {
   });
 
   it('returns 204 when session is successfully destroyed', async () => {
-    mockSessionManager.getSession.mockReturnValue(mockSession);
+    mockSessionManager.peekSession.mockReturnValue(mockSession);
     mockSessionManager.destroySession.mockReturnValue(true);
 
     const response = await DELETE(makeDeleteRequest({ [MCP_SESSION_HEADER]: mockSession.id }));
@@ -771,7 +897,7 @@ describe('DELETE /mcp', () => {
   });
 
   it('returns 404 when session does not exist', async () => {
-    mockSessionManager.getSession.mockReturnValue(null as never);
+    mockSessionManager.peekSession.mockReturnValue(null as never);
 
     const response = await DELETE(makeDeleteRequest({ [MCP_SESSION_HEADER]: 'unknown-session' }));
 
@@ -779,7 +905,7 @@ describe('DELETE /mcp', () => {
   });
 
   it('returns 404 JSON-RPC error when session belongs to a different api key', async () => {
-    mockSessionManager.getSession.mockReturnValue({
+    mockSessionManager.peekSession.mockReturnValue({
       ...mockSession,
       apiKeyId: 'different-key',
     });
@@ -793,7 +919,7 @@ describe('DELETE /mcp', () => {
   });
 
   it('calls logMcpAudit after session destroy', async () => {
-    mockSessionManager.getSession.mockReturnValue(mockSession);
+    mockSessionManager.peekSession.mockReturnValue(mockSession);
     mockSessionManager.destroySession.mockReturnValue(true);
 
     await DELETE(makeDeleteRequest({ [MCP_SESSION_HEADER]: mockSession.id }));
@@ -808,7 +934,7 @@ describe('DELETE /mcp', () => {
   });
 
   it('logs error audit when session not found', async () => {
-    mockSessionManager.getSession.mockReturnValue(null as never);
+    mockSessionManager.peekSession.mockReturnValue(null as never);
 
     await DELETE(makeDeleteRequest({ [MCP_SESSION_HEADER]: 'nonexistent' }));
 
@@ -821,7 +947,7 @@ describe('DELETE /mcp', () => {
   });
 
   it('does not call destroySession when session belongs to a different api key', async () => {
-    mockSessionManager.getSession.mockReturnValue({
+    mockSessionManager.peekSession.mockReturnValue({
       ...mockSession,
       apiKeyId: 'different-key',
     });
@@ -1043,7 +1169,7 @@ describe('the org the key acts for (§106, t-673)', () => {
 
   it('DELETE: the session lookup and the audit row see the key’s org', async () => {
     let seen: TenantContext | null | undefined;
-    mockSessionManager.getSession.mockImplementation(() => {
+    mockSessionManager.peekSession.mockImplementation(() => {
       seen = getTenantContext();
       return mockSession;
     });

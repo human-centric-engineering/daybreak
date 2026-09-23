@@ -20,7 +20,7 @@ vi.mock('@/lib/db/client', () => ({ prisma: {} }));
 import { McpSessionManager, createEphemeralSession } from '@/lib/orchestration/mcp/session-manager';
 import { logger } from '@/lib/logging';
 import { getTenantContext, runAsOrg } from '@/lib/tenancy/context';
-import type { JsonRpcNotification } from '@/types/mcp';
+import type { JsonRpcNotification, McpSession } from '@/types/mcp';
 
 const KEY_ID = 'api-key-abc';
 const KEY_ID_2 = 'api-key-xyz';
@@ -174,7 +174,7 @@ describe('McpSessionManager', () => {
       const b = manager.createSession(KEY_ID_2, 5)!;
       manager.subscribe(a.id, 'sunrise://agents');
       manager.subscribe(b.id, 'sunrise://agents');
-      const subscribers = manager.getSubscribers('sunrise://agents');
+      const subscribers = manager.getSubscribers('sunrise://agents', 'every-org');
       expect(subscribers.sort()).toEqual([a.id, b.id].sort());
     });
 
@@ -182,7 +182,7 @@ describe('McpSessionManager', () => {
       const s = manager.createSession(KEY_ID, 5)!;
       manager.subscribe(s.id, 'sunrise://agents');
       manager.destroySession(s.id);
-      expect(manager.getSubscribers('sunrise://agents')).toEqual([]);
+      expect(manager.getSubscribers('sunrise://agents', 'every-org')).toEqual([]);
     });
 
     it('expired session no longer appears as a subscriber', async () => {
@@ -190,7 +190,7 @@ describe('McpSessionManager', () => {
       const s = shortTtl.createSession(KEY_ID, 5)!;
       shortTtl.subscribe(s.id, 'sunrise://agents');
       await new Promise((r) => setTimeout(r, 60));
-      expect(shortTtl.getSubscribers('sunrise://agents')).toEqual([]);
+      expect(shortTtl.getSubscribers('sunrise://agents', 'every-org')).toEqual([]);
       shortTtl.destroy();
     });
   });
@@ -675,5 +675,353 @@ describe('the eviction timer’s tenant scope (§108 t-715)', () => {
     });
 
     expect(seen).toBe(ORG_A);
+  });
+});
+
+describe('whose sessions a scope can see (§108 t-716)', () => {
+  // Driven through the REAL tenant context — `runAsOrg` to mint, `runAsOrg`
+  // again to read — rather than by passing an org in. A stamp that came from
+  // anywhere but the call stack would pass a test that hands it over and fail
+  // in production, where nobody does: the transport enters
+  // `runAsOrg(auth.orgId)` and calls `createSession(apiKeyId, max)`.
+  const ORG_A = 'cmorg00000000000000000orga';
+  const ORG_B = 'cmorg00000000000000000orgb';
+  const INSTALL = 'install-org';
+
+  let mgr: McpSessionManager;
+
+  beforeEach(() => {
+    mockEnv.TENANCY_MODE = 'multi';
+    mgr = new McpSessionManager(60_000);
+  });
+
+  afterEach(() => {
+    mgr.destroy();
+    mockEnv.TENANCY_MODE = 'multi';
+  });
+
+  /** One session per org, each minted inside that org's scope. */
+  async function seed(): Promise<{ a: McpSession; b: McpSession }> {
+    const a = await runAsOrg(ORG_A, async () => mgr.createSession('key-a', 5)!);
+    const b = await runAsOrg(ORG_B, async () => mgr.createSession('key-b', 5)!);
+    return { a, b };
+  }
+
+  describe('the stamp', () => {
+    it('records the org the session was minted in', async () => {
+      const { a, b } = await seed();
+      expect(a.orgId).toBe(ORG_A);
+      expect(b.orgId).toBe(ORG_B);
+    });
+
+    it('is null for a session minted outside any scope', () => {
+      expect(mgr.createSession('key-x', 5)?.orgId).toBeNull();
+    });
+
+    it('is stamped on a stateless ephemeral session too', async () => {
+      const s = await runAsOrg(ORG_A, async () => createEphemeralSession('key-a', '2025-06-18'));
+      expect(s.orgId).toBe(ORG_A);
+    });
+  });
+
+  describe('getActiveSessions', () => {
+    it('shows each org its own sessions and nobody else’s', async () => {
+      const { a, b } = await seed();
+
+      const seenByA = await runAsOrg(ORG_A, async () => mgr.getActiveSessions().map((s) => s.id));
+      const seenByB = await runAsOrg(ORG_B, async () => mgr.getActiveSessions().map((s) => s.id));
+
+      expect(seenByA).toEqual([a.id]);
+      expect(seenByB).toEqual([b.id]);
+    });
+
+    it('keeps both in the one map — the scope is the read, not the store', async () => {
+      await seed();
+      // Proven from outside any org: the sessions are there, and it is the
+      // reading scope that narrows them. Without this the test above would
+      // also pass if `createSession` had simply stopped storing anything.
+      mockEnv.TENANCY_MODE = 'single';
+      expect(mgr.getActiveSessions()).toHaveLength(2);
+    });
+
+    it('shows a scope with no org none of them at multi', async () => {
+      await seed();
+      // A platform-admin API key enters no org in either mode. It sees only
+      // unstamped sessions, of which production makes none.
+      expect(mgr.getActiveSessions()).toEqual([]);
+    });
+
+    it('shows everything at single, including a second org’s sessions', async () => {
+      // The org API creates orgs in both modes, so a single-mode install can
+      // hold a second org whose key mints sessions stamped with it. Narrowing
+      // to the install org would hide them from a page that always showed them.
+      mockEnv.TENANCY_MODE = 'single';
+      await runAsOrg(INSTALL, async () => mgr.createSession('key-i', 5));
+      await runAsOrg(ORG_B, async () => mgr.createSession('key-b', 5));
+
+      expect(await runAsOrg(INSTALL, async () => mgr.getActiveSessions())).toHaveLength(2);
+    });
+  });
+
+  describe('destroySession', () => {
+    it('refuses another org’s session, indistinguishably from an unknown id', async () => {
+      const { a, b } = await seed();
+
+      const foreign = await runAsOrg(ORG_A, async () => mgr.destroySession(b.id));
+      const unknown = await runAsOrg(ORG_A, async () => mgr.destroySession('no-such-session'));
+
+      // Same answer for both, which is what makes the admin route's 404
+      // identical and stops an org probing for another's session ids.
+      expect(foreign).toBe(false);
+      expect(unknown).toBe(false);
+      // And B's session is still alive, not merely un-reported.
+      expect(await runAsOrg(ORG_B, async () => mgr.getSession(b.id))).not.toBeNull();
+      expect(a.id).not.toBe(b.id);
+    });
+
+    it('terminates the caller’s own session', async () => {
+      const { a } = await seed();
+      expect(await runAsOrg(ORG_A, async () => mgr.destroySession(a.id))).toBe(true);
+      expect(await runAsOrg(ORG_A, async () => mgr.getSession(a.id))).toBeNull();
+    });
+
+    it('terminates any session at single', async () => {
+      const { b } = await seed();
+      mockEnv.TENANCY_MODE = 'single';
+      expect(await runAsOrg(INSTALL, async () => mgr.destroySession(b.id))).toBe(true);
+    });
+  });
+
+  describe('getSubscribers — the audience is the caller’s to state', () => {
+    /** Both orgs subscribed to the SAME uri, which is the whole problem. */
+    async function seedSubscribers(): Promise<{ a: McpSession; b: McpSession }> {
+      const { a, b } = await seed();
+      await runAsOrg(ORG_A, async () => mgr.subscribe(a.id, 'sunrise://agents'));
+      await runAsOrg(ORG_B, async () => mgr.subscribe(b.id, 'sunrise://agents'));
+      return { a, b };
+    }
+
+    it('this-org returns only the calling org’s subscribers', async () => {
+      const { a } = await seedSubscribers();
+      expect(
+        await runAsOrg(ORG_A, async () => mgr.getSubscribers('sunrise://agents', 'this-org'))
+      ).toEqual([a.id]);
+    });
+
+    it('every-org returns both — the case a blanket filter would have broken', async () => {
+      // `McpExposedResource` is global config, so editing the ROW changes every
+      // org's definition of this URI. Narrowing here would leave every org but
+      // the editor's holding a stale definition, with nothing to tell them.
+      const { a, b } = await seedSubscribers();
+      expect(
+        (
+          await runAsOrg(ORG_A, async () => mgr.getSubscribers('sunrise://agents', 'every-org'))
+        ).sort()
+      ).toEqual([a.id, b.id].sort());
+    });
+
+    it('does not refresh a session’s activity by fanning out to it', async () => {
+      // `getSession` bumps `lastActivityAt`; a fan-out must not, or a
+      // subscribed session never expires while anyone else is mutating.
+      const shortTtl = new McpSessionManager(80);
+      const s = await runAsOrg(ORG_A, async () => shortTtl.createSession('key-a', 5)!);
+      await runAsOrg(ORG_A, async () => shortTtl.subscribe(s.id, 'sunrise://agents'));
+
+      await new Promise((r) => setTimeout(r, 50));
+      await runAsOrg(ORG_A, async () => shortTtl.getSubscribers('sunrise://agents', 'this-org'));
+      await new Promise((r) => setTimeout(r, 50));
+
+      expect(
+        await runAsOrg(ORG_A, async () => shortTtl.getSubscribers('sunrise://agents', 'this-org'))
+      ).toEqual([]);
+      shortTtl.destroy();
+    });
+
+    it('returns everything at single, whichever audience is asked', async () => {
+      mockEnv.TENANCY_MODE = 'single';
+      const { a, b } = await seedSubscribers();
+      for (const audience of ['this-org', 'every-org'] as const) {
+        expect(
+          (
+            await runAsOrg(INSTALL, async () => mgr.getSubscribers('sunrise://agents', audience))
+          ).sort()
+        ).toEqual([a.id, b.id].sort());
+      }
+    });
+  });
+
+  describe('the failure modes this change introduces', () => {
+    it('warns and reaches nobody when this-org is asked from a scope with no org', async () => {
+      // Unreachable today — every 'this-org' caller fires after a tenant-owned
+      // write, which at multi the data layer refuses with no org before any SQL.
+      // Asserted anyway because the day a 'this-org' notify is attached to a
+      // GLOBAL-config write, a platform credential CAN get there, and "nobody
+      // was told" is indistinguishable from "nothing changed".
+      const { a } = await seed();
+      await runAsOrg(ORG_A, async () => mgr.subscribe(a.id, 'sunrise://agents'));
+
+      const recipients = mgr.getSubscribers('sunrise://agents', 'this-org');
+
+      expect(recipients).toEqual([]);
+      expect(logger.warn).toHaveBeenCalledWith(
+        'MCP resource fan-out asked for this-org from a scope with no org',
+        { uri: 'sunrise://agents' }
+      );
+    });
+
+    it('cuts the push channel when a session is terminated', async () => {
+      // Otherwise terminate does not terminate: `sseListeners` is what
+      // broadcastNotification enumerates, so a force-terminated client's open
+      // stream would keep receiving every list_changed ping.
+      const { a } = await seed();
+      const sink = vi.fn();
+      await runAsOrg(ORG_A, async () => mgr.registerSseListener(a.id, sink));
+
+      // Population check — it really was a recipient first.
+      mgr.broadcastNotification({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' });
+      expect(sink).toHaveBeenCalledTimes(1);
+
+      await runAsOrg(ORG_A, async () => mgr.destroySession(a.id));
+      mgr.broadcastNotification({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' });
+
+      expect(sink).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses to attach a sink to a session that no longer exists', async () => {
+      // The route verifies ownership and then RETURNS a Response; the generator
+      // that calls registerSseListener runs later, when the platform pulls the
+      // body. A session destroyed in between would otherwise leave a sink with
+      // no session — and broadcastNotification with no targets enumerates the
+      // sinks, not the sessions, so that zombie would receive every
+      // list_changed ping for the life of the connection.
+      const { a } = await seed();
+      await runAsOrg(ORG_A, async () => mgr.destroySession(a.id));
+
+      const sink = vi.fn();
+      mgr.registerSseListener(a.id, sink);
+      mgr.broadcastNotification({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' });
+
+      expect(sink).not.toHaveBeenCalled();
+    });
+
+    it('refuses to attach a sink to an EXPIRED session', async () => {
+      const shortTtl = new McpSessionManager(40);
+      const s = await runAsOrg(ORG_A, async () => shortTtl.createSession('key-a', 5)!);
+      await new Promise((r) => setTimeout(r, 60));
+
+      const sink = vi.fn();
+      shortTtl.registerSseListener(s.id, sink);
+      shortTtl.broadcastNotification({
+        jsonrpc: '2.0',
+        method: 'notifications/tools/list_changed',
+      });
+
+      expect(sink).not.toHaveBeenCalled();
+      shortTtl.destroy();
+    });
+
+    it('still attaches for a live session — so the refusals above are not vacuous', async () => {
+      const { a } = await seed();
+      const sink = vi.fn();
+
+      mgr.registerSseListener(a.id, sink);
+      mgr.broadcastNotification({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' });
+
+      expect(sink).toHaveBeenCalledTimes(1);
+    });
+
+    it('cuts the push channel on the LAZY expiry path too', async () => {
+      // The third way a session is forgotten, and the one that was incomplete:
+      // getSession's inline TTL check used to delete only the session row. Since
+      // evictExpired iterates `sessions`, once the lazy path had removed the row
+      // the sweep could never reach that id again — so the sink was orphaned for
+      // the life of the connection and kept receiving every list_changed ping.
+      const shortTtl = new McpSessionManager(40);
+      const s = await runAsOrg(ORG_A, async () => shortTtl.createSession('key-a', 5)!);
+      await runAsOrg(ORG_A, async () => shortTtl.subscribe(s.id, 'sunrise://agents'));
+      const sink = vi.fn();
+      shortTtl.registerSseListener(s.id, sink);
+
+      shortTtl.broadcastNotification({
+        jsonrpc: '2.0',
+        method: 'notifications/tools/list_changed',
+      });
+      expect(sink).toHaveBeenCalledTimes(1);
+
+      await new Promise((r) => setTimeout(r, 60));
+      // The lazy path ONLY — no evictExpired, no destroySession.
+      expect(shortTtl.getSession(s.id)).toBeNull();
+
+      shortTtl.broadcastNotification({
+        jsonrpc: '2.0',
+        method: 'notifications/tools/list_changed',
+      });
+      expect(sink).toHaveBeenCalledTimes(1);
+      // And the subscription, which the class docblock has always claimed is
+      // "cleared with the session on destroy / expiry".
+      expect(
+        await runAsOrg(ORG_A, async () => shortTtl.getSubscribers('sunrise://agents', 'this-org'))
+      ).toEqual([]);
+      shortTtl.destroy();
+    });
+
+    it('peekSession answers without extending the session it was asked about', async () => {
+      // An ownership check whose answer may be "refuse" must not refresh the
+      // session as a side effect, or polling with someone else's id keeps that
+      // session alive for ever — at multi, one org holding another org's open.
+      const shortTtl = new McpSessionManager(80);
+      const s = await runAsOrg(ORG_A, async () => shortTtl.createSession('key-a', 5)!);
+
+      await new Promise((r) => setTimeout(r, 50));
+      expect(shortTtl.peekSession(s.id)).not.toBeNull();
+      await new Promise((r) => setTimeout(r, 50));
+
+      // getSession would have bumped it at the 50ms mark and kept it alive.
+      expect(shortTtl.peekSession(s.id)).toBeNull();
+      shortTtl.destroy();
+    });
+
+    it('cuts the push channel when a session is evicted', async () => {
+      const shortTtl = new McpSessionManager(40);
+      const s = await runAsOrg(ORG_A, async () => shortTtl.createSession('key-a', 5)!);
+      const sink = vi.fn();
+      shortTtl.registerSseListener(s.id, sink);
+
+      shortTtl.broadcastNotification({
+        jsonrpc: '2.0',
+        method: 'notifications/tools/list_changed',
+      });
+      expect(sink).toHaveBeenCalledTimes(1);
+
+      await new Promise((r) => setTimeout(r, 60));
+      (shortTtl as unknown as { evictExpired: () => void }).evictExpired();
+      shortTtl.broadcastNotification({
+        jsonrpc: '2.0',
+        method: 'notifications/tools/list_changed',
+      });
+
+      expect(sink).toHaveBeenCalledTimes(1);
+      shortTtl.destroy();
+    });
+  });
+
+  describe('what is deliberately not scoped', () => {
+    it('getActiveSessionCount counts one key’s sessions from any scope', async () => {
+      // A key belongs to one org, so this cannot cross orgs — and filtering it
+      // would make `maxSessionsPerKey` silently unenforceable from a scope that
+      // is not the key's.
+      await runAsOrg(ORG_A, async () => mgr.createSession('key-a', 5));
+      await runAsOrg(ORG_A, async () => mgr.createSession('key-a', 5));
+
+      expect(await runAsOrg(ORG_B, async () => mgr.getActiveSessionCount('key-a'))).toBe(2);
+    });
+
+    it('getSession answers across orgs, because the transport checks the key', async () => {
+      // The stronger check lives in the route: a session whose `apiKeyId` is
+      // not the authenticated key's is refused there, at all three places the transport accepts an Mcp-Session-Id. An
+      // org filter here would guard a state no caller can reach.
+      const { b } = await seed();
+      expect(await runAsOrg(ORG_A, async () => mgr.getSession(b.id)?.apiKeyId)).toBe('key-b');
+    });
   });
 });
