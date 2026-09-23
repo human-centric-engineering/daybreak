@@ -28,6 +28,12 @@
  * org (see {@link requireTenantContext}) and at `multi` refuses, so it
  * fails loud rather than reads wide.
  *
+ * **And what belongs to the process rather than to one org has to leave.** The
+ * store propagates into `setInterval`, so a process-lifetime timer armed inside
+ * a request would keep that request's org for ever — {@link runDetached} is how
+ * such a timer is armed (§108 t-715). A timer belonging to one org's work is the
+ * other case and keeps its scope, however long it outlives the request.
+ *
  * **At `single` the install org is the only answer.** A single-tenant install
  * runs exactly the same components (design record, request-path diagram);
  * the difference is that "nothing entered a context" resolves to the install
@@ -216,6 +222,49 @@ export function runAsSystem<T>(reason: string, fn: () => Promise<T>): Promise<T>
 export function runAsCredentialLookup<T>(credential: string, fn: () => Promise<T>): Promise<T> {
   logger.debug('Entering system tenant scope for a credential lookup', { credential });
   return tenantContext.run({ orgId: null, source: 'system' }, () => settleInside(fn));
+}
+
+/**
+ * Run `fn` outside every tenant scope, whatever the caller is inside.
+ *
+ * **For arming something whose lifetime is the PROCESS's from inside a
+ * request** (§108 t-715). An `AsyncLocalStorage` store is captured when
+ * `setInterval` is *called*, not when the callback fires, so a repeating timer
+ * armed inside `runAsOrg` carries that one org for the life of the process:
+ * every line it logs is attributed to whichever org happened to make the first
+ * request after boot, and at `multi` every query it makes is scoped to them.
+ * Lazily constructed singletons are where this bites, and they are lazy on
+ * purpose — a registry filled at boot is empty in the realm that reads it
+ * (`platform.seam-realm`), so "construct it eagerly" is not the fix. Arming
+ * inside `exit()` is: the callback body needs no change.
+ *
+ * **Not {@link runAsSystem}**, which is the nearest thing that already
+ * existed. That one logs its reason at `info` on every entry — once every few
+ * minutes, for the life of the process — and, more importantly, it is the
+ * *audited database bypass*: at `multi` it sets `app.bypass_rls`, which is a
+ * claim about what the code may read. Arming a timer is not making that claim.
+ * This enters no scope at all, so a detached callback that needs an org gets
+ * the same refusal as any other path nobody taught to enter one
+ * ({@link requireTenantContext} throws at `multi`) rather than silently
+ * reading every org's rows.
+ *
+ * **Detach only what the PROCESS outlives its work by.** A timer belonging to
+ * one unit of work — an execution's lease heartbeat, a webhook delivery retry,
+ * an abort timer for one fetch — must KEEP the context it was armed in: its
+ * callback writes that org's rows, and detaching it would break the write
+ * rather than fix an attribution. Note that "outlives the request" is NOT the
+ * test, though it is the tempting one: a delivery retry is armed inside a
+ * request and fires a minute after the response, and it still belongs to that
+ * org. The question is whether the timer's work belongs to one org at all, or
+ * to the process.
+ *
+ * Synchronous and unawaited, unlike the scope-entering runners above: its
+ * callers arm timers rather than run queries. A detached *query* is a
+ * different request — the audited bypass — so reach for {@link runAsSystem}
+ * there and let it be logged.
+ */
+export function runDetached<T>(fn: () => T): T {
+  return tenantContext.exit(fn);
 }
 
 /**

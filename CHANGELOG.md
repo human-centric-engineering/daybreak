@@ -18,6 +18,24 @@ release process.
 
 ### Added
 
+- **`runDetached(fn)` on `lib/tenancy/context.ts`** (multi-tenancy §108 t-715)
+  — runs `fn` outside every tenant scope, for arming something whose lifetime
+  is the **process's** from inside a request. An `AsyncLocalStorage` store is
+  captured when `setInterval` is called, so a repeating timer armed inside
+  `runAsOrg` carries that org for the life of the process: every line it logs
+  is attributed to whichever org made the first request after boot, and at
+  `multi` every query it makes is scoped to them. `McpSessionManager`'s
+  eviction sweep is armed through it, so its "evicted expired sessions" lines
+  are now unstamped rather than one arbitrary org's — a line only
+  `MCP_SESSION_MODE=stateful` produces, since `stateless` (the default) stores
+  no session for the sweep to find. **Use it only where the timer's
+  work belongs to the process rather than to one org** — a timer belonging to
+  one org's work (a lease heartbeat, a delivery retry, a `fetch` abort) must
+  KEEP the context it was armed in, because its callback writes that org's rows.
+  "Outlives the request" is not the test: a delivery retry does, and it still
+  belongs to the org that armed it. Nor is this `runAsSystem`, which logs a
+  reason on every entry and is the audited database bypass — a claim about what
+  the code may read that arming a timer is not making.
 - **`registerLogTenancy(bridge)` and the `LogTenancy` type on
   `lib/admin/logs.ts`** (multi-tenancy §108 t-714) — how the admin log buffer
   learns which org a line was produced in, and whether the install runs more
@@ -373,8 +391,8 @@ release process.
   behind `GET /api/v1/admin/logs` — filters to the reader's org and counts
   `total` after that filter. The buffer itself is unchanged: one process-wide
   ring, scoped at the query. An entry produced outside any tenant scope (boot,
-  a `runAsSystem` job, or a request on a platform credential, which carries no
-  org in either mode) is stamped `null`. **The scope rule applies at `multi`
+  a `runAsSystem` job, a request on a platform credential, which carries no org
+  in either mode, or a timer armed through `runDetached`) is stamped `null`. **The scope rule applies at `multi`
   only**: at `single` the page shows the process's lines exactly as it always
   has, so a single-tenant install is unchanged. At `multi` an unstamped entry
   is visible only to a reader who is also outside an org, and an org admin
