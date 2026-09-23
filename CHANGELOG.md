@@ -18,6 +18,17 @@ release process.
 
 ### Added
 
+- **`registerLogTenancy(bridge)` and the `LogTenancy` type on
+  `lib/admin/logs.ts`** (multi-tenancy §108 t-714) — how the admin log buffer
+  learns which org a line was produced in, and whether the install runs more
+  than one. `lib/tenancy/context.ts` registers it at module scope; nothing else
+  needs to call it. It exists as a registration rather than an import because
+  `lib/admin/logs.ts` must reach no other module at runtime: the logger pulls
+  it in with a literal `require` and is itself imported by client components,
+  so an import here puts `lib/db/client.ts` — and `pg` — in the browser
+  bundle. **Forks:** a test that does `vi.mock('@/lib/admin/logs', …)` must now
+  return `registerLogTenancy`, or importing anything that loads the tenancy
+  module throws.
 - **Each org can set its own retention windows** (multi-tenancy §108 t-713).
   `PATCH /api/v1/admin/orgs/[id]` takes
   `settings: { retention: { … } }` — the five windows the tenant retention
@@ -356,6 +367,20 @@ release process.
 
 ### Changed
 
+- **The admin Logs page shows only the reading org's lines** (multi-tenancy
+  §108 t-714). `LogEntry` (`types/admin.ts`) gains `orgId?: string | null`,
+  stamped by `addLogEntry` from the tenant context, and `getLogEntries` —
+  behind `GET /api/v1/admin/logs` — filters to the reader's org and counts
+  `total` after that filter. The buffer itself is unchanged: one process-wide
+  ring, scoped at the query. An entry produced outside any tenant scope (boot,
+  a `runAsSystem` job, or a request on a platform credential, which carries no
+  org in either mode) is stamped `null`. **The scope rule applies at `multi`
+  only**: at `single` the page shows the process's lines exactly as it always
+  has, so a single-tenant install is unchanged. At `multi` an unstamped entry
+  is visible only to a reader who is also outside an org, and an org admin
+  never sees another org's lines —
+  which they previously did, messages, `context` and `meta`, searchable. A
+  platform operator has no cross-org view through this page until §111.
 - **Both org reads now carry the org's settings** (multi-tenancy §108 t-713).
   `GET /api/v1/admin/orgs/[id]` returns the whole `Org.settings` column, and
   `createOrg` / `updateOrg` return it on `OrgRecord`. `GET /api/v1/orgs/[id]`
