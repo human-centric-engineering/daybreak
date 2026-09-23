@@ -7,6 +7,11 @@
  * rows, admin audit log rows, workflow-execution history, evaluation
  * history, and MCP audit-log rows based on global settings.
  *
+ * **Each org may set its own windows** (§108 t-713). The global row is the
+ * default; an org's `settings.retention` slice overrides it per key — a key
+ * absent from the slice inherits, an explicit `null` keeps that class forever
+ * for that org. See {@link loadEffectiveRetentionWindows}.
+ *
  * Agents with `retentionDays = null` keep conversations forever.
  * Settings with `webhookRetentionDays`, `costLogRetentionDays`,
  * `auditLogRetentionDays`, `executionRetentionDays`, or
@@ -31,6 +36,18 @@
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { getMcpServerConfig } from '@/lib/orchestration/mcp/config';
+import {
+  loadEffectiveRetentionWindows,
+  type RetentionWindows,
+} from '@/lib/orchestration/retention-windows';
+
+export {
+  loadEffectiveRetentionWindows,
+  loadRetentionWindows,
+  readRetentionWindows,
+  RETENTION_WINDOW_KEYS,
+  type RetentionWindows,
+} from '@/lib/orchestration/retention-windows';
 
 export interface RetentionResult {
   /** Number of conversations deleted. */
@@ -62,7 +79,7 @@ export interface SystemRetentionResult {
 /**
  * Enforce retention policies for all agents that have `retentionDays` set,
  * then prune old webhook deliveries, cost logs, executions and evaluation
- * history per global settings.
+ * history per the effective windows of the org this run is for.
  *
  * For each agent, deletes conversations whose `updatedAt` is older than
  * `now - retentionDays`. Cascade deletes handle messages, embeddings,
@@ -101,18 +118,22 @@ export async function enforceRetentionPolicies(): Promise<RetentionResult> {
     }
   }
 
-  // One settings read per sweep. Each prune below would otherwise fetch the
-  // same singleton row again — eight round-trips for six columns (#442).
-  // Passing the windows explicitly is what makes them stop. At `multi` the
-  // sweep itself runs once per org (§108), so this read — and the coherence
-  // warning under it — repeat per org: the windows are global, so every org
-  // reads the same row and any warning says the same thing N times. Hoisting
-  // them above the iteration would mean passing them through the job
-  // registry, which is a wider seam change than one indexed singleton read an
-  // hour is worth.
-  const windows = await loadRetentionWindows();
+  // Two settings reads per sweep — the global row and this org's slice. Each
+  // prune below would otherwise fetch the singleton again, eight round-trips
+  // for six columns (#442); passing the windows explicitly is what makes them
+  // stop. The reads repeat per org because the answer now differs per org, so
+  // hoisting them above the iteration is no longer even correct, never mind
+  // worth a seam change.
+  const { windows, orgId, overrides } = await loadEffectiveRetentionWindows();
 
-  warnOnIncoherentRetention(windows);
+  if (overrides.length > 0) {
+    // The only place an org's stored slice becomes visible as behaviour. A
+    // window written and never read again would be indistinguishable from one
+    // that was never written (HB9).
+    logger.info('Retention windows overridden for org', { orgId, windows: overrides });
+  }
+
+  warnOnIncoherentRetention(windows, orgId);
 
   const webhookResult = await pruneWebhookDeliveries(
     windows.webhookRetentionDays,
@@ -419,85 +440,35 @@ export async function pruneMcpAuditLogs(maxAgeDays?: number): Promise<PruneResul
  *
  * `AiWorkflowExecution.totalCostUsd` is a scalar column, so it outlives the
  * `AiCostLog` rows behind it: prune the logs first and an execution keeps
- * reporting spend while its breakdown reads empty. The settings route rejects
- * the combination at write time, but installs configured before that check
- * existed stay silently in this state — nobody re-saves settings to find out.
+ * reporting spend while its breakdown reads empty. Both write paths reject the
+ * combination — the settings route on the global row, the admin org route on
+ * an org's effective pair — but installs configured before those checks
+ * existed stay silently in this state, and an org's stored slice can be made
+ * incoherent later by a change to the global row it inherits the other half
+ * from. Nobody re-saves settings to find out.
  *
- * Reads nothing itself — the sweep's single `loadRetentionWindows()` already has
- * both values, and a failed read arrives here as `null`, which is silence.
+ * Runs on the EFFECTIVE windows, inside the org's own run of the sweep, so
+ * the org it names is the org whose combination is wrong (§108 t-713).
+ *
+ * Reads nothing itself — the sweep's `loadEffectiveRetentionWindows()` already
+ * has both values, and a read it could not make arrives here as `null`, which
+ * is silence.
  */
-function warnOnIncoherentRetention(windows: RetentionWindows): void {
+function warnOnIncoherentRetention(windows: RetentionWindows, orgId: string | null): void {
   const costLogDays = windows.costLogRetentionDays;
   const executionDays = windows.executionRetentionDays;
-  // Either window unset means that class isn't pruned at all — no coupling.
-  if (costLogDays === null || executionDays === null) return;
-  if (costLogDays >= executionDays) return;
+  // Cost logs kept for ever outlive anything, so that is the only unset window
+  // that means "no coupling". Executions kept for ever are the opposite: they
+  // outlive every finite cost-log window, and reading BOTH nulls as safe — as
+  // this did until §108 t-713's third review round — stayed silent on one of
+  // the two states it was written to report.
+  if (costLogDays === null) return;
+  if (executionDays !== null && costLogDays >= executionDays) return;
 
   logger.warn(
     'Retention windows are incoherent: cost logs are pruned before the executions that reference them, so cost breakdowns will read empty for executions still on file',
-    { costLogRetentionDays: costLogDays, executionRetentionDays: executionDays }
+    { orgId, costLogRetentionDays: costLogDays, executionRetentionDays: executionDays }
   );
-}
-
-/**
- * The global retention windows the TENANT sweep needs, in days. `null` = that
- * class is never pruned.
- *
- * `auditLogRetentionDays` is deliberately absent: the admin audit log moved to
- * {@link enforceSystemRetentionPolicies} (§108), so selecting it here would
- * read a column this sweep never uses.
- */
-export interface RetentionWindows {
-  webhookRetentionDays: number | null;
-  webhookDlqRetentionDays: number | null;
-  costLogRetentionDays: number | null;
-  executionRetentionDays: number | null;
-  evaluationRetentionDays: number | null;
-}
-
-const NO_RETENTION_WINDOWS: RetentionWindows = {
-  webhookRetentionDays: null,
-  webhookDlqRetentionDays: null,
-  costLogRetentionDays: null,
-  executionRetentionDays: null,
-  evaluationRetentionDays: null,
-};
-
-/**
- * Read all six retention windows in **one** query.
- *
- * `resolveRetentionDays` reads the same singleton row once per prune, which cost
- * a sweep seven or eight round-trips to fetch a handful of columns (#442). This is a
- * hoist, not a cache: every prune already takes an explicit window as its first
- * parameter, the sweep just never passed one.
- *
- * Read failures degrade to "no windows configured", matching
- * `resolveRetentionDays`' swallow-on-error contract — a transient settings-read
- * failure skips the prunes rather than throwing out of the sweep.
- */
-export async function loadRetentionWindows(): Promise<RetentionWindows> {
-  try {
-    const row = await prisma.aiOrchestrationSettings.findUnique({
-      where: { slug: 'global' },
-      select: {
-        webhookRetentionDays: true,
-        webhookDlqRetentionDays: true,
-        costLogRetentionDays: true,
-        executionRetentionDays: true,
-        evaluationRetentionDays: true,
-      },
-    });
-    if (!row) return NO_RETENTION_WINDOWS;
-    return {
-      webhookRetentionDays: row.webhookRetentionDays ?? null,
-      webhookDlqRetentionDays: row.webhookDlqRetentionDays ?? null,
-      costLogRetentionDays: row.costLogRetentionDays ?? null,
-      executionRetentionDays: row.executionRetentionDays ?? null,
-      evaluationRetentionDays: row.evaluationRetentionDays ?? null,
-    };
-  } catch {
-    return NO_RETENTION_WINDOWS;
-  }
 }
 
 /** Read a named retention column from the singleton settings row. */

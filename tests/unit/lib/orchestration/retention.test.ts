@@ -4,7 +4,7 @@
  * @see lib/orchestration/retention.ts
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -43,8 +43,16 @@ vi.mock('@/lib/db/client', () => ({
     aiOrchestrationSettings: {
       findUnique: vi.fn(),
     },
+    org: {
+      findUnique: vi.fn(),
+    },
   },
 }));
+
+// `TENANCY_MODE` is the only env field this module's graph reads (through
+// `lib/tenancy/context.ts`), so a one-field stand-in is complete.
+const mockEnv = vi.hoisted(() => ({ TENANCY_MODE: 'multi' }));
+vi.mock('@/lib/env', () => ({ env: mockEnv }));
 
 vi.mock('@/lib/logging', () => ({
   logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() },
@@ -69,7 +77,10 @@ import {
   pruneExecutions,
   pruneEvaluationData,
   pruneMcpAuditLogs,
+  RETENTION_WINDOW_KEYS,
 } from '@/lib/orchestration/retention';
+import { runAsOrg } from '@/lib/tenancy/context';
+import { ORG_RETENTION_KEYS } from '@/lib/validations/tenancy';
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
@@ -989,7 +1000,9 @@ describe('retention coherence warning', () => {
 
     expect(logger.warn).toHaveBeenCalledWith(
       expect.stringContaining('Retention windows are incoherent'),
-      { costLogRetentionDays: 30, executionRetentionDays: 90 }
+      // `orgId: null` is this sweep running outside any tenant context; the
+      // per-org case is in the effective-windows suite.
+      { orgId: null, costLogRetentionDays: 30, executionRetentionDays: 90 }
     );
   });
 
@@ -1015,10 +1028,32 @@ describe('retention coherence warning', () => {
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
-  it('stays quiet when execution retention is unset (executions are never pruned)', async () => {
+  it('warns LOUDEST when execution retention is unset — the parenthesis in this test’s old name had it backwards', async () => {
+    // This case used to assert silence, on the reading that an unset window
+    // means "that class isn't pruned, so there is no coupling". That is true
+    // of the cost-log side and false of this one: executions never pruned are
+    // executions kept FOR EVER, which outlives every finite cost-log window.
+    // Cost logs go at 7 days, the executions referencing them stay on file
+    // indefinitely, and every one of them reports spend with an empty
+    // breakdown — the exact state the warning describes.
     vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue({
       costLogRetentionDays: 7,
       executionRetentionDays: null,
+    } as never);
+
+    await enforceRetentionPolicies();
+
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Retention windows are incoherent'),
+      { orgId: null, costLogRetentionDays: 7, executionRetentionDays: null }
+    );
+  });
+
+  it('stays quiet when cost logs are kept for ever, whatever the execution window', async () => {
+    // The genuinely uncoupled null: cost logs outlive anything.
+    vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue({
+      costLogRetentionDays: null,
+      executionRetentionDays: 90,
     } as never);
 
     await enforceRetentionPolicies();
@@ -1032,5 +1067,199 @@ describe('retention coherence warning', () => {
     );
 
     await expect(enforceRetentionPolicies()).resolves.toBeDefined();
+  });
+});
+
+// ─── Per-org windows (§108 t-713) ───────────────────────────────────────────
+
+describe('the effective retention windows of one org', () => {
+  const ORG_A = 'cmorg00000000000000000orga';
+  const ORG_B = 'cmorg00000000000000000orgb';
+  const NOW = new Date('2026-09-22T12:00:00.000Z');
+
+  /** The cutoff a window of `days` produces at the pinned clock. */
+  const cutoff = (days: number) => new Date(NOW.getTime() - days * 24 * 60 * 60 * 1000);
+
+  /** Every `createdAt.lt` the execution prune was asked for, in call order. */
+  function executionCutoffs(): unknown[] {
+    return vi
+      .mocked(prisma.aiWorkflowExecution.deleteMany)
+      .mock.calls.map(
+        (call) => (call[0] as { where: { createdAt: { lt: Date } } }).where.createdAt.lt
+      );
+  }
+
+  /** Run the sweep the way the job runner does: inside one org's scope. */
+  const sweepAs = (orgId: string) => runAsOrg(orgId, () => enforceRetentionPolicies());
+
+  /** The org rows the sweep's `findUnique` will answer with. */
+  function orgSettings(settings: Record<string, Record<string, unknown>> | null): void {
+    vi.mocked(prisma.org.findUnique).mockImplementation(((args: { where: { id: string } }) =>
+      Promise.resolve(
+        settings === null ? null : { settings: settings[args.where.id] ?? null }
+      )) as never);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+    mockEnv.TENANCY_MODE = 'multi';
+
+    vi.mocked(prisma.aiAgent.findMany).mockResolvedValue([]);
+    vi.mocked(prisma.aiWebhookDelivery.deleteMany).mockResolvedValue({ count: 0 });
+    vi.mocked(prisma.aiEventHookDelivery.deleteMany).mockResolvedValue({ count: 0 });
+    vi.mocked(prisma.aiCostLog.deleteMany).mockResolvedValue({ count: 0 });
+    vi.mocked(prisma.aiWorkflowExecution.deleteMany).mockResolvedValue({ count: 0 });
+    vi.mocked(prisma.aiEvaluationSession.deleteMany).mockResolvedValue({ count: 0 });
+    vi.mocked(prisma.aiEvaluationRun.deleteMany).mockResolvedValue({ count: 0 });
+
+    // The platform's defaults, which org B will inherit whole.
+    vi.mocked(prisma.aiOrchestrationSettings.findUnique).mockResolvedValue({
+      webhookRetentionDays: 30,
+      webhookDlqRetentionDays: null,
+      costLogRetentionDays: 365,
+      executionRetentionDays: 90,
+      evaluationRetentionDays: 90,
+    } as never);
+
+    orgSettings({});
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('prunes each org on its own window — the slice for one, the global row for the next', async () => {
+    orgSettings({ [ORG_A]: { retention: { executionRetentionDays: 7 } } });
+
+    await sweepAs(ORG_A);
+    await sweepAs(ORG_B);
+
+    expect(executionCutoffs()).toEqual([cutoff(7), cutoff(90)]);
+    expect(prisma.org.findUnique).toHaveBeenCalledWith({
+      where: { id: ORG_A },
+      select: { settings: true },
+    });
+  });
+
+  it('keeps a class forever for the org that asked, while another org still prunes it', async () => {
+    orgSettings({ [ORG_A]: { retention: { executionRetentionDays: null } } });
+
+    await sweepAs(ORG_A);
+    expect(prisma.aiWorkflowExecution.deleteMany).not.toHaveBeenCalled();
+
+    await sweepAs(ORG_B);
+    expect(executionCutoffs()).toEqual([cutoff(90)]);
+  });
+
+  it('inherits every window the slice does not name', async () => {
+    orgSettings({ [ORG_A]: { retention: { executionRetentionDays: 7 } } });
+
+    await sweepAs(ORG_A);
+
+    // Named: 7. Unnamed: the global 90, not "unset" and not the named value.
+    expect(executionCutoffs()).toEqual([cutoff(7)]);
+    expect(prisma.aiEvaluationRun.deleteMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ createdAt: { lt: cutoff(90) } }) })
+    );
+  });
+
+  it('inherits a window whose stored value cannot be read, and says which', async () => {
+    orgSettings({
+      [ORG_A]: { retention: { executionRetentionDays: 'thirty', evaluationRetentionDays: 7 } },
+    });
+
+    await sweepAs(ORG_A);
+
+    expect(executionCutoffs()).toEqual([cutoff(90)]);
+    expect(prisma.aiEvaluationRun.deleteMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ createdAt: { lt: cutoff(7) } }) })
+    );
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('malformed'),
+      expect.objectContaining({ orgId: ORG_A, keys: ['executionRetentionDays'] })
+    );
+  });
+
+  it('skips every prune when the org read fails, rather than pruning on the global windows', async () => {
+    // Falling back would delete on a window this org had explicitly rejected,
+    // and deletion does not come back.
+    vi.mocked(prisma.org.findUnique).mockRejectedValue(new Error('db unavailable'));
+
+    await expect(sweepAs(ORG_A)).resolves.toBeDefined();
+
+    expect(prisma.aiWorkflowExecution.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.aiCostLog.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.aiWebhookDelivery.deleteMany).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('retention windows'),
+      expect.objectContaining({ orgId: ORG_A })
+    );
+  });
+
+  it('reports which windows the org overrode, so the write is visible as behaviour', async () => {
+    orgSettings({
+      [ORG_A]: { retention: { executionRetentionDays: 7, webhookRetentionDays: null } },
+    });
+
+    await sweepAs(ORG_A);
+
+    expect(logger.info).toHaveBeenCalledWith('Retention windows overridden for org', {
+      orgId: ORG_A,
+      windows: expect.arrayContaining(['executionRetentionDays', 'webhookRetentionDays']),
+    });
+  });
+
+  it('gives an org its own DLQ window', async () => {
+    orgSettings({ [ORG_A]: { retention: { webhookDlqRetentionDays: 60 } } });
+
+    await sweepAs(ORG_A);
+
+    const calls = vi
+      .mocked(prisma.aiWebhookDelivery.deleteMany)
+      .mock.calls.map((call) => call[0] as { where: { createdAt: { lt: Date }; status: unknown } });
+    expect(calls.map((call) => call.where.createdAt.lt)).toEqual([cutoff(30), cutoff(60)]);
+  });
+
+  it('prunes an org’s DLQ on its webhook window when the DLQ window is null — NOT forever', async () => {
+    // The exception to "null keeps that class forever". `pruneWebhookDeliveries`
+    // reads a null DLQ window as "use webhookRetentionDays" — the fallback that
+    // preserved pre-DLQ behaviour — so nulling it shortens the DLQ to the
+    // webhook window rather than keeping it. The docs say so because this test
+    // says so.
+    orgSettings({
+      [ORG_A]: { retention: { webhookRetentionDays: 7, webhookDlqRetentionDays: null } },
+    });
+
+    await sweepAs(ORG_A);
+
+    const calls = vi
+      .mocked(prisma.aiWebhookDelivery.deleteMany)
+      .mock.calls.map((call) => call[0] as { where: { createdAt: { lt: Date } } });
+    expect(calls.map((call) => call.where.createdAt.lt)).toEqual([cutoff(7), cutoff(7)]);
+  });
+
+  it('names the org whose effective pair is incoherent, not the global row', async () => {
+    // Coherent globally (365 ≥ 90). The org shortens only the cost-log side,
+    // and inherits the execution window it now undercuts.
+    orgSettings({ [ORG_A]: { retention: { costLogRetentionDays: 30 } } });
+
+    await sweepAs(ORG_A);
+    await sweepAs(ORG_B);
+
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+    expect(logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Retention windows are incoherent'),
+      { orgId: ORG_A, costLogRetentionDays: 30, executionRetentionDays: 90 }
+    );
+  });
+});
+
+describe('the slice and the sweep name the same windows', () => {
+  it('has an org-settable key for every window the sweep reads', () => {
+    // A window added to the global row and not to the slice would be one no
+    // org could ever override, and nothing else would say so.
+    expect([...RETENTION_WINDOW_KEYS].sort()).toEqual([...ORG_RETENTION_KEYS].sort());
   });
 });

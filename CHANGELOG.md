@@ -18,6 +18,37 @@ release process.
 
 ### Added
 
+- **Each org can set its own retention windows** (multi-tenancy §108 t-713).
+  `PATCH /api/v1/admin/orgs/[id]` takes
+  `settings: { retention: { … } }` — the five windows the tenant retention
+  sweep reads (`webhookRetentionDays`, `webhookDlqRetentionDays`,
+  `costLogRetentionDays`, `executionRetentionDays`, `evaluationRetentionDays`),
+  each optional and nullable, stored on `Org.settings`. A key omitted inherits
+  the global `AiOrchestrationSettings` window; `null` carries whatever `null`
+  means for that column globally (keep forever, except
+  `webhookDlqRetentionDays`, whose existing fallback is "use
+  `webhookRetentionDays`"); `{ "retention": null }` or `{}` removes the slice.
+  A slice is stored and returned in both tenancy modes but **applied at
+  `multi` only** — no prune carries an `orgId`, so at `single`, where there are
+  no policies, one org's window would reach every org's rows. The write refuses
+  a slice whose **effective** cost-log window is shorter than the execution
+  window it would inherit, `executionRetentionDays: null` included: executions
+  kept for ever outlive every finite cost-log window, so keeping them needs
+  `costLogRetentionDays: null` with it. The write replaces
+  the `retention` key and preserves every other key in `settings`, which is a
+  fork's. `auditLogRetentionDays` is deliberately not settable: it prunes a
+  system table with no org. Both objects are strict, and an org's slice is
+  refused when the cost-log window it sets undercuts the execution window it
+  would inherit. Platform admin only until the org console (§111). Two new
+  modules — `lib/tenancy/org-settings.ts` (the slice: its schema, the
+  per-key read and the write-merge) and
+  `lib/orchestration/retention-windows.ts` (`loadRetentionWindows`, the new
+  `loadEffectiveRetentionWindows()`, `readRetentionWindows()` and
+  `RETENTION_WINDOW_KEYS`, moved out of `lib/orchestration/retention.ts`,
+  which re-exports them). `readRetentionWindows()` is `loadRetentionWindows()`
+  without the swallow-on-error, for callers that must not read "I could not
+  look" as "there is nothing to check". See
+  `.context/orchestration/retention.md`.
 - **A fork's recurring job declares whose rows it acts on** (multi-tenancy
   §108 t-711). `AppJob` (`lib/orchestration/maintenance/app-jobs.ts`, the
   `registerAppJob` seam) gains an optional `scope?: JobScope` —
@@ -325,6 +356,18 @@ release process.
 
 ### Changed
 
+- **Both org reads now carry the org's settings** (multi-tenancy §108 t-713).
+  `GET /api/v1/admin/orgs/[id]` returns the whole `Org.settings` column, and
+  `createOrg` / `updateOrg` return it on `OrgRecord`. `GET /api/v1/orgs/[id]`
+  gains `settings: { retention }` only — the validated slice, `null` when the
+  org has set none — because that route is readable by every MEMBER and the
+  platform cannot vouch for a key a fork keeps beside its own. An org's data
+  export (`GET /api/v1/admin/orgs/[id]/export`) carries the column too, since
+  it exports the org row whole — so a fork storing its own config in
+  `Org.settings` now sees it there. The retention sweep's incoherent-windows
+  warning now names the org it is about, and no longer reads
+  `executionRetentionDays: null` as "nothing to couple to": executions kept for
+  ever are the longest window, not an absent one.
 - **The maintenance tick runs every platform job and the schedules sweep per
   org** (multi-tenancy §108 t-711). Every entry in `PLATFORM_JOBS` declares a
   `scope` (required); all eight existing tasks and `processDueSchedules` are
