@@ -45,7 +45,10 @@ process.
     to supply `orgId`.
 
   Framework tables are unchanged at this stage. Stage 2 (`v0.13.0`) makes them
-  tenant-owned. Both stages ship together in the next Daybreak release.
+  tenant-owned. **Each stage is its own Daybreak release, so you stage the
+  upgrade by tag rather than by Sunrise commit.** This entry ships as **0.5.0**
+  and stage 2 as **0.6.0**. Take 0.5.0, run `db:migrate:deploy`, deploy it, and
+  only then take 0.6.0.
 
 ## [0.4.0] — 2026-09-16
 
