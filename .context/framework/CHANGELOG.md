@@ -25,6 +25,28 @@ process.
 
 ## [Unreleased]
 
+### Changed
+
+- **Sunrise 0.13.0 stage 1 merged — commit `7d511506` (org identity, §106), which
+  also carries the Sunrise 0.12.1 security fix.** The fix stops a sign-up request
+  from choosing its own `role`. On any install with `SIGNUP_MODE=open` (the
+  default), a leaf on Daybreak 0.4.0 is exposed until it takes this. Until then,
+  look for `user` rows with `role = 'ADMIN'` you did not create. What changes for
+  a leaf:
+  - **A new reserved leaf seam, `lib/app/tenant-resolver.ts`.** Daybreak keeps it
+    empty. Deciding which org a request belongs to (subdomain, header, …) is the
+    leaf's product decision, not the framework's.
+  - **Your own `runInvitedSignup(fn)` calls must pass the invitation as a second
+    argument.** They still compile without it, but an invited platform admin then
+    joins the install org as `MEMBER`, not `OWNER`.
+  - **The role-literal guard now also polices `'OWNER'` / `'MEMBER'`** outside
+    `lib/tenancy/roles.ts`.
+  - **Anything that builds `EmbedContext` or `McpAuthContext` by hand** now has
+    to supply `orgId`.
+
+  Framework tables are unchanged at this stage. Stage 2 (`v0.13.0`) makes them
+  tenant-owned. Both stages ship together in the next Daybreak release.
+
 ## [0.4.0] — 2026-09-16
 
 > **Fourth tagged Daybreak release — the Sunrise 0.12.0 sync.** Daybreak moves from
