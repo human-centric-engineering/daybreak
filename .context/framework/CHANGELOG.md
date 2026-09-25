@@ -25,6 +25,55 @@ process.
 
 ## [Unreleased]
 
+> **Sunrise 0.13.0, stage 2 of 2**: Sunrise `v0.13.0` (row isolation §107,
+> tenant-aware jobs §108, the stateful MCP transport removed), merged together with
+> Daybreak's own tenancy work, because the new guards fail on framework tables
+> until that work lands. **Take 0.5.0 and deploy it first.** The big migration is
+> Sunrise's `tenant_owned_org_id`: `orgId` added to 38 tables and every row
+> backfilled. Daybreak adds the same for its 19 framework tables. Schedule it on a
+> large database. At `TENANCY_MODE=single` nothing a user sees changes.
+
+### ⚠️ Changed — action required for existing leaf forks
+
+- **Every model of yours now needs an org decision.** Four always-run tests name
+  it until it has one: `model-classification`, `policy-coverage`,
+  `org-scoped-slugs` and `org-sources`. The recipe (column + relation, per-org
+  uniques, a hand-written migration with the backfill and the isolation policy,
+  an org-export declaration) is in
+  [`building-on-daybreak.md`](./building-on-daybreak.md#tenancy-every-model-of-yours-needs-an-org-decision-daybreak-060).
+  Never pass one by editing an allowlist.
+- **Framework slugs are unique per org now, not install-wide.** That covers
+  `Module`, `FacilitationGraph` and `SlotDefinition` slugs, a facilitation
+  agent's `role`, and the `UserJourney` / `SlotValue` / `FrameworkNodeEmbedding`
+  natural keys, each of which now leads with `orgId`. Code of yours that did
+  `prisma.module.findUnique({ where: { slug } })` no longer type-checks: read with
+  `findFirst({ where: { slug } })`, or write with `orgId_slug: { orgId:
+  requireOrgId(), slug }`. The same holds for Sunrise's `AiAgent`,
+  `AiKnowledgeBase` and `AiKnowledgeDocument`.
+- **Sunrise's `Org` model carries a `DAYBREAK` block of 19 back-relations.** Add
+  your own below it, and keep all of them on every sync that conflicts there.
+- **Everything else in Sunrise's stage-2 notes applies unchanged:**
+  - `prisma` is typed `TenancyClient`.
+  - Mocks of `@/lib/admin/logs` must return `registerLogTenancy`.
+  - Delete `MCP_SESSION_MODE` wherever you set it.
+  - `PATCH …/mcp/settings` refuses unknown keys.
+
+  See [`../../CHANGELOG.md`](../../CHANGELOG.md) `[0.13.0]`.
+
+### Added
+
+- **`leafOrgSources()` in `lib/app/leaf-data-export.ts`**: declares your
+  `orgId` models for an org's data export. It ships empty. It's reached through
+  `collectAppOrgSources()` on the `lib/app/data-export.ts` bridge, which a
+  fork-first seam in Sunrise's `lib/privacy/org-sources.ts` pulls
+  (`getOrgDataSources()` / `getOrgExcludedSources()`). It will be replaced by
+  Sunrise's own seam when it ships. See
+  [`upstream-asks.md`](./upstream-asks.md).
+- **The org export now carries the framework's tables**: journeys, node state,
+  events, nudges, slot values, conversation evals, maps and their versions,
+  policies, agent bindings, proposals, modules and their versions and bindings,
+  and slot definitions. Node embeddings are excluded as derived vectors.
+
 ## [0.5.0] — 2026-09-24
 
 > **Fifth tagged Daybreak release: Sunrise 0.13.0, stage 1 of 2.** Daybreak takes

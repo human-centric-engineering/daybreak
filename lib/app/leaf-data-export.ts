@@ -38,6 +38,7 @@
  */
 
 import type { AppSubjectData, AppSubjectQuery } from '@/lib/app/data-export';
+import type { AppOrgSourceContribution } from '@/lib/privacy/org-sources';
 
 /**
  * Declare the leaf app's own models to core's subject-source registry —
@@ -82,4 +83,19 @@ export function initLeafSubjectSources(): void {
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function collectLeafSubjectData(_subject: AppSubjectQuery): Promise<AppSubjectData> {
   return {};
+}
+
+/**
+ * Declare this leaf app's `orgId`-carrying models for an ORG's data export — the
+ * org-subject twin of {@link initLeafSubjectSources}. Ships empty.
+ *
+ * If you add `orgId` to a model of your own (making it tenant-owned under
+ * Sunrise §107), `tests/unit/lib/privacy/org-sources.test.ts` names it until it
+ * appears here: as a source (an `export` fetch scoped by `orgId`, full rows,
+ * `omit` for any secret) or as an exclusion with the reason the reader is shown.
+ * Pulled lazily by `lib/app/data-export.ts` on every read — nothing to register.
+ * See `lib/framework/privacy/org-sources.ts` for 18 worked examples.
+ */
+export function leafOrgSources(): AppOrgSourceContribution {
+  return { sources: [], excluded: [] };
 }
