@@ -26,7 +26,13 @@ const contribution = vi.hoisted(() => ({
   current: null as null | { sources: unknown[]; excluded: unknown[] },
 }));
 
-vi.mock('@/lib/db/client', () => ({ prisma: {} }));
+const prismaMock = vi.hoisted(() => ({
+  userJourney: { findMany: vi.fn().mockResolvedValue([]) },
+}));
+const multi = vi.hoisted(() => ({ on: false }));
+
+vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
+vi.mock('@/lib/tenancy/context', () => ({ isMultiTenant: () => multi.on }));
 vi.mock('@/lib/app/data-export', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/lib/app/data-export')>();
   return {
@@ -63,6 +69,8 @@ const FRAMEWORK_MODELS = [
 
 beforeEach(() => {
   contribution.current = null;
+  multi.on = false;
+  prismaMock.userJourney.findMany.mockClear();
 });
 
 describe('the org-export seam, at rest', () => {
@@ -106,5 +114,31 @@ describe('the framework’s contribution, through the real bridge', () => {
     expect(sources.every((s) => s.disposition === 'export')).toBe(true);
     expect(excluded.map((e) => e.model)).toEqual(['FrameworkNodeEmbedding']);
     expect(getOrgExcludedSources().map((e) => e.model)).toContain('FrameworkNodeEmbedding');
+  });
+});
+
+describe('which rows an org owns (core’s ownedBy rule, restated)', () => {
+  const journeys = () => {
+    const source = frameworkOrgSources().sources.find((s) => s.model === 'UserJourney');
+    if (!source) throw new Error('UserJourney source missing');
+    return source;
+  };
+  const whereOfLastCall = () =>
+    (prismaMock.userJourney.findMany.mock.calls.at(-1)?.[0] as { where: unknown }).where;
+
+  it('gives the install org its NULL-org rows at single (written before the chokepoint stamped them)', async () => {
+    await journeys().fetch({ orgId: 'install' });
+    expect(whereOfLastCall()).toEqual({ OR: [{ orgId: 'install' }, { orgId: null }] });
+  });
+
+  it('scopes any other org strictly at single', async () => {
+    await journeys().fetch({ orgId: 'cmorg000000000000000other' });
+    expect(whereOfLastCall()).toEqual({ orgId: 'cmorg000000000000000other' });
+  });
+
+  it('scopes even the install org strictly at multi, where a NULL org is nobody’s', async () => {
+    multi.on = true;
+    await journeys().fetch({ orgId: 'install' });
+    expect(whereOfLastCall()).toEqual({ orgId: 'install' });
   });
 });
