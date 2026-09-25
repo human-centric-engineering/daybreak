@@ -44,6 +44,7 @@ import { INVITATION_IDENTIFIER_PREFIX } from '@/lib/utils/invitation-token';
 import { toSafeHook, type SafeHook } from '@/lib/orchestration/hooks/serialize';
 import { INSTALL_ORG_ID } from '@/lib/tenancy/constants';
 import { isMultiTenant } from '@/lib/tenancy/context';
+import { collectAppOrgSources } from '@/lib/app/data-export';
 
 /** Identity of the org being exported. */
 export interface OrgQuery {
@@ -651,3 +652,31 @@ export const ORG_EXCLUDED_SOURCES: OrgExcludedSource[] = [
       'Engine lease bookkeeping for stuck-execution recovery — lease tokens and heartbeat events, nothing the organisation authored; the executions themselves are exported.',
   },
 ];
+
+// ─── DAYBREAK fork-first seam (Hub t-134, §34 f-framework-tenancy) ───────────
+//
+// "Not a fork seam yet" (header) was true of core; a fork whose own models
+// carry `orgId` — Daybreak's 19 framework tables — has no other way to satisfy
+// the coverage guard than rows in the lists above. This is the generic seam
+// §109 anticipates, shaped like the subject manifest's: the `lib/app/data-export.ts`
+// bridge contributes sources and exclusions, pulled lazily on every read (never
+// registered at boot, so nothing is lost when a registry resets). With an empty
+// contribution both getters return exactly the lists above — behaviour-neutral
+// at rest, pinned by tests/unit/lib/framework/privacy/org-sources.test.ts.
+// Ledgered in .context/framework/upstream-asks.md; delete when §109 ships its own.
+
+/** What the `lib/app` bridge contributes to the org manifest. */
+export interface AppOrgSourceContribution {
+  sources: OrgDataSource[];
+  excluded: OrgExcludedSource[];
+}
+
+/** Every org-export source: core's, then the app bridge's. */
+export function getOrgDataSources(): OrgDataSource[] {
+  return [...ORG_DATA_SOURCES, ...collectAppOrgSources().sources];
+}
+
+/** Every deliberately excluded model: core's, then the app bridge's. */
+export function getOrgExcludedSources(): OrgExcludedSource[] {
+  return [...ORG_EXCLUDED_SOURCES, ...collectAppOrgSources().excluded];
+}

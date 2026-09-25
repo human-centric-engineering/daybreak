@@ -52,7 +52,13 @@ vi.mock('@/lib/tenancy/context', () => ({ isMultiTenant: vi.fn(() => false) }));
 
 const { isMultiTenant } = await import('@/lib/tenancy/context');
 
-const { ORG_DATA_SOURCES, ORG_EXCLUDED_SOURCES } = await import('@/lib/privacy/org-sources');
+// DAYBREAK "keep mine" (Hub t-134): read the manifest through the fork-first
+// getters, so a fork's contributed sources (Daybreak's framework tables) are
+// held to the same coverage and per-source rules as core's. With an empty
+// contribution these are exactly the two constants.
+const { getOrgDataSources, getOrgExcludedSources } = await import('@/lib/privacy/org-sources');
+const ORG_DATA_SOURCES = getOrgDataSources();
+const ORG_EXCLUDED_SOURCES = getOrgExcludedSources();
 
 const SCHEMA_DIR = path.join(process.cwd(), 'prisma', 'schema');
 const MODEL_OPEN = /^model\s+(\w+)\s*\{/;

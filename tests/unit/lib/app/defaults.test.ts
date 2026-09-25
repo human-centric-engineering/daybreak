@@ -81,7 +81,11 @@ import {
 } from '@/lib/app/leaf-ci';
 import { occupiedTiers } from '@/lib/app/reserved-tiers';
 import { initAppUserCreatedHooks } from '@/lib/app/user-created';
-import { collectLeafSubjectData, initLeafSubjectSources } from '@/lib/app/leaf-data-export';
+import {
+  collectLeafSubjectData,
+  initLeafSubjectSources,
+  leafOrgSources,
+} from '@/lib/app/leaf-data-export';
 import {
   getAppSubjectSources,
   getAppExcludedSubjectSources,
@@ -284,6 +288,9 @@ const SEAM_DEFAULTS: SeamDefault[] = [
       expect(await collectLeafSubjectData({ userId: 'user-1', email: 'user@example.com' })).toEqual(
         {}
       );
+      // The org-export half (Hub t-134): a leaf's org sources ship empty, so a
+      // vanilla Daybreak org export carries the framework's tables and nothing else.
+      expect(leafOrgSources()).toEqual({ sources: [], excluded: [] });
       // The declaration half (#533), asserted as "this seam changes nothing"
       // rather than "the registry is empty". Reading the registry TRIGGERS the
       // lazy init, which runs the framework tier as well — so an emptiness

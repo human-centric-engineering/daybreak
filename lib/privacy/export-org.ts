@@ -25,8 +25,8 @@
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import {
-  ORG_DATA_SOURCES,
-  ORG_EXCLUDED_SOURCES,
+  getOrgDataSources,
+  getOrgExcludedSources,
   type OrgExcludedSource,
   type OrgQuery,
 } from '@/lib/privacy/org-sources';
@@ -95,7 +95,7 @@ export async function exportOrgData(params: ExportOrgParams): Promise<OrgExport>
   // A rejection propagates: an export that quietly lost a section would be
   // indistinguishable, to the reader, from one that had nothing to show.
   const results = await Promise.all(
-    ORG_DATA_SOURCES.map(async (source) => ({ source, rows: await source.fetch(query) }))
+    getOrgDataSources().map(async (source) => ({ source, rows: await source.fetch(query) }))
   );
 
   const data: Record<string, unknown[]> = {};
@@ -133,7 +133,7 @@ export async function exportOrgData(params: ExportOrgParams): Promise<OrgExport>
       orgId,
       exported,
       attribution,
-      excluded: [...ORG_EXCLUDED_SOURCES],
+      excluded: getOrgExcludedSources(),
     },
     org,
     data,
