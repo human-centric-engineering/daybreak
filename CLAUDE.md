@@ -61,7 +61,10 @@
 >   `initFramework()`), `admin-nav.ts` (client sidebar → the framework nav section),
 >   `data-export.ts` (GDPR Art. 15 subject access → the framework's own manifest at
 >   `lib/framework/privacy/export-sources.ts`, declared through core's
->   `registerAppSubjectSources({ tier: 'framework' })`), `brand.ts` (product name + legal
+>   `registerAppSubjectSources({ tier: 'framework' })`; and the ORG export →
+>   `lib/framework/privacy/org-sources.ts`, pulled through `collectAppOrgSources()` by a
+>   fork-first seam Daybreak carries in `lib/privacy/org-sources.ts` — see
+>   `.context/framework/upstream-asks.md`), `brand.ts` (product name + legal
 >   entity → `lib/brand.ts`), `db-drift.ts` (Prisma-unmodelled DB objects → the framework's
 >   drift probes), and `ci.ts` (coverage exclusions + always-run tests → `vitest.config.ts`
 >   and `ALWAYS_RUN_TESTS`; Sunrise #759/#762). A framework registration that must run in a realm
