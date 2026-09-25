@@ -88,14 +88,15 @@ export async function syncMapNodeEmbeddings(
     );
   });
 
+  // Raw SQL is not stamped by the tenancy chokepoint, so the upsert below writes the org itself:
+  // the org this call runs in (the install org at single). Resolved BEFORE the embedding call, so a
+  // caller with no org fails before the provider is billed, not after.
+  const orgId = requireOrgId();
   const { embeddings, provenance } = await embedBatch(texts, undefined, 'document');
 
   // Upsert one row per node, keyed on (orgId, graphSlug, nodeKey, version) — the per-org unique
-  // (§34 / Sunrise §107). Raw SQL is not stamped by the tenancy chokepoint, so the org is written
-  // explicitly: the same org the published-map read above ran in (the install org at single).
-  // Sequential over a bounded map (F8 — ≤ low-hundreds of nodes); each upsert is idempotent, so a
-  // partial failure is fixed on re-run.
-  const orgId = requireOrgId();
+  // (§34 / Sunrise §107). Sequential over a bounded map (F8 — ≤ low-hundreds of nodes); each
+  // upsert is idempotent, so a partial failure is fixed on re-run.
   let embeddedCount = 0;
   for (let i = 0; i < nodes.length; i += 1) {
     const embeddingStr = `[${embeddings[i].join(',')}]`;

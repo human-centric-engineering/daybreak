@@ -13,6 +13,7 @@ vi.mock('@/lib/framework/modules/registry', () => ({ getRegisteredModule: vi.fn(
 vi.mock('@/lib/orchestration/knowledge/embedder', () => ({ embedBatch: vi.fn() }));
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({ logAdminAction: vi.fn() }));
 vi.mock('@/lib/logging', () => ({ logger: { warn: vi.fn(), info: vi.fn(), error: vi.fn() } }));
+vi.mock('@/lib/tenancy/context', () => ({ requireOrgId: vi.fn(() => 'install') }));
 
 import {
   syncMapNodeEmbeddings,
@@ -25,6 +26,7 @@ import { embedBatch } from '@/lib/orchestration/knowledge/embedder';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { logger } from '@/lib/logging';
 import { NotFoundError } from '@/lib/api/errors';
+import { requireOrgId } from '@/lib/tenancy/context';
 
 /** Flush the fire-and-forget promise chain (all mocks resolve synchronously). */
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -62,7 +64,20 @@ beforeEach(() => {
 });
 
 describe('syncMapNodeEmbeddings', () => {
-  it('embeds every node and upserts keyed on (graphSlug, nodeKey, version), then audits', async () => {
+  it('refuses before calling the embedding provider when the call has no org', async () => {
+    vi.mocked(requireOrgId).mockImplementationOnce(() => {
+      throw new Error('No org in the tenant context');
+    });
+
+    await expect(
+      syncMapNodeEmbeddings({ slug: 'primary', actorUserId: 'admin-1' })
+    ).rejects.toThrow('No org in the tenant context');
+    // Nothing billed, nothing written.
+    expect(embedBatch).not.toHaveBeenCalled();
+    expect(prisma.$executeRawUnsafe).not.toHaveBeenCalled();
+  });
+
+  it('embeds every node and upserts keyed on (orgId, graphSlug, nodeKey, version), then audits', async () => {
     const result = await syncMapNodeEmbeddings({ slug: 'primary', actorUserId: 'admin-1' });
 
     expect(result).toMatchObject({

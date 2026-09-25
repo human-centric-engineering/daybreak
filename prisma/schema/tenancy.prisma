@@ -98,7 +98,7 @@ model Org {
   frameworkUserNodeStates            UserNodeState[]
   frameworkJourneyEvents             JourneyEvent[]
   frameworkFacilitationAgentBindings FacilitationAgentBinding[]
-  frameworkFacilitationPolicys       FacilitationPolicy[]
+  frameworkFacilitationPolicies      FacilitationPolicy[]
   frameworkStructureChangeProposals  StructureChangeProposal[]
   frameworkConversationEvals         FrameworkConversationEval[]
   frameworkNodeEmbeddings            FrameworkNodeEmbedding[]

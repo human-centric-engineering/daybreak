@@ -211,8 +211,8 @@ describe('syncRegisteredSlotDefinitions', () => {
 
     await syncRegisteredSlotDefinitions();
 
-    // Keyed by the row's own id (not the slug) — see sync.ts §107: reads by the
-    // per-org slug use findFirst, but the follow-up write pins the exact row found.
+    // Keyed by the row's own id, not the slug: since §34 the slug is unique only
+    // within an org, so the write pins the exact row the scoped read returned.
     expect(txMock.slotDefinition.update).toHaveBeenCalledTimes(1);
     expect(txMock.slotDefinition.update).toHaveBeenCalledWith({
       where: { id: 'slot_primary_goal' },
@@ -268,7 +268,7 @@ describe('syncRegisteredSlotDefinitions', () => {
     expect(created[0]?.description).toBe('From review');
     expect(created[0]?.scope).toBe('module:review');
     expect(loggerWarn).toHaveBeenCalledWith(
-      'collectRegisteredSlotDefinitions: duplicate slot slug — last registration wins (slugs must be globally unique)',
+      'collectRegisteredSlotDefinitions: duplicate slot slug — last registration wins (slugs must be unique across the registry)',
       { slug: 'goal', moduleSlug: 'review' }
     );
   });

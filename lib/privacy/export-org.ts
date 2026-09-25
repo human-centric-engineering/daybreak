@@ -5,8 +5,15 @@
  * Assembles one org's record into a single JSON bundle: the org row, every
  * table that holds the org's own data, and the credentials it holds. Like the
  * subject export it decides nothing about *which* tables — it walks
- * {@link ORG_DATA_SOURCES}, the manifest a build-breaking test holds level
- * with every `orgId` column in `prisma/schema/*.prisma`.
+ * {@link getOrgDataSources} (core's `ORG_DATA_SOURCES` plus a fork's
+ * contribution), the manifest a build-breaking test holds level with every
+ * `orgId` column in `prisma/schema/*.prisma`.
+ *
+ * DAYBREAK "keep mine" (Hub t-134): this file reads the manifest through the
+ * fork-first getters in `lib/privacy/org-sources.ts` (two call sites below).
+ * On a Sunrise sync that conflicts here, keep the getters — reverting to the
+ * constants silently drops every framework table from org exports.
+ * Ledgered in `.context/framework/upstream-asks.md`.
  *
  * **A partial export is worse than no export.** Any source that throws fails
  * the whole export; nothing is best-effort. Same asymmetry with `eraseOrg()`
