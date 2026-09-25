@@ -84,6 +84,32 @@ model Org {
   aiWorkflowRunningSteps            AiWorkflowRunningStep[]
   aiWorkflowExecutionLeaseEvents    AiWorkflowExecutionLeaseEvent[]
 
+  // DAYBREAK "keep mine" (§34 f-framework-tenancy, Hub t-134): back-relations for
+  // the 19 tenant-owned framework_* models. Prisma relations are two-sided and
+  // Sunrise's model-classification test requires every tenant-owned model to carry
+  // the `org` relation, so a fork cannot add them without editing this block.
+  // On a Sunrise sync that conflicts here: keep upstream's lines AND this block.
+  // Ledgered in .context/framework/upstream-asks.md.
+  frameworkSlotDefinitions           SlotDefinition[]
+  frameworkSlotValues                SlotValue[]
+  frameworkFacilitationGraphs        FacilitationGraph[]
+  frameworkFacilitationGraphVersions FacilitationGraphVersion[]
+  frameworkUserJourneys              UserJourney[]
+  frameworkUserNodeStates            UserNodeState[]
+  frameworkJourneyEvents             JourneyEvent[]
+  frameworkFacilitationAgentBindings FacilitationAgentBinding[]
+  frameworkFacilitationPolicys       FacilitationPolicy[]
+  frameworkStructureChangeProposals  StructureChangeProposal[]
+  frameworkConversationEvals         FrameworkConversationEval[]
+  frameworkNodeEmbeddings            FrameworkNodeEmbedding[]
+  frameworkJourneyNudges             FrameworkJourneyNudge[]
+  frameworkModules                   Module[]
+  frameworkModuleVersions            ModuleVersion[]
+  frameworkModuleKnowledgeDocuments  ModuleKnowledgeDocument[]
+  frameworkModuleKnowledgeTags       ModuleKnowledgeTag[]
+  frameworkModuleWorkflowBindings    ModuleWorkflowBinding[]
+  frameworkModuleAgentBindings       ModuleAgentBinding[]
+
   @@map("org")
 }
 

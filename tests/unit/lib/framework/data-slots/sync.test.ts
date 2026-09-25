@@ -66,6 +66,7 @@ function registerModuleWithSlots(slug: string, slotDefinitions: SlotDefinitionIn
 function row(overrides: Partial<SlotDefinition> & Pick<SlotDefinition, 'slug'>): SlotDefinition {
   return {
     id: `slot_${overrides.slug}`,
+    orgId: null,
     group: 'goals',
     description: 'A goal',
     scope: 'module:onboarding',
@@ -210,9 +211,11 @@ describe('syncRegisteredSlotDefinitions', () => {
 
     await syncRegisteredSlotDefinitions();
 
+    // Keyed by the row's own id (not the slug) — see sync.ts §107: reads by the
+    // per-org slug use findFirst, but the follow-up write pins the exact row found.
     expect(txMock.slotDefinition.update).toHaveBeenCalledTimes(1);
     expect(txMock.slotDefinition.update).toHaveBeenCalledWith({
-      where: { slug: 'primary_goal' },
+      where: { id: 'slot_primary_goal' },
       data: {
         slug: 'primary_goal',
         group: 'goals',

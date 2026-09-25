@@ -143,7 +143,7 @@ export async function syncRegisteredSlotDefinitions(): Promise<void> {
         if (!row) continue;
         if (slotDefinitionNeedsUpdate(row, desired)) {
           await tx.slotDefinition.update({
-            where: { slug: desired.slug },
+            where: { id: row.id },
             data: { ...desired, isActive: true },
           });
           updated++;
