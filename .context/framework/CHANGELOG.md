@@ -25,13 +25,40 @@ process.
 
 ## [Unreleased]
 
-> **Sunrise 0.13.0, stage 2 of 2**: Sunrise `v0.13.0` (row isolation §107,
-> tenant-aware jobs §108, the stateful MCP transport removed), merged together with
-> Daybreak's own tenancy work, because the new guards fail on framework tables
-> until that work lands. **Take 0.5.0 and deploy it first.** The big migration is
+## [0.6.0] — 2026-09-25
+
+> **Sixth tagged Daybreak release: Sunrise 0.13.0, stage 2 of 2.** It carries
+> Sunrise `v0.13.0` (row isolation §107, tenant-aware jobs and caches §108, the
+> stateful MCP transport removed) and Daybreak's own tenancy work, in one merge
+> ([#279](https://github.com/human-centric-engineering/daybreak/pull/279)). They
+> are one unit because `v0.13.0`'s new guards fail on framework tables until that
+> work lands.
+>
+> **Take 0.5.0 and deploy it first**, then this. The migration to schedule is
 > Sunrise's `tenant_owned_org_id`: `orgId` added to 38 tables and every row
-> backfilled. Daybreak adds the same for its 19 framework tables. Schedule it on a
-> large database. At `TENANCY_MODE=single` nothing a user sees changes.
+> backfilled. Daybreak does the same for its 19 framework tables. Six migrations
+> in all (four Sunrise, two `framework_…`). Run `db:migrate:deploy`, then
+> `db:drift-check`: a vanilla Daybreak reports 71 probes.
+>
+> **At `TENANCY_MODE=single`, the default, nothing a user sees changes.**
+> **Do not switch to `multi` yet.** The framework's boot syncs (modules, slot
+> definitions) are not yet run per org, and a newly created org gets no module or
+> slot rows. That work is tracked on the Daybreak Hub and is needed before any
+> Daybreak app enables `multi`.
+>
+> **One tooling caveat.** `/pre-pr`'s "≥80% coverage per changed file" is really
+> an 80% average across the changed files. Sunrise's runner passes the per-file
+> flag in a form vitest 5 ignores ([#851](https://github.com/human-centric-engineering/sunrise/issues/851)). Until that's fixed, read
+> `coverage/coverage-summary.json` per file rather than trusting the exit code.
+
+### Security
+
+- **The stateful MCP transport is gone** (Sunrise 0.13.0). A leaf on Daybreak
+  0.5.0 or older (Sunrise 0.12.x up to the stage-1 commit) that ran
+  `MCP_SESSION_MODE=stateful` was exposed to a cross-key SSE hijack. The
+  default, `stateless`, never was. Taking this release removes the mode; delete
+  `MCP_SESSION_MODE` wherever you set it. See Sunrise's `[0.13.0]` Security and
+  Removed entries.
 
 ### ⚠️ Changed — action required for existing leaf forks
 
@@ -52,10 +79,10 @@ process.
   `AiKnowledgeBase` and `AiKnowledgeDocument`.
 - **Sunrise's `Org` model carries a `DAYBREAK` block of 19 back-relations.** Add
   your own below it, and keep all of them on every sync that conflicts there.
+  Sunrise [#859](https://github.com/human-centric-engineering/sunrise/issues/859) asks for a way to avoid the edit.
 - **Everything else in Sunrise's stage-2 notes applies unchanged:**
   - `prisma` is typed `TenancyClient`.
   - Mocks of `@/lib/admin/logs` must return `registerLogTenancy`.
-  - Delete `MCP_SESSION_MODE` wherever you set it.
   - `PATCH …/mcp/settings` refuses unknown keys.
 
   See [`../../CHANGELOG.md`](../../CHANGELOG.md) `[0.13.0]`.
@@ -67,7 +94,7 @@ process.
   `collectAppOrgSources()` on the `lib/app/data-export.ts` bridge, which a
   fork-first seam in Sunrise's `lib/privacy/org-sources.ts` pulls
   (`getOrgDataSources()` / `getOrgExcludedSources()`). It will be replaced by
-  Sunrise's own seam when it ships. See
+  Sunrise's own seam when it ships ([#858](https://github.com/human-centric-engineering/sunrise/issues/858)). See
   [`upstream-asks.md`](./upstream-asks.md).
 - **The org export now carries the framework's tables**: journeys, node state,
   events, nudges, slot values, conversation evals, maps and their versions,
