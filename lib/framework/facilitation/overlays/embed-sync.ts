@@ -13,6 +13,7 @@
  */
 
 import { prisma } from '@/lib/db/client';
+import { requireOrgId } from '@/lib/tenancy/context';
 import { NotFoundError } from '@/lib/api/errors';
 import { logger } from '@/lib/logging';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
@@ -89,18 +90,22 @@ export async function syncMapNodeEmbeddings(
 
   const { embeddings, provenance } = await embedBatch(texts, undefined, 'document');
 
-  // Upsert one row per node, keyed on (graphSlug, nodeKey, version). Sequential over a bounded map
-  // (F8 — ≤ low-hundreds of nodes); each upsert is idempotent, so a partial failure is fixed on re-run.
+  // Upsert one row per node, keyed on (orgId, graphSlug, nodeKey, version) — the per-org unique
+  // (§34 / Sunrise §107). Raw SQL is not stamped by the tenancy chokepoint, so the org is written
+  // explicitly: the same org the published-map read above ran in (the install org at single).
+  // Sequential over a bounded map (F8 — ≤ low-hundreds of nodes); each upsert is idempotent, so a
+  // partial failure is fixed on re-run.
+  const orgId = requireOrgId();
   let embeddedCount = 0;
   for (let i = 0; i < nodes.length; i += 1) {
     const embeddingStr = `[${embeddings[i].join(',')}]`;
     await prisma.$executeRawUnsafe(
       `INSERT INTO framework_node_embedding (
-         id, "graphSlug", "nodeKey", "version", embedding,
+         id, "orgId", "graphSlug", "nodeKey", "version", embedding,
          "embeddingModel", "embeddingProvider", "embeddingDimension", "sourceText", "updatedAt"
        )
-       VALUES (gen_random_uuid(), $1, $2, $3, $4::vector, $5, $6, $7, $8, NOW())
-       ON CONFLICT ("graphSlug", "nodeKey", "version") DO UPDATE
+       VALUES (gen_random_uuid(), $9, $1, $2, $3, $4::vector, $5, $6, $7, $8, NOW())
+       ON CONFLICT ("orgId", "graphSlug", "nodeKey", "version") DO UPDATE
          SET embedding = $4::vector,
              "embeddingModel" = $5,
              "embeddingProvider" = $6,
@@ -114,7 +119,8 @@ export async function syncMapNodeEmbeddings(
       provenance.model,
       provenance.provider,
       provenance.dimensions,
-      texts[i]
+      texts[i],
+      orgId
     );
     embeddedCount += 1;
   }

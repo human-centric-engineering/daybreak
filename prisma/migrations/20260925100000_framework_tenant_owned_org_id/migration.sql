@@ -7,11 +7,12 @@
 --
 -- Shape follows Sunrise's 20260919200000_tenant_owned_org_id: nullable
 -- `orgId`, backfilled to the install org, indexed, FK to "org" ON DELETE
--- CASCADE (so eraseOrg() cascades without enumerating tables). One framework
--- difference: the FK is HAND-WRITTEN and the Prisma model carries `orgId` as a
--- plain scalar — no `org` relation — because a relation needs a back-relation
--- line on the Sunrise-owned `Org` model; every framework `userId` FK follows
--- the same convention. NOT NULL is a later staged migration, as upstream.
+-- CASCADE (so eraseOrg() cascades without enumerating tables). The FK is written
+-- here by hand, named and ruled exactly as Prisma names the `org` relation each
+-- model declares (`<table>_orgId_fkey`, ON DELETE/UPDATE CASCADE), so Prisma
+-- treats it as its own. The back-relations sit in a marked DAYBREAK block on
+-- Sunrise's `Org` model (its model-classification test requires the relation).
+-- NOT NULL is a later staged migration, as upstream.
 --
 -- Seven global uniques become per-org, so two orgs (or one user in two orgs)
 -- can hold the same slug / role / slug-keyed row: framework_module.slug,
@@ -106,7 +107,7 @@ CREATE INDEX "framework_user_journey_orgId_idx" ON "framework_user_journey"("org
 CREATE UNIQUE INDEX "framework_user_journey_orgId_userId_graphSlug_contextKey_key" ON "framework_user_journey"("orgId", "userId", "graphSlug", "contextKey");
 CREATE INDEX "framework_user_node_state_orgId_idx" ON "framework_user_node_state"("orgId");
 
--- 5. Hand-written FK to "org" (mapped table name, B11) — no Prisma relation
+-- 5. FK to "org" (mapped table name, B11), matching the Prisma `org` relation
 ALTER TABLE "framework_conversation_eval" ADD CONSTRAINT "framework_conversation_eval_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "org"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "framework_facilitation_agent" ADD CONSTRAINT "framework_facilitation_agent_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "org"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "framework_facilitation_graph" ADD CONSTRAINT "framework_facilitation_graph_orgId_fkey" FOREIGN KEY ("orgId") REFERENCES "org"("id") ON DELETE CASCADE ON UPDATE CASCADE;

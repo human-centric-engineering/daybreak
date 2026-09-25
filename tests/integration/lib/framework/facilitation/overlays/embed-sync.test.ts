@@ -90,6 +90,11 @@ describe('syncMapNodeEmbeddings', () => {
     expect(firstCall[4]).toBe('[0.1,0.2]'); // $4 embedding literal
     expect(firstCall[5]).toBe('text-embedding-3-small'); // $5 model
     expect(firstCall[7]).toBe(1536); // $7 dimension
+    // The org is written explicitly (raw SQL is not stamped by the tenancy chokepoint) and the
+    // conflict target is the per-org unique — the global (graphSlug, nodeKey, version) key is gone.
+    expect(firstCall[9]).toBe('install'); // $9 orgId — the install org at single
+    expect(firstCall[0]).toContain('"orgId", "graphSlug", "nodeKey", "version", embedding');
+    expect(firstCall[0]).toContain('ON CONFLICT ("orgId", "graphSlug", "nodeKey", "version")');
 
     expect(logAdminAction).toHaveBeenCalledWith(
       expect.objectContaining({ action: 'framework_node_embedding.sync', entityId: 'primary' })
