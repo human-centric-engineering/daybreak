@@ -1,6 +1,14 @@
-import { serviceAccountWhere } from '@/lib/auth/account';
-import type { SeedContext, SeedUnit } from '@/prisma/runner';
-import { requireOrgId } from '@/lib/tenancy/context';
+/**
+ * The Document Clean Up Assistant — cleans an uploaded knowledge document
+ * before it is chunked and embedded, choosing among fourteen cleanup
+ * capabilities. Cleanup conversations edit one document directly and never
+ * query the knowledge base.
+ */
+import type { TenancyClient } from '@/lib/db/tenancy-extension';
+import type {
+  PlatformAgentBinding,
+  PlatformAgentDefinition,
+} from '@/lib/orchestration/agents/platform-agents';
 
 const CLEANUP_INSTRUCTIONS = `You are the Document Clean Up Assistant. An admin has uploaded a document into the knowledge base and wants it cleaned before it is chunked and embedded. They tell you what they want; you choose the tools and apply the changes.
 
@@ -69,9 +77,9 @@ const CLEANUP_CAPABILITY_SLUGS = [
  * when nothing qualifies, in which case the agent keeps the empty-string
  * inherit-at-runtime behaviour.
  */
-async function pickPinnedBinding(
-  prisma: SeedContext['prisma']
-): Promise<{ provider: string; model: string } | null> {
+export async function pickCleanupBinding(
+  prisma: TenancyClient
+): Promise<PlatformAgentBinding | null> {
   const providers = await prisma.aiProviderConfig.findMany({
     where: { isActive: true },
     orderBy: { createdAt: 'asc' },
@@ -107,116 +115,19 @@ async function pickPinnedBinding(
   return { provider: best.providerSlug, model: best.modelId };
 }
 
-// Seeds the Document Clean Up Assistant agent and binds all cleanup
-// capabilities. Idempotent — re-seeding only sets isSystem: true so admin
-// edits to the system prompt or model survive. Capabilities are upserted
-// in 019-cleanup-capabilities; this seed only creates the pivot rows.
-const unit: SeedUnit = {
-  name: '020-cleanup-agent',
-  async run({ prisma, logger }) {
-    logger.info('🧹 Seeding cleanup-agent...');
-
-    // Attribute the agent to the non-login SERVICE config-owner that
-    // 001-system-owner guarantees, exactly as every other seeded agent does
-    // (016-evaluation-judges, 017-case-generator-agent). An earlier version
-    // looked for a *human* admin, which exists only under the dev-only
-    // 001-test-users profile — so the profile-gated seeder used by CI and by
-    // `docker-compose up` on a fresh database hit a database with no human
-    // admin yet and aborted the whole seed run here.
-    const owner = await prisma.user.findFirst({
-      where: serviceAccountWhere,
-      select: { id: true },
-    });
-    if (!owner) {
-      throw new Error('No config owner found — ensure 001-system-owner runs first.');
-    }
-
-    const pinned = await pickPinnedBinding(prisma);
-    if (pinned) {
-      logger.info(`🔗 Pinning cleanup-agent to ${pinned.provider}/${pinned.model}`);
-    } else {
-      logger.info('🔗 No reachable tool-capable model — cleanup-agent inherits at runtime');
-    }
-
-    const agent = await prisma.aiAgent.upsert({
-      where: { orgId_slug: { orgId: requireOrgId(), slug: 'cleanup-agent' } },
-      update: { isSystem: true },
-      create: {
-        name: 'Document Clean Up Assistant',
-        slug: 'cleanup-agent',
-        description:
-          'Helps admins clean up uploaded knowledge-base documents before chunking and embedding. Combines deterministic text transforms with optional LLM rewrites.',
-        systemInstructions: CLEANUP_INSTRUCTIONS,
-        // Pinned to the strongest tool-using model this install can reach —
-        // see pickPinnedBinding. Falls back to empty strings, which
-        // agent-resolver.ts fills at runtime from the install default.
-        model: pinned?.model ?? '',
-        provider: pinned?.provider ?? '',
-        temperature: 0.2,
-        maxTokens: 2048,
-        // Cleanup conversations don't query the KB — they edit a single
-        // uploaded document directly via the cleanup capabilities.
-        knowledgeAccessMode: 'restricted',
-        visibility: 'internal',
-        isActive: true,
-        isSystem: true,
-        createdBy: owner.id,
-      },
-    });
-
-    // Fill the binding on an EXISTING agent only while both fields are still
-    // empty — an admin's own choice is never overwritten. Without this, an
-    // install seeded before the pin existed would keep inheriting the global
-    // default chat model forever.
-    if (pinned) {
-      const filled = await prisma.aiAgent.updateMany({
-        where: { slug: 'cleanup-agent', provider: '', model: '' },
-        data: { provider: pinned.provider, model: pinned.model },
-      });
-      if (filled.count > 0) {
-        logger.info(`🔗 Filled empty cleanup-agent binding → ${pinned.provider}/${pinned.model}`);
-      }
-    }
-
-    // Refresh the system prompt on an existing agent only while it has never
-    // been edited by a human — `systemInstructionsHistory` is appended to on
-    // every admin save, so an empty array means the row still holds exactly
-    // what a previous seed wrote. This is what lets a platform prompt fix (new
-    // capabilities, corrected tool guidance) actually reach an install that
-    // was seeded before it, without ever clobbering someone's own wording.
-    const untouched = await prisma.aiAgent.findFirst({
-      where: { slug: 'cleanup-agent', systemInstructionsHistory: { equals: [] } },
-      select: { id: true, systemInstructions: true },
-    });
-    if (untouched && untouched.systemInstructions !== CLEANUP_INSTRUCTIONS) {
-      await prisma.aiAgent.update({
-        where: { id: untouched.id },
-        data: { systemInstructions: CLEANUP_INSTRUCTIONS },
-      });
-      logger.info('📝 Refreshed cleanup-agent system prompt (never edited by an admin)');
-    }
-
-    for (const slug of CLEANUP_CAPABILITY_SLUGS) {
-      const capability = await prisma.aiCapability.findUnique({ where: { slug } });
-      if (!capability) {
-        logger.warn(`⚠️ Capability ${slug} not found — skipping bind for cleanup-agent`);
-        continue;
-      }
-      await prisma.aiAgentCapability.upsert({
-        where: {
-          agentId_capabilityId: { agentId: agent.id, capabilityId: capability.id },
-        },
-        update: {},
-        create: {
-          agentId: agent.id,
-          capabilityId: capability.id,
-          isEnabled: true,
-        },
-      });
-    }
-
-    logger.info(`✅ Seeded cleanup-agent with ${CLEANUP_CAPABILITY_SLUGS.length} capabilities`);
+export const CLEANUP_AGENT: PlatformAgentDefinition = {
+  slug: 'cleanup-agent',
+  audience: 'every-org',
+  agent: {
+    name: 'Document Clean Up Assistant',
+    description:
+      'Helps admins clean up uploaded knowledge-base documents before chunking and embedding. Combines deterministic text transforms with optional LLM rewrites.',
+    systemInstructions: CLEANUP_INSTRUCTIONS,
+    temperature: 0.2,
+    maxTokens: 2048,
+    knowledgeAccessMode: 'restricted',
   },
+  capabilities: CLEANUP_CAPABILITY_SLUGS,
+  knowledgeTags: [],
+  defaultBinding: pickCleanupBinding,
 };
-
-export default unit;

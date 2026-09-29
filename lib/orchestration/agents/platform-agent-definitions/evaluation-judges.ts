@@ -1,50 +1,27 @@
-import type { SeedUnit } from '@/prisma/runner';
-import { requireOrgId } from '@/lib/tenancy/context';
-import { serviceAccountWhere } from '@/lib/auth/account';
-
 /**
- * Seed the 6 built-in evaluation-judge agents.
+ * The six answer-quality evaluation judges — correctness, relevance,
+ * coherence, faithfulness, groundedness and brand voice.
  *
- * Each judge is a real `AiAgent` row with `kind = 'judge'` and
- * `isSystem = true` — they appear in the agents list (filtered behind a
- * "Judges" tab), can have their model/prompt edited by an admin like
- * any other agent, and they're driven by the evaluation worker via
- * `streamChat`. The grader registry's `judge_agent` entry looks them up
- * by slug at run time.
+ * Each is a `kind: 'judge'` agent the `judge_agent` grader looks up by slug at
+ * run time and drives through `streamChat`.
  *
- * Rubric design (v2 — Phase 1.6, "consistency pass"):
+ * Rubric design (v2 — "consistency pass"):
  *
- *   1. **Continuous 0.0–1.0 scoring with anchor points.** Each rubric
- *      lists five anchor values (0.0, 0.3, 0.5, 0.7, 1.0) with prose
- *      describing what each one means for THAT metric, plus an
- *      explicit statement that intermediate values (0.1, 0.2, …, 0.9)
- *      are encouraged so the judge can express nuance. Previously the
- *      rubrics implied a trinomial {0, 0.5, 1} scale.
- *
- *   2. **Mandatory EVALUATION STEPS.** The judge must walk through a
- *      named, ordered set of micro-steps BEFORE producing a score —
- *      the G-Eval / chain-of-thought-before-judging pattern.
- *      Materialising the steps as a JSON array makes the
- *      reasoning auditable per case in the drill-in UI and forces the
- *      LLM to actually think rather than pattern-match.
- *
- *   3. **Explicit IGNORE clauses.** Each rubric tells the judge what
- *      it does NOT score so the six metrics don't bleed into each
+ *   1. **Continuous 0.0–1.0 scoring with anchor points.** Each rubric lists
+ *      five anchors (0.0, 0.3, 0.5, 0.7, 1.0) with prose for THAT metric, and
+ *      says intermediate values are encouraged.
+ *   2. **Mandatory EVALUATION STEPS**, walked before scoring (G-Eval /
+ *      chain-of-thought-before-judging). Stored per case, so the drill-in can
+ *      show the judge's working.
+ *   3. **Explicit IGNORE clauses**, so the six metrics don't bleed into each
  *      other.
+ *   4. **Pinned output schema** —
+ *      `{ "evaluation_steps": string[], "score": number|null, "reasoning": string }`.
  *
- *   4. **Pinned output schema.** Every judge returns:
- *        { "evaluation_steps": string[], "score": number|null, "reasoning": string }
- *      The worker stores `evaluation_steps` in
- *      `AiEvaluationCaseResult.metricScores[key].evaluationSteps` so
- *      the per-case drill-in can show the judge's working.
- *
- * Re-seeding behaviour: this unit OVERWRITES `systemInstructions` on
- * existing seeded judges. The rubrics are platform-managed and evolve
- * with the codebase; admin customisations to a seeded judge will be
- * lost on the next deploy. Admins who want a customised judge should
- * CREATE a new kind='judge' agent via the "Create custom judge" CTA
- * — those are never touched by this seed.
+ * The rubrics are the platform's: an org that wants its own creates a new
+ * `kind: 'judge'` agent ("Create custom judge"), which no reconcile touches.
  */
+import type { PlatformAgentDefinition } from '@/lib/orchestration/agents/platform-agents';
 
 interface JudgeSpec {
   slug: string;
@@ -319,67 +296,24 @@ OUTPUT — respond ONLY with the JSON object below, no prose around it and no co
   },
 ] as const;
 
-const unit: SeedUnit = {
-  name: '016-evaluation-judges',
-  async run({ prisma, logger }) {
-    logger.info('⚖️  Seeding 6 built-in evaluation-judge agents...');
-
-    const admin = await prisma.user.findFirst({
-      where: serviceAccountWhere,
-      select: { id: true },
-    });
-    if (!admin) {
-      throw new Error('No admin user found — ensure 001-system-owner runs first.');
-    }
-
-    for (const judge of JUDGES) {
-      await prisma.aiAgent.upsert({
-        where: { orgId_slug: { orgId: requireOrgId(), slug: judge.slug } },
-        update: {
-          // Seed-managed: the rubrics evolve with the platform, so we
-          // OVERWRITE systemInstructions on re-seed. Admin customisations
-          // to a seeded judge are LOST on the next deploy. Admins who
-          // want a customised rubric should create a NEW kind='judge'
-          // agent via the "Create custom judge" CTA (those are never
-          // touched by this seed).
-          isSystem: true,
-          kind: 'judge',
-          description: judge.description,
-          systemInstructions: judge.instructions,
-        },
-        create: {
-          name: judge.name,
-          slug: judge.slug,
-          description: judge.description,
-          systemInstructions: judge.instructions,
-          kind: 'judge',
-          // Empty strings → resolved at runtime via agent-resolver.ts
-          // using the operator's configured judge / chat default.
-          model: '',
-          provider: '',
-          // Low temperature — judges should be deterministic.
-          temperature: 0.2,
-          // Bumped from 600 to 1000 to leave headroom for the
-          // evaluation_steps array.
-          maxTokens: 1000,
-          isActive: true,
-          isSystem: true,
-          // Judges don't browse the knowledge base by default. Admins
-          // CAN attach a knowledge document to a custom judge (e.g. a
-          // policy guide for a policy-compliance judge) via the agent
-          // form; restricted mode keeps that from accidentally
-          // including documents seeded for chat agents.
-          knowledgeAccessMode: 'restricted',
-          // Judges are internal — no public visibility, no embed.
-          visibility: 'internal',
-          createdBy: admin.id,
-        },
-      });
-      logger.info(`  ✓ ${judge.slug}`);
-    }
-
-    logger.info(`✓ Seeded ${JUDGES.length} judge agents`);
-  },
-};
-
-export default unit;
+export const EVALUATION_JUDGE_AGENTS: readonly PlatformAgentDefinition[] = JUDGES.map(
+  (judge): PlatformAgentDefinition => ({
+    slug: judge.slug,
+    audience: 'every-org',
+    agent: {
+      name: judge.name,
+      description: judge.description,
+      systemInstructions: judge.instructions,
+      kind: 'judge',
+      // Low temperature — judges should be deterministic.
+      temperature: 0.2,
+      // Headroom for the evaluation_steps array.
+      maxTokens: 1000,
+      // Judges don't browse knowledge. An org can attach a document to a
+      // custom judge; restricted mode keeps chat agents' documents out.
+      knowledgeAccessMode: 'restricted',
+    },
+    capabilities: [],
+    knowledgeTags: [],
+  })
+);

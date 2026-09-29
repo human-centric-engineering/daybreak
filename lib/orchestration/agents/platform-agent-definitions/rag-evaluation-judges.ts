@@ -1,38 +1,10 @@
-import type { SeedUnit } from '@/prisma/runner';
-import { requireOrgId } from '@/lib/tenancy/context';
-import { serviceAccountWhere } from '@/lib/auth/account';
-
 /**
- * Seed three Ragas-style RAG-focused evaluation-judge agents.
- *
- * The Phase 1 set (016-evaluation-judges) covers answer-quality —
- * correctness, faithfulness, groundedness, relevance, coherence,
- * brand-voice. Phase 3 adds retrieval-quality judges drawn from the
- * Ragas framework — judges that look at the *retrieval-then-answer*
- * shape that RAG agents exhibit:
- *
- *   1. context_precision — of the citations the answer USED, what
- *      fraction are actually relevant to the question? (Penalises
- *      cluttering the prompt with off-topic chunks.)
- *
- *   2. context_recall — of the reference passages the gold answer
- *      relied on, what fraction did the retrieval surface? (Reads
- *      gold-passage hints from `expectedOutput` / the case metadata.)
- *
- *   3. answer_similarity — semantic similarity between ANSWER and
- *      EXPECTED ANSWER, judged by the model (Ragas-style; not
- *      embedding-based). A complement to `correctness` which scores
- *      coverage of key points — similarity scores the overall shape.
- *
- * The dispatch path is identical to the Phase 1 judges: the
- * `judge_agent` grader looks them up by slug at run time. No code
- * changes are needed beyond seeding.
- *
- * Re-seeding behaviour: same as 016 — `systemInstructions` is
- * OVERWRITTEN on existing rows. Admins who want a customised rubric
- * should create a new kind='judge' agent via the "Create custom judge"
- * CTA; those are never touched by this seed.
+ * The three Ragas-style retrieval-quality judges — context precision, context
+ * recall and answer similarity. Dispatched exactly like the answer-quality
+ * judges in `evaluation-judges.ts`: the `judge_agent` grader looks them up by
+ * slug at run time.
  */
+import type { PlatformAgentDefinition } from '@/lib/orchestration/agents/platform-agents';
 
 interface JudgeSpec {
   slug: string;
@@ -180,53 +152,20 @@ OUTPUT — respond ONLY with the JSON object below, no prose around it and no co
   },
 ] as const;
 
-const unit: SeedUnit = {
-  name: '018-rag-evaluation-judges',
-  async run({ prisma, logger }) {
-    logger.info('🔍 Seeding 3 Ragas-style RAG evaluation-judge agents...');
-
-    const admin = await prisma.user.findFirst({
-      where: serviceAccountWhere,
-      select: { id: true },
-    });
-    if (!admin) {
-      throw new Error('No admin user found — ensure 001-system-owner runs first.');
-    }
-
-    for (const judge of JUDGES) {
-      await prisma.aiAgent.upsert({
-        where: { orgId_slug: { orgId: requireOrgId(), slug: judge.slug } },
-        update: {
-          // Seed-managed — see 016-evaluation-judges for the policy.
-          isSystem: true,
-          kind: 'judge',
-          name: judge.name,
-          description: judge.description,
-          systemInstructions: judge.instructions,
-        },
-        create: {
-          name: judge.name,
-          slug: judge.slug,
-          description: judge.description,
-          systemInstructions: judge.instructions,
-          kind: 'judge',
-          // Empty strings → resolved at runtime via agent-resolver.ts.
-          model: '',
-          provider: '',
-          temperature: 0.2,
-          maxTokens: 1000,
-          isActive: true,
-          isSystem: true,
-          knowledgeAccessMode: 'restricted',
-          visibility: 'internal',
-          createdBy: admin.id,
-        },
-      });
-      logger.info(`  ✓ ${judge.slug}`);
-    }
-
-    logger.info(`✓ Seeded ${JUDGES.length} RAG-focused judge agents`);
-  },
-};
-
-export default unit;
+export const RAG_EVALUATION_JUDGE_AGENTS: readonly PlatformAgentDefinition[] = JUDGES.map(
+  (judge): PlatformAgentDefinition => ({
+    slug: judge.slug,
+    audience: 'every-org',
+    agent: {
+      name: judge.name,
+      description: judge.description,
+      systemInstructions: judge.instructions,
+      kind: 'judge',
+      temperature: 0.2,
+      maxTokens: 1000,
+      knowledgeAccessMode: 'restricted',
+    },
+    capabilities: [],
+    knowledgeTags: [],
+  })
+);
