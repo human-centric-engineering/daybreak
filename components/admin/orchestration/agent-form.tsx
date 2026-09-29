@@ -188,6 +188,16 @@ const createFormSchema = agentFormSchema.superRefine((data, ctx) => {
 export type AgentWithGrants = AiAgent & {
   grantedTagIds?: string[];
   grantedDocumentIds?: string[];
+  /**
+   * On a system (platform) agent, what the API refuses to change and what
+   * this org may tune — returned by `GET /agents/:id` from the same rule the
+   * API enforces. `null` or absent for an org's own agent.
+   */
+  platformAgent?: {
+    lockedFields: string[];
+    tunableFields: string[];
+    bindingsLocked: boolean;
+  } | null;
 };
 
 /** Slim profile summary passed to the form for the dropdown + preview. */
@@ -220,6 +230,37 @@ export interface AgentFormProps {
   profiles?: AgentProfileSummary[];
 }
 
+/**
+ * How the banner names the fields an org tunes on a platform agent, in the
+ * order an admin meets them on the form. `providerConfig` has no control
+ * here (it is set through the API), so the banner — which says what can be
+ * changed *here* — leaves it out. An org-tunable field a fork adds falls back
+ * to its registry label.
+ */
+const TUNABLE_FIELD_PHRASES: Record<string, string | null> = {
+  provider: 'provider',
+  model: 'model',
+  fallbackProviders: 'fallback providers',
+  monthlyBudgetUsd: 'monthly budget',
+  maxCostPerTurnUsd: 'per-turn cost cap',
+  rateLimitRpm: 'rate limit',
+  retentionDays: 'how long its conversations are kept',
+  providerConfig: null,
+};
+
+/** "provider, model, … and how long its conversations are kept", from the API's list. */
+function describeTunableFields(fields: string[], capabilitiesToo: boolean): string {
+  const known = Object.keys(TUNABLE_FIELD_PHRASES).filter((field) => fields.includes(field));
+  const forkFields = fields.filter((field) => !(field in TUNABLE_FIELD_PHRASES));
+  const phrases = [
+    ...known.map((field) => TUNABLE_FIELD_PHRASES[field]),
+    ...forkFields.map((field) => (fieldLabels()[field] ?? field).toLowerCase()),
+    ...(capabilitiesToo ? ['which capabilities it may use'] : []),
+  ].filter((phrase): phrase is string => phrase !== null);
+  if (phrases.length <= 1) return phrases.join('');
+  return `${phrases.slice(0, -1).join(', ')} and ${phrases[phrases.length - 1]}`;
+}
+
 function toSlug(value: string): string {
   return value
     .toLowerCase()
@@ -242,6 +283,16 @@ export function AgentForm({
   const searchParams = useSearchParams();
   const schedule = useTimeout();
   const isEdit = mode === 'edit';
+
+  // A platform agent's fields split into the platform's (read-only here) and
+  // the org's (§116 t-725). The API sends the split; a group is locked only
+  // when every field in it is.
+  const platformAgent = isEdit ? (agent?.platformAgent ?? null) : null;
+  const lockedFields = useMemo(() => new Set(platformAgent?.lockedFields ?? []), [platformAgent]);
+  // Each locked control is disabled on its own rather than through a
+  // fieldset: a disabled fieldset also disables the <FieldHelp> buttons
+  // inside it, and a locked field's help is still worth reading.
+  const locked = (field: string): boolean => lockedFields.has(field);
 
   // On a fresh create, honour `?kind=judge` from the URL (used by the
   // "Create custom judge" CTA in the run-create form). On edit, the
@@ -633,6 +684,9 @@ export function AgentForm({
         // `updateAgentObjectSchema` requires non-empty when present.
         const editPayload: Record<string, unknown> = { ...payload };
         delete editPayload.kind;
+        // A platform agent's platform-owned fields are read-only here and the
+        // API refuses a change to them, so they are never sent (§116 t-725).
+        for (const field of lockedFields) delete editPayload[field];
         if (!authored.provider || data.provider.length === 0) delete editPayload.provider;
         if (!authored.model || data.model.length === 0) delete editPayload.model;
 
@@ -734,6 +788,28 @@ export function AgentForm({
         </div>
       )}
 
+      {/* Above the tabs: every tab has locked controls to explain. */}
+      {isEdit && agent?.isSystem && (
+        <div
+          data-testid="platform-agent-banner"
+          className="flex items-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400"
+        >
+          <Shield className="h-4 w-4 shrink-0" />
+          <span>
+            This is a platform agent. The platform sets what it is — its instructions, settings,
+            knowledge
+            {platformAgent?.bindingsLocked === false ? '' : ' and capabilities'} — and updates it
+            with each release, so those are read-only here and it cannot be deleted. Here, this org
+            sets its{' '}
+            {describeTunableFields(
+              platformAgent?.tunableFields ?? [],
+              platformAgent?.bindingsLocked === false
+            )}
+            .
+          </span>
+        </div>
+      )}
+
       <Tabs defaultValue="general" className="w-full">
         <TabsList className="w-full justify-start">
           <TabsTrigger value="general">General</TabsTrigger>
@@ -784,16 +860,6 @@ export function AgentForm({
 
         {/* ================= TAB 1 — GENERAL ================= */}
         <TabsContent value="general" className="space-y-4 pt-4">
-          {isEdit && agent?.isSystem && (
-            <div className="flex items-center gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-700 dark:text-amber-400">
-              <Shield className="h-4 w-4 shrink-0" />
-              <span>
-                This is a system agent used internally by the platform. It cannot be deleted or
-                deactivated. Editing instructions, model, and capabilities is supported — changes
-                are versioned and can be reverted.
-              </span>
-            </div>
-          )}
           <div className="grid gap-2">
             <Label htmlFor="name">
               Name{' '}
@@ -802,7 +868,12 @@ export function AgentForm({
                 chat UI.
               </FieldHelp>
             </Label>
-            <Input id="name" {...register('name')} placeholder="Research Assistant" />
+            <Input
+              id="name"
+              {...register('name')}
+              placeholder="Research Assistant"
+              disabled={locked('name')}
+            />
             {errors.name && <p className="text-destructive text-xs">{errors.name.message}</p>}
           </div>
 
@@ -848,6 +919,7 @@ export function AgentForm({
             <Textarea
               id="description"
               rows={3}
+              disabled={locked('description')}
               {...register('description')}
               placeholder="Summarizes research papers and answers follow-up questions."
             />
@@ -878,6 +950,7 @@ export function AgentForm({
               </Label>
               <Select
                 value={currentProfileId ?? '__none__'}
+                disabled={locked('profileId')}
                 onValueChange={(v) =>
                   setValue('profileId', v === '__none__' ? null : v, { shouldDirty: true })
                 }
@@ -914,7 +987,7 @@ export function AgentForm({
               id="isActive"
               checked={currentIsActive}
               onCheckedChange={(v) => setValue('isActive', v)}
-              disabled={isEdit && agent?.isSystem}
+              disabled={locked('isActive')}
             />
           </div>
 
@@ -937,6 +1010,7 @@ export function AgentForm({
             </Label>
             <Select
               value={currentVisibility}
+              disabled={locked('visibility')}
               onValueChange={(v) =>
                 setValue('visibility', v as AgentFormData['visibility'], { shouldValidate: true })
               }
@@ -1226,6 +1300,7 @@ export function AgentForm({
               step={0.05}
               value={[currentTemp]}
               onValueChange={([v]) => setValue('temperature', v, { shouldValidate: true })}
+              disabled={locked('temperature')}
             />
           </div>
 
@@ -1242,6 +1317,7 @@ export function AgentForm({
               id="maxTokens"
               type="number"
               {...register('maxTokens', { valueAsNumber: true })}
+              disabled={locked('maxTokens')}
             />
             {errors.maxTokens && (
               <p className="text-destructive text-xs">{errors.maxTokens.message}</p>
@@ -1252,6 +1328,7 @@ export function AgentForm({
             id="reasoningEffort"
             value={watch('reasoningEffort')}
             onChange={(v) => setValue('reasoningEffort', v, { shouldDirty: true })}
+            disabled={locked('reasoningEffort')}
           />
 
           <div className="grid gap-2">
@@ -1374,6 +1451,7 @@ export function AgentForm({
             <Switch
               id="enableVoiceInput"
               checked={currentVoiceInput}
+              disabled={locked('enableVoiceInput')}
               onCheckedChange={(v) => setValue('enableVoiceInput', v, { shouldDirty: true })}
             />
           </div>
@@ -1424,7 +1502,7 @@ export function AgentForm({
             <Switch
               id="enableImageInput"
               checked={currentImageInput}
-              disabled={!supportsVision}
+              disabled={locked('enableImageInput') || !supportsVision}
               onCheckedChange={(v) => setValue('enableImageInput', v, { shouldDirty: true })}
             />
           </div>
@@ -1478,7 +1556,7 @@ export function AgentForm({
             <Switch
               id="enableDocumentInput"
               checked={currentDocumentInput}
-              disabled={!supportsDocuments}
+              disabled={locked('enableDocumentInput') || !supportsDocuments}
               onCheckedChange={(v) => setValue('enableDocumentInput', v, { shouldDirty: true })}
             />
           </div>
@@ -1502,6 +1580,7 @@ export function AgentForm({
             <Input
               id="maxHistoryTokens"
               type="number"
+              disabled={locked('maxHistoryTokens')}
               placeholder="Use model default"
               {...register('maxHistoryTokens', {
                 setValueAs: (v: string | number) =>
@@ -1534,6 +1613,7 @@ export function AgentForm({
             <Input
               id="maxHistoryMessages"
               type="number"
+              disabled={locked('maxHistoryMessages')}
               min={0}
               max={500}
               placeholder="Use platform default (50)"
@@ -1560,6 +1640,7 @@ export function AgentForm({
               </Label>
               <Select
                 value={currentInputGuard ?? '__global__'}
+                disabled={locked('inputGuardMode')}
                 onValueChange={(v) =>
                   setValue(
                     'inputGuardMode',
@@ -1593,6 +1674,7 @@ export function AgentForm({
               </Label>
               <Select
                 value={currentOutputGuard ?? '__global__'}
+                disabled={locked('outputGuardMode')}
                 onValueChange={(v) =>
                   setValue(
                     'outputGuardMode',
@@ -1628,6 +1710,7 @@ export function AgentForm({
               </Label>
               <Select
                 value={currentCitationGuard ?? '__global__'}
+                disabled={locked('citationGuardMode')}
                 onValueChange={(v) =>
                   setValue(
                     'citationGuardMode',
@@ -1666,6 +1749,7 @@ export function AgentForm({
               <Checkbox
                 id="runtimePromptManaged"
                 checked={currentRuntimePromptManaged}
+                disabled={locked('runtimePromptManaged')}
                 onCheckedChange={(v) => {
                   const next = v === true;
                   setValue('runtimePromptManaged', next, { shouldDirty: true });
@@ -1703,6 +1787,7 @@ export function AgentForm({
                 <Textarea
                   id="runtimePromptNote"
                   rows={2}
+                  disabled={locked('runtimePromptNote')}
                   placeholder="Optional: where is the real prompt built? e.g. lib/questionnaire/extractor-capability.ts"
                   {...register('runtimePromptNote', {
                     setValueAs: (v: string) => (v === '' ? null : v),
@@ -1734,6 +1819,7 @@ export function AgentForm({
             <Textarea
               id="persona"
               rows={5}
+              disabled={locked('persona')}
               placeholder={
                 selectedProfile?.persona
                   ? `Profile says: ${selectedProfile.persona.slice(0, 80)}${selectedProfile.persona.length > 80 ? '…' : ''}`
@@ -1746,6 +1832,7 @@ export function AgentForm({
                 <Checkbox
                   id="personaAppend"
                   checked={currentPersonaMode === 'append'}
+                  disabled={locked('personaMode')}
                   onCheckedChange={(v) =>
                     setValue('personaMode', v ? 'append' : 'override', { shouldDirty: true })
                   }
@@ -1774,6 +1861,7 @@ export function AgentForm({
             <Textarea
               id="systemInstructions"
               rows={16}
+              disabled={locked('systemInstructions')}
               {...register('systemInstructions')}
               className="font-mono text-xs"
             />
@@ -1781,6 +1869,8 @@ export function AgentForm({
               <span>
                 {errors.systemInstructions ? (
                   <span className="text-destructive">{errors.systemInstructions.message}</span>
+                ) : locked('systemInstructions') ? (
+                  'Set by the platform.'
                 ) : (
                   'Changes are saved when you click Save changes.'
                 )}
@@ -1808,6 +1898,7 @@ export function AgentForm({
             <Textarea
               id="guardrails"
               rows={4}
+              disabled={locked('guardrails')}
               placeholder={
                 selectedProfile?.guardrails
                   ? `Profile says: ${selectedProfile.guardrails.slice(0, 80)}${selectedProfile.guardrails.length > 80 ? '…' : ''}`
@@ -1820,6 +1911,7 @@ export function AgentForm({
                 <Checkbox
                   id="guardrailsAppend"
                   checked={currentGuardrailsMode === 'append'}
+                  disabled={locked('guardrailsMode')}
                   onCheckedChange={(v) =>
                     setValue('guardrailsMode', v ? 'append' : 'override', { shouldDirty: true })
                   }
@@ -1855,6 +1947,7 @@ export function AgentForm({
             <Textarea
               id="brandVoiceInstructions"
               rows={4}
+              disabled={locked('brandVoiceInstructions')}
               placeholder={
                 selectedProfile?.brandVoiceInstructions
                   ? `Profile says: ${selectedProfile.brandVoiceInstructions.slice(0, 80)}${selectedProfile.brandVoiceInstructions.length > 80 ? '…' : ''}`
@@ -1869,6 +1962,7 @@ export function AgentForm({
                 <Checkbox
                   id="voiceAppend"
                   checked={currentVoiceMode === 'append'}
+                  disabled={locked('voiceMode')}
                   onCheckedChange={(v) =>
                     setValue('voiceMode', v ? 'append' : 'override', { shouldDirty: true })
                   }
@@ -1895,6 +1989,7 @@ export function AgentForm({
             tagIds={watch('knowledgeTagIds')}
             documentIds={watch('knowledgeDocumentIds')}
             agentId={agent?.id}
+            disabled={locked('knowledgeAccessMode')}
             onModeChange={(next) => setValue('knowledgeAccessMode', next, { shouldDirty: true })}
             onTagsChange={(next) => setValue('knowledgeTagIds', next, { shouldDirty: true })}
             onDocumentsChange={(next) =>
@@ -1930,6 +2025,7 @@ export function AgentForm({
             </Label>
             <Select
               value={watch('knowledgeRetrievalMode')}
+              disabled={locked('knowledgeRetrievalMode')}
               onValueChange={(v) =>
                 setValue('knowledgeRetrievalMode', v as AgentFormData['knowledgeRetrievalMode'], {
                   shouldDirty: true,
@@ -1962,6 +2058,7 @@ export function AgentForm({
                 id="knowledgeTriggerKeywords"
                 placeholder="e.g. refund, warranty, returns"
                 {...register('knowledgeTriggerKeywords')}
+                disabled={locked('knowledgeTriggerKeywords')}
               />
               {errors.knowledgeTriggerKeywords && (
                 <p className="text-destructive text-xs">
@@ -1985,12 +2082,14 @@ export function AgentForm({
               id="topicBoundaries"
               placeholder="e.g. competitor pricing, legal advice, medical"
               {...register('topicBoundaries')}
+              disabled={locked('topicBoundaries')}
             />
           </div>
 
           {isEdit && agent && (
             <InstructionsHistoryPanel
               agentId={agent.id}
+              readOnly={locked('systemInstructions')}
               onReverted={() => {
                 // Revert mutates the server-side instructions; re-pull the
                 // fresh agent into the form so the textarea reflects reality.
@@ -2014,7 +2113,10 @@ export function AgentForm({
         {/* ================= TAB 4 — CAPABILITIES ================= */}
         <TabsContent value="capabilities" className="pt-4">
           {isEdit && agent ? (
-            <AgentCapabilitiesTab agentId={agent.id} />
+            <AgentCapabilitiesTab
+              agentId={agent.id}
+              bindingsLocked={platformAgent?.bindingsLocked ?? false}
+            />
           ) : (
             <div className="text-muted-foreground space-y-2 rounded-md border p-6 text-sm leading-relaxed">
               <p>
@@ -2172,7 +2274,11 @@ export function AgentForm({
         {/* ================= TAB 8 — EMBED ================= */}
         <TabsContent value="embed" className="pt-4">
           {isEdit && agent ? (
-            <EmbedConfigPanel agentId={agent.id} appUrl={process.env.NEXT_PUBLIC_APP_URL ?? ''} />
+            <EmbedConfigPanel
+              agentId={agent.id}
+              appUrl={process.env.NEXT_PUBLIC_APP_URL ?? ''}
+              appearanceLocked={locked('widgetConfig')}
+            />
           ) : (
             <div className="text-muted-foreground space-y-2 rounded-md border p-6 text-sm leading-relaxed">
               <p>
