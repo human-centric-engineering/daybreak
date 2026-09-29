@@ -533,13 +533,16 @@ describe('seedChunks', () => {
 // --- Phase 2: embedChunks ---
 
 describe('embedChunks', () => {
-  beforeEach(() => vi.resetAllMocks());
+  beforeEach(() => {
+    vi.resetAllMocks();
+    mockEnv.TENANCY_MODE = 'multi';
+  });
 
   it('returns immediately when all chunks are already embedded', async () => {
     db.aiKnowledgeChunk.count.mockResolvedValue(10);
     db.$queryRawUnsafe.mockResolvedValue([]);
 
-    const result = await embedChunks();
+    const result = await inOrgB(() => embedChunks());
 
     expect(result).toEqual({ processed: 0, total: 10, alreadyEmbedded: 10 });
     expect(embedBatch).not.toHaveBeenCalled();
@@ -561,7 +564,7 @@ describe('embedChunks', () => {
     );
     db.$executeRawUnsafe.mockResolvedValue(1);
 
-    const result = await embedChunks();
+    const result = await inOrgB(() => embedChunks());
 
     expect(result).toEqual({ processed: 2, total: 5, alreadyEmbedded: 3 });
     expect(String(db.$queryRawUnsafe.mock.calls[0][0])).toContain('WHERE embedding IS NULL');
@@ -591,6 +594,6 @@ describe('embedChunks', () => {
     db.$queryRawUnsafe.mockResolvedValue([{ id: 'c1', content: 'text' }]);
     vi.mocked(embedBatch).mockRejectedValue(new Error('Provider unavailable'));
 
-    await expect(embedChunks()).rejects.toThrow('Provider unavailable');
+    await expect(inOrgB(() => embedChunks())).rejects.toThrow('Provider unavailable');
   });
 });

@@ -42,8 +42,6 @@ import {
 import { platformAgentFieldNames } from '@/lib/orchestration/agents/agent-field-registry';
 
 const EVERY_ORG = [
-  'pattern-advisor',
-  'quiz-master',
   'mcp-system',
   'eval-judge-correctness',
   'eval-judge-relevance',
@@ -57,7 +55,14 @@ const EVERY_ORG = [
   'eval-judge-answer-similarity',
   'cleanup-agent',
 ];
-const INSTALL_ONLY = ['provider-model-auditor', 'audit-report-writer'];
+// The provider auditors write the catalogue every org reads; the Learn page's
+// advisor and quiz serve the install's app admins (§116 t-733).
+const INSTALL_ONLY = [
+  'pattern-advisor',
+  'quiz-master',
+  'provider-model-auditor',
+  'audit-report-writer',
+];
 
 function fork(slug: string): PlatformAgentDefinition {
   return {
@@ -82,7 +87,7 @@ beforeEach(() => {
 });
 
 describe('the core roster', () => {
-  it('is the sixteen agents the seeds used to write, fourteen for every org', () => {
+  it('is the sixteen agents the seeds used to write, twelve for every org', () => {
     expect(CORE_PLATFORM_AGENTS.map((d) => d.slug).sort()).toEqual(
       [...EVERY_ORG, ...INSTALL_ONLY].sort()
     );
@@ -91,7 +96,7 @@ describe('the core roster', () => {
     ).toEqual(INSTALL_ONLY);
   });
 
-  it('gives the install org all sixteen and any other org the fourteen', () => {
+  it('gives the install org all sixteen and any other org the twelve', () => {
     expect(platformAgentsForOrg('install')).toHaveLength(16);
     expect(
       platformAgentsForOrg('cmorg-other')
@@ -234,7 +239,7 @@ describe('platformAgentRegistryHash', () => {
     expect(platformAgentRegistryHash()).not.toBe(before);
   });
 
-  it('moves when the patterns knowledge changes, so every org is reconciled for its copy', () => {
+  it('moves when the patterns knowledge changes, so an org that should hold a copy is reconciled for it', () => {
     const before = platformAgentRegistryHash();
     __resetPlatformAgentsForTests();
     patternsKnowledge.PATTERNS_DOCUMENT_SLUG = 'patterns-bbbbbbbb';

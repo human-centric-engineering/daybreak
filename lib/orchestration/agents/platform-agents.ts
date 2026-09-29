@@ -9,8 +9,8 @@
  * clean-up upload threw, MCP calls found no agent, and evaluation runs had no
  * judge.
  *
- * So each one is now a **definition** here, and every org gets its own
- * **instance** of it: an ordinary tenant row, created when the org is and
+ * So each one is now a **definition** here, and every org it is for (its
+ * `audience`) gets its own **instance** of it: an ordinary tenant row, created when the org is and
  * brought back in line with the definition on each release
  * (`reconcile-platform-agents.ts`). Nothing is shared between orgs, so every
  * §107/§108 mechanism (row isolation, caches, rate limits, budgets,
@@ -276,8 +276,10 @@ export function platformAgentsForOrg(orgId: string): readonly PlatformAgentDefin
 
 /**
  * A digest of everything a reconcile writes from: every definition, the
- * baseline, and the version of the patterns knowledge each org gets a copy of
- * (its document slug carries the content hash). An org whose stored digest
+ * baseline, and the version of the patterns knowledge the reconcile writes
+ * where an agent declares its tag (its document slug carries the content
+ * hash). One digest for every org, so a knowledge edit reconciles an org that
+ * holds no copy too: that run changes no agent, and rewrites only its marker. An org whose stored digest
  * differs is behind the running code and is reconciled by the maintenance job.
  *
  * `defaultBinding` is a function, so only its presence is hashed — it decides

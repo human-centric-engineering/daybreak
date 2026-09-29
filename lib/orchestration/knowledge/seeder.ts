@@ -305,10 +305,11 @@ export async function seedChunks(chunksJsonPath: string): Promise<void> {
  * repeatedly — only processes chunks that still need embeddings.
  *
  * The calling org's chunks only: at `multi` the chokepoint runs each query,
- * the raw ones included, under the org's `app.current_org`, so the policies
- * hide every other org's rows. That is what embeds a new org's copy of the
- * patterns knowledge (`POST /knowledge/embed` from that org). With no
- * embedding provider it throws, as it always has.
+ * the raw ones included, under the org's `app.current_org`, and the app role
+ * the runtime connects as is subject to the policies, so they hide every
+ * other org's rows. It needs an org to run in there (the embeddings script
+ * enters the install org). With no embedding provider it throws, as it always
+ * has.
  *
  * @returns Summary of what was processed
  */
