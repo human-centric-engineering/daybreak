@@ -558,6 +558,85 @@ describe('importOrchestrationConfig', () => {
     expect(result.workflows).toEqual({ created: 1, updated: 0 });
     expect(result.warnings).toEqual([]);
   });
+
+  it('skips the system workflow by slug on a target with no row, even with a now-invalid definition (t-729)', async () => {
+    // A bundle exported before t-729 carries the provider-model audit. On a
+    // target where that row is absent — or another org's, at `multi` — the
+    // row flag cannot see it, so without the slug check the import would
+    // create an ordinary copy (single) or P2002 and roll back (multi). An old
+    // definition the schema now rejects must report THIS reason, not "failed
+    // validation", which reads as a corrupt backup.
+    mockTx.aiWorkflow.findUnique.mockResolvedValue(null);
+    mockTx.aiWorkflow.create.mockResolvedValue({ id: 'wf-new' });
+    mockTx.aiWorkflowVersion.create.mockResolvedValue({ id: 'wfv-1', version: 1 });
+
+    const payload = {
+      ...minPayload,
+      data: {
+        ...minPayload.data,
+        workflows: [
+          makeWorkflow({
+            slug: 'tpl-provider-model-audit',
+            isActive: false,
+            workflowDefinition: { steps: [], entryStepId: 'missing', errorStrategy: 'fail' },
+          }),
+          makeWorkflow(),
+        ],
+      },
+    };
+    const result = await importOrchestrationConfig(payload, 'user-1');
+
+    // The system slug never reaches the database; the ordinary one restores.
+    expect(mockTx.aiWorkflow.findUnique).toHaveBeenCalledTimes(1);
+    expect(mockTx.aiWorkflow.findUnique).toHaveBeenCalledWith({
+      where: { slug: 'onboarding-flow' },
+    });
+    expect(mockTx.aiWorkflow.create).toHaveBeenCalledTimes(1);
+    expect(mockTx.aiWorkflow.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ slug: 'onboarding-flow' }),
+    });
+    expect(result.workflows).toEqual({ created: 1, updated: 0 });
+    expect(result.warnings).toEqual([
+      "System workflow 'tpl-provider-model-audit' skipped — system workflows cannot be overwritten by backup import",
+    ]);
+  });
+
+  it('skips an existing system workflow the slug list does not know, by its row flag, before parsing its definition (t-729)', async () => {
+    // A fork's own seeded system workflow: not in SYSTEM_WORKFLOW_SLUGS, but
+    // its row says isSystem. Versioning over it would republish the bundle's
+    // definition and could deactivate it, which PATCH refuses. Its old
+    // definition fails today's schema, and the reason must still be the
+    // system-workflow one, not "definition failed validation".
+    mockTx.aiWorkflow.findUnique.mockResolvedValue({
+      id: 'wf-sys',
+      slug: 'fork-system-flow',
+      isSystem: true,
+    });
+
+    const payload = {
+      ...minPayload,
+      data: {
+        ...minPayload.data,
+        workflows: [
+          makeWorkflow({
+            slug: 'fork-system-flow',
+            isActive: false,
+            workflowDefinition: { steps: [], entryStepId: 'missing', errorStrategy: 'fail' },
+          }),
+        ],
+      },
+    };
+    const result = await importOrchestrationConfig(payload, 'user-1');
+
+    expect(mockTx.aiWorkflow.update).not.toHaveBeenCalled();
+    expect(mockTx.aiWorkflowVersion.findFirst).not.toHaveBeenCalled();
+    expect(mockTx.aiWorkflowVersion.create).not.toHaveBeenCalled();
+    expect(mockTx.aiWorkflow.create).not.toHaveBeenCalled();
+    expect(result.workflows).toEqual({ created: 0, updated: 0 });
+    expect(result.warnings).toEqual([
+      "System workflow 'fork-system-flow' skipped — system workflows cannot be overwritten by backup import",
+    ]);
+  });
 });
 
 // ─── Knowledge tag import ────────────────────────────────────────────────────

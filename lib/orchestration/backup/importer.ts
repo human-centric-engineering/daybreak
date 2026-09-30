@@ -20,7 +20,10 @@ import {
   isReservedAgentSlug,
   reservedAgentSlugMessage,
 } from '@/lib/orchestration/agents/platform-agent-guard';
-import { isBuiltinTemplateSlug } from '@/lib/orchestration/workflows/template-catalogue';
+import {
+  isBuiltinTemplateSlug,
+  isSystemWorkflowSlug,
+} from '@/lib/orchestration/workflows/template-catalogue';
 import { createInitialVersion } from '@/lib/orchestration/workflows/version-service';
 import { workflowDefinitionSchema } from '@/lib/validations/orchestration';
 
@@ -32,6 +35,11 @@ export interface ImportResult {
   knowledgeTags: { created: number; updated: number };
   settingsUpdated: boolean;
   warnings: string[];
+}
+
+/** The warning for a system workflow the import refused, by slug or by row flag. */
+function systemWorkflowSkipped(slug: string): string {
+  return `System workflow '${slug}' skipped — system workflows cannot be overwritten by backup import`;
 }
 
 export async function importOrchestrationConfig(
@@ -359,9 +367,13 @@ export async function importOrchestrationConfig(
     // new published version (update path: published draft promoted to vN+1)
     // or the initial v1 (create path).
     for (const wf of parsed.data.workflows) {
-      const defParsed = workflowDefinitionSchema.safeParse(wf.workflowDefinition);
-      if (!defParsed.success) {
-        result.warnings.push(`Workflow '${wf.slug}' skipped — definition failed validation`);
+      // A system workflow is the seed's, as a platform agent is, so it is
+      // recognised by slug before anything else: a bundle exported before
+      // t-729 carries the provider-model audit, and on a target where that row
+      // is absent (or another org's, at `multi`) the row check further down
+      // cannot see it.
+      if (isSystemWorkflowSlug(wf.slug)) {
+        result.warnings.push(systemWorkflowSkipped(wf.slug));
         continue;
       }
       // A built-in template is served from code (§116 t-727). A backup taken
@@ -376,6 +388,21 @@ export async function importOrchestrationConfig(
         continue;
       }
       const existing = await tx.aiWorkflow.findUnique({ where: { slug: wf.slug } });
+      // The row flag catches a system workflow the slug list does not know (a
+      // fork's own seed). Versioning over one would republish whatever
+      // definition the bundle carried, and the update below could deactivate
+      // it or change its template status — both of which PATCH refuses.
+      if (existing?.isSystem) {
+        result.warnings.push(systemWorkflowSkipped(wf.slug));
+        continue;
+      }
+      // Parsed only after both system checks, so a skipped row never reports a
+      // definition problem as its reason.
+      const defParsed = workflowDefinitionSchema.safeParse(wf.workflowDefinition);
+      if (!defParsed.success) {
+        result.warnings.push(`Workflow '${wf.slug}' skipped — definition failed validation`);
+        continue;
+      }
       if (existing) {
         // Promote the imported snapshot to a new version on the existing workflow.
         const lastVersion = await tx.aiWorkflowVersion.findFirst({

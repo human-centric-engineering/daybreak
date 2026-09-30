@@ -212,6 +212,33 @@ release process.
   `platformAgentFieldNames('code')` is the list the API and version restore
   hold a system agent to.
 
+### Fixed
+
+- **Backup import no longer overwrites a system workflow** (t-729). The
+  provider-model audit (`tpl-provider-model-audit`, `isSystem: true`) was
+  exported in every bundle and versioned over on import, so restoring an older
+  bundle republished its stale definition and could deactivate the workflow,
+  which PATCH refuses. The export now leaves system workflows out, as it does
+  system agents and capabilities. The import skips one by slug, using the new
+  `SYSTEM_WORKFLOW_SLUGS` / `isSystemWorkflowSlug()` in
+  `lib/orchestration/workflows/template-catalogue.ts`, or by an existing row's
+  `isSystem` flag, and reports the skip. A bundle exported before this fix
+  still carries the audit workflow; importing it reports the skip whether or
+  not the target has that row. A fork's own seeded system workflow is covered
+  by the row flag wherever the importing org can see the row (at `multi`, a
+  row in another org is invisible, and the import fails on the slug as any
+  cross-org slug collision does today). The export leaves out the
+  same two, so a bundle no longer carries a row the import would refuse.
+  **Cost:** an admin's own edits to a system workflow are no longer in the
+  backup, so a restore to a fresh install brings back the seed's version.
+  **If you restored an older bundle before this fix**, check that the
+  provider-model audit workflow is active and is not marked as a template,
+  since that restore could have changed either. PATCH accepts `isActive: true`,
+  so an inactive one can be re-activated through the API. It refuses any
+  template-status change on a system workflow, and the seed resets that only when
+  `010-model-auditor` or the audit template it hashes changes, so a wrongly-set flag needs a direct
+  database update.
+
 ## [0.13.0] — 2026-09-24
 
 > **Alpha release.** Nineteenth tagged Sunrise release. **MINOR bump**. It
