@@ -28,6 +28,7 @@ vi.mock('@/lib/db/client', () => ({
 // ─── Imports after mocks ─────────────────────────────────────────────────────
 
 import { exportOrchestrationConfig } from '@/lib/orchestration/backup/exporter';
+import { BUILTIN_WORKFLOW_TEMPLATES } from '@/prisma/seeds/data/templates';
 
 // ─── Fixtures ────────────────────────────────────────────────────────────────
 
@@ -475,5 +476,30 @@ describe('exportOrchestrationConfig', () => {
     // Second findMany call is for capabilities
     const capCall = mockFindMany.mock.calls[1][0] as { where?: { isSystem?: boolean } };
     expect(capCall?.where?.isSystem).toBe(false);
+  });
+  it('leaves out template rows holding a built-in slug, and nothing else (§116 t-727)', async () => {
+    mockFindMany
+      .mockResolvedValueOnce([]) // agents
+      .mockResolvedValueOnce([]) // capabilities
+      .mockResolvedValueOnce([]) // workflows
+      .mockResolvedValueOnce([]); // webhooks
+    mockFindMany.mockResolvedValueOnce([]); // knowledgeTags
+    mockFindUnique.mockResolvedValue(null);
+
+    await exportOrchestrationConfig();
+
+    // Third findMany call is for workflows. Only a TEMPLATE row with a
+    // built-in slug is left out: that is a seed-era copy of a template served
+    // from code. The same slug on an ordinary workflow (a retired row an
+    // install switched back on) is live config and must be backed up.
+    const wfCall = mockFindMany.mock.calls[2][0] as {
+      where?: { NOT?: { isTemplate?: boolean; slug?: { in?: string[] } } };
+    };
+    expect(wfCall?.where).toEqual({
+      NOT: { isTemplate: true, slug: { in: expect.any(Array) } },
+    });
+    expect([...(wfCall?.where?.NOT?.slug?.in ?? [])].sort()).toEqual(
+      BUILTIN_WORKFLOW_TEMPLATES.map((t) => t.slug).sort()
+    );
   });
 });

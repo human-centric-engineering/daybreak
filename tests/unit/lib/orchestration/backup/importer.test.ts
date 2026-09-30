@@ -500,6 +500,64 @@ describe('importOrchestrationConfig', () => {
       ])
     );
   });
+
+  it('skips a built-in slug carried as a template: the seed-era row (§116 t-727)', async () => {
+    // The retired seed row still holds the slug on an upgraded install; a
+    // backup taken before the upgrade must not bring it back as a template.
+    mockTx.aiWorkflow.findUnique.mockResolvedValue({ id: 'wf-retired' });
+    mockTx.aiWorkflowVersion.findFirst.mockResolvedValue({ version: 1 });
+    mockTx.aiWorkflowVersion.create.mockResolvedValue({ id: 'wfv-2', version: 2 });
+    mockTx.aiWorkflow.update.mockResolvedValue({ id: 'wf-retired' });
+
+    const payload = {
+      ...minPayload,
+      data: {
+        ...minPayload.data,
+        workflows: [
+          makeWorkflow({ slug: 'tpl-customer-support', isTemplate: true }),
+          makeWorkflow(),
+        ],
+      },
+    };
+    const result = await importOrchestrationConfig(payload, 'user-1');
+
+    // Only the ordinary workflow is looked up and written; the built-in never
+    // reaches the database.
+    expect(mockTx.aiWorkflow.findUnique).toHaveBeenCalledTimes(1);
+    expect(mockTx.aiWorkflow.update).toHaveBeenCalledTimes(1);
+    expect(mockTx.aiWorkflowVersion.create).toHaveBeenCalledTimes(1);
+    expect(mockTx.aiWorkflow.create).not.toHaveBeenCalled();
+    expect(mockTx.aiWorkflow.findUnique).toHaveBeenCalledWith({
+      where: { slug: 'onboarding-flow' },
+    });
+    expect(result.workflows).toEqual({ created: 0, updated: 1 });
+    expect(result.warnings).toEqual([
+      "Workflow 'tpl-customer-support' skipped — built-in templates are served from code, not restored from a backup",
+    ]);
+  });
+
+  it('imports an ordinary workflow holding a built-in slug: a row the install switched back on', async () => {
+    // A retired row an install turned back on (or one an admin converted) is
+    // live config. Skipping it would silently drop a running workflow.
+    mockTx.aiWorkflow.findUnique.mockResolvedValue(null);
+    mockTx.aiWorkflow.create.mockResolvedValue({ id: 'wf-new' });
+    mockTx.aiWorkflowVersion.create.mockResolvedValue({ id: 'wfv-1', version: 1 });
+
+    const payload = {
+      ...minPayload,
+      data: {
+        ...minPayload.data,
+        workflows: [makeWorkflow({ slug: 'tpl-scheduled-source-monitor', isTemplate: false })],
+      },
+    };
+    const result = await importOrchestrationConfig(payload, 'user-1');
+
+    expect(mockTx.aiWorkflow.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ slug: 'tpl-scheduled-source-monitor', isTemplate: false }),
+    });
+    expect(result.workflows).toEqual({ created: 1, updated: 0 });
+    expect(result.warnings).toEqual([]);
+  });
 });
 
 // ─── Knowledge tag import ────────────────────────────────────────────────────
