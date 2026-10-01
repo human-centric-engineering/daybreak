@@ -69,6 +69,20 @@ release process.
   (`PATTERNS_DOCUMENT_SLUG` among them), are the patterns knowledge's per-org
   seam.
 
+- **`LlmProvider.embedMany?(texts, { model, dimensions?, inputType? })`**, with
+  the `EmbedManyOptions` / `EmbedManyResult` types (t-740). This is how
+  knowledge ingestion and search now reach an embedding vendor: through the
+  provider manager, counted by the in-flight Proxy like chat, instead of the
+  embedder's own `fetch`. Implemented by `VoyageProvider` and
+  `OpenAiCompatibleProvider`, and classified `track` in `METHOD_DISPOSITION`.
+  It is optional, so a fork's provider class written against the older contract
+  still compiles, but such a class cannot be used for knowledge embedding
+  (`embedding_unsupported`). Implement it to make it usable. It must return
+  plain `number[]` vectors in input order, send `dimensions` only when given
+  one, and refuse redirects. `OpenAiCompatibleProvider` asks for
+  `encoding_format: 'float'`, because the `openai` SDK's base64 default decodes
+  to `Float32Array`.
+
 ### Changed
 
 - **Admin edits to a system agent's platform-owned fields no longer
@@ -192,6 +206,37 @@ release process.
   "Use template" list (the code version is served instead) but listed on
   the workflows page.
 
+- **The provider manager now SSRF-checks a configured Voyage `baseUrl`** at
+  build time (t-740), as it already did for OpenAI-compatible rows. Knowledge
+  text is posted there by `VoyageProvider.embedMany`, which honours the row's
+  `baseUrl` as the knowledge embedder did; the embedder used to run this check
+  itself. A Voyage row whose `baseUrl` fails the guard now fails to build with
+  `unsafe_base_url`. As for OpenAI-compatible rows, loopback is allowed only
+  when the row is marked Local.
+- **Knowledge embedding now goes through the provider manager's build rules**
+  (t-740), with three consequences for existing installs:
+  - **Keyless remote endpoints.** An OpenAI-compatible embedding row that is
+    not marked Local and has no API key used to embed, because the embedder
+    sent no `Authorization` header. The manager requires a key for a
+    non-local row, as it always has for chat, so that row now fails with
+    `missing_api_key`. For a keyless self-hosted server (TEI, vLLM), mark the
+    row Local, which also costs it at $0. For a hosted one, set its API key.
+  - **Timeouts.** A batch of more than one text gets at least 5 minutes
+    (`EMBEDDING_BATCH_TIMEOUT_MS`), where the old embedder set none. A single
+    text, such as a search query inside a chat turn, keeps the row's own
+    timeout.
+  - **Test model.** The admin **Test model** action for an embedding model
+    (`POST /api/v1/admin/orchestration/providers/[id]/test-model`) now calls
+    `embedMany` with the model under test. It used to call `embed`, which
+    ignored that model and, on Voyage, the row's `baseUrl`.
+
+### Deprecated
+
+- **`LlmProvider.embed`** (t-740). It cannot choose a model or dimension or
+  report usage, and knowledge embedding never used it. Use `embedMany`. It
+  will be removed at the next MAJOR. Until then it stays for fork provider
+  classes and the admin test-model route.
+
 ### Removed
 
 - **The agent-only seed units `006-quiz-master`, `016-evaluation-judges`,
@@ -211,6 +256,20 @@ release process.
   t-725). The three fields it named are now three of many:
   `platformAgentFieldNames('code')` is the list the API and version restore
   hold a system agent to.
+
+- **The bare `OPENAI_API_KEY` embedding fallback, and `UNCONFIGURED_OPENAI_SLUG`
+  (`'env:openai'`)** from `knowledge/embedder.ts` (t-740). The embedder's last
+  resort sent documents to `api.openai.com` off the env var alone, with no
+  provider row an admin could see. It dated from before provider rows and
+  env-key detection existed. **Upgrade check:** your install is unaffected if
+  Settings has an embedding model selected, or an active OpenAI, Voyage or
+  local provider row exists. If neither, add OpenAI as a provider (the
+  Providers page detects `OPENAI_API_KEY` and creates it in one step). It then
+  produces the same model and 1536-dimension vectors, so nothing needs
+  re-embedding. Until you do, a document upload fails with an error that names
+  the fix (the server logs a `warn` saying the same), and **Generate
+  Embeddings** stays disabled behind the knowledge page's "Add an embedding
+  provider" banner. Existing embeddings are untouched. A fork eligibility rule naming `env:openai` now matches nothing.
 
 ### Fixed
 

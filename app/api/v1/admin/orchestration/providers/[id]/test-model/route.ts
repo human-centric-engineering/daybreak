@@ -133,8 +133,24 @@ export const POST = withAdminAuth<{ id: string }>(async (request, session, { par
 
     if (capability === 'embedding') {
       // Single-input embedding round-trip. Cheaper than chat and
-      // exercises the same auth + base URL surface.
-      await provider.embed('hello');
+      // exercises the same auth + base URL surface. Through `embedMany`
+      // with the model under test, which is what knowledge ingestion calls
+      // (t-740); the deprecated `embed` ignores the model and, on Voyage, the
+      // row's baseUrl, so it could pass while ingestion failed. A class
+      // without `embedMany` is refused, as ingestion refuses it — the audio
+      // branch's shape for a missing `transcribe`.
+      if (!provider.embedMany) {
+        return successResponse({
+          ok: false,
+          latencyMs: null,
+          model,
+          capability,
+          error: 'provider_no_embedding_support',
+          message:
+            'This provider class does not implement embedMany, so knowledge embedding cannot use it.',
+        });
+      }
+      await provider.embedMany(['hello'], { model });
     } else if (capability === 'audio') {
       // Tiny silent WAV — verifies API key, base URL and model id
       // without recording a real clip. Most providers return an
