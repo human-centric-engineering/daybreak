@@ -29,7 +29,11 @@ import { getDefaultModelForTask } from '@/lib/orchestration/llm/settings-resolve
 import { isProviderEligible } from '@/lib/orchestration/llm/provider-eligibility';
 import type { ExecutionContext } from '@/lib/orchestration/engine/context';
 import { ExecutorError } from '@/lib/orchestration/engine/errors';
-import { isRequestFault, ProviderError } from '@/lib/orchestration/llm/provider';
+import {
+  isRequestFault,
+  PROVIDER_NOT_PERMITTED,
+  ProviderError,
+} from '@/lib/orchestration/llm/provider';
 import { interpolatePrompt } from '@/lib/orchestration/engine/interpolate-prompt';
 import {
   GEN_AI_OPERATION_NAME,
@@ -159,7 +163,7 @@ export async function runLlmCall(
           // question whose answer cannot change within the run.
           throw new ExecutorError(
             params.stepId,
-            'provider_not_permitted',
+            PROVIDER_NOT_PERMITTED,
             'The model for this step resolves to a provider this deployment does not permit',
             undefined,
             false
@@ -169,7 +173,13 @@ export async function runLlmCall(
 
       let provider;
       try {
-        provider = await getProvider(modelInfo.provider);
+        // The gate (§120 t-741) is told the same thing the check above turned
+        // on: an override is the operator's choice, the task default is ours.
+        provider = await getProvider(modelInfo.provider, {
+          task: 'chat',
+          source: override === null ? 'primary' : 'explicit',
+          primarySlug: null,
+        });
       } catch (err) {
         throw new ExecutorError(
           params.stepId,

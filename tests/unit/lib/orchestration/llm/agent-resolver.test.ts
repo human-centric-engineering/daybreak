@@ -128,6 +128,7 @@ describe('resolveAgentProviderAndModel', () => {
         providerSlug: 'openai',
         model: 'gpt-4o-mini',
         fallbacks: ['anthropic'],
+        provenance: { task: 'chat', primary: 'explicit', fallbacks: 'explicit' },
       });
       expect(prisma.aiProviderConfig.findMany).not.toHaveBeenCalled();
     });
@@ -244,6 +245,56 @@ describe('resolveAgentProviderAndModel', () => {
 
       expect(result.providerSlug).toBe('anthropic');
       expect(result.fallbacks).toEqual(['openai', 'ollama-local']);
+    });
+  });
+
+  // The binding tells the call-time gate (§120 t-741) where each provider came
+  // from, so the eligibility rule sees the same `source` at call time that it
+  // saw at selection.
+  describe('provenance', () => {
+    it('records an auto-picked primary and a system fill', async () => {
+      setProviders([
+        makeProviderRow({ slug: 'anthropic' }),
+        makeProviderRow({ slug: 'openai', createdAt: new Date('2026-04-16T00:00:00Z') }),
+      ]);
+
+      const result = await resolveAgentProviderAndModel(makeAgent(), 'routing');
+
+      expect(result.provenance).toEqual({
+        task: 'routing',
+        primary: 'primary',
+        fallbacks: 'system',
+      });
+    });
+
+    it("records a named provider and the agent's own fallback list as explicit", async () => {
+      setProviders([makeProviderRow({ slug: 'anthropic' })]);
+
+      const result = await resolveAgentProviderAndModel(
+        makeAgent({ provider: 'anthropic', model: '', fallbackProviders: ['openai'] }),
+        'chat'
+      );
+
+      expect(result.provenance).toEqual({
+        task: 'chat',
+        primary: 'explicit',
+        fallbacks: 'explicit',
+      });
+    });
+
+    it('records an auto-picked primary with an explicit fallback list', async () => {
+      setProviders([makeProviderRow({ slug: 'anthropic' })]);
+
+      const result = await resolveAgentProviderAndModel(
+        makeAgent({ fallbackProviders: ['openai'] }),
+        'chat'
+      );
+
+      expect(result.provenance).toEqual({
+        task: 'chat',
+        primary: 'primary',
+        fallbacks: 'explicit',
+      });
     });
   });
 });

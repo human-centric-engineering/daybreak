@@ -440,7 +440,22 @@ export async function executeOrchestrator(
 
         const retryParsed: unknown = JSON.parse(retryResult.content);
         plannerResponse = orchestratorPlannerResponseSchema.parse(retryParsed);
-      } catch {
+      } catch (retryErr) {
+        // The retry CALL failed: re-wrap it with its own verdict and billing,
+        // the same way the first planner call's catch does, so a request fault
+        // or a provider-policy refusal (§120 t-741) is not re-issued and its
+        // spend is not lost. Only a second PARSE failure is a parse failure.
+        if (retryErr instanceof ExecutorError) {
+          throw new ExecutorError(
+            step.id,
+            'planner_call_failed',
+            `Planner LLM retry failed in round ${round + 1}: ${retryErr.message}`,
+            retryErr,
+            retryErr.retriable,
+            retryErr.tokensUsed,
+            retryErr.costUsd
+          );
+        }
         throw new ExecutorError(
           step.id,
           'planner_parse_failed',

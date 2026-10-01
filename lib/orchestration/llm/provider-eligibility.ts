@@ -27,16 +27,15 @@
  * only where the rule has been applied so far.
  *
  * **That list is hand-derived and was short on all three occasions it was
- * checked**, so treat it as the current state, not a guarantee. The seam
- * constrains what it is consulted for; it is not a boundary around the process.
- * `.context/orchestration/llm-providers.md` carries the per-path table, the
- * Proxy every manager-built provider passes through, and the two routes that
- * bypass the provider manager entirely — the last of which is why a complete
- * boundary needs enforcement at the point calls pass through rather than at
- * each site that chooses. Note the limit on all of it, recorded 2026-09-07 and
- * written down in that file: the guarantee binds Sunrise core, not a fork's own
- * code, which can construct a provider directly. The eight choices this seam
- * covers:
+ * checked**, which is why it is not the boundary. The boundary is
+ * {@link assertProviderCallPermitted}, the call-time gate at the bottom of this
+ * file: the provider manager's Proxy runs it before every vendor call, so a
+ * site missing from this list chooses less well but cannot send a call the rule
+ * refuses (§120 t-741). `.context/orchestration/llm-providers.md` carries the
+ * per-path table and the gate. Note the limit on all of it, recorded 2026-09-07
+ * and written down in that file: the guarantee binds Sunrise core, not a fork's
+ * own code, which can construct a provider directly. The eight choices
+ * selection covers:
  *
  *  - the **auto-picked primary**, when the agent leaves `provider` blank and
  *    the resolver chooses `candidates[0]`;
@@ -67,17 +66,20 @@
  * next candidate, which is what every other guard in those functions already
  * does.
  *
- * It does NOT filter an **explicit `agent.provider`**, an explicit step
- * `modelOverride`, a review request's own `modelOverride`, an operator's pinned
- * audio default, or the `EVALUATION_DEFAULT_PROVIDER` / `_MODEL` /
- * `EVALUATION_JUDGE_MODEL` environment variables. Each is an operator's
+ * At selection it does NOT filter an **explicit `agent.provider`**, an explicit step
+ * `modelOverride`, a review request's own `modelOverride`, or the
+ * `EVALUATION_DEFAULT_PROVIDER` / `_MODEL` / `EVALUATION_JUDGE_MODEL`
+ * environment variables. Each is an operator's
  * recorded decision, and silently rerouting one would make a request answer
  * from a provider its own configuration does not name — harder to diagnose than
- * a refusal, and a worse failure than the one being prevented.
+ * a refusal, and a worse failure than the one being prevented. The call-time
+ * gate refuses them instead, as `source: 'explicit'`, when the rule says no.
+ * The one operator choice asked at selection is the pinned AUDIO default, as
+ * `'explicit'`: that pin is documented to fall through to the matrix when it is
+ * unusable, and a refused pin is unusable, so asking first lets a permitted row
+ * serve the request instead of the gate failing it.
  * `.context/orchestration/llm-providers.md` carries the per-path coverage
- * table. It is hand-derived and has been short once, so re-derive it from the
- * tree rather than from its previous version before treating this seam as a
- * whole-tree guarantee.
+ * table, which says where Sunrise chooses rather than where data can go.
  *
  * The intended enforcement for that case is at the point of CHOOSING: a
  * per-org install should not offer a provider the org has not approved, so the
@@ -115,6 +117,8 @@
  */
 
 import { logger } from '@/lib/logging';
+import { PROVIDER_NOT_PERMITTED, ProviderError } from '@/lib/orchestration/llm/provider';
+import { getTenantContext, isMultiTenant } from '@/lib/tenancy/context';
 import type { TaskType } from '@/types/orchestration';
 
 /**
@@ -148,14 +152,24 @@ export interface ProviderEligibilityContext {
    *    added for — the opposite of what widening coverage is supposed to do.
    *    Reusing `'primary'` extends an existing rule to them for free, and it is
    *    honest: the category is the same one.
-   *  - `'explicit'` — the agent's own `fallbackProviders`, a recorded operator
-   *    choice.
+   *  - `'explicit'` — a recorded operator choice. At selection that is the
+   *    agent's own `fallbackProviders`. At the call-time gate
+   *    ({@link assertProviderCallPermitted}) it is also the operator's choice of
+   *    PRIMARY: an explicit `agent.provider`, a step's `modelOverride`, a pinned
+   *    audio or embedding default, an `EVALUATION_*` env var, an admin testing a
+   *    named provider. Selection never filters those, because rerouting a
+   *    recorded choice is worse than refusing it; the gate refuses them when the
+   *    rule says no, which is the difference.
    *  - `'system'` — the automatic fill nobody asked for.
    */
   source: 'primary' | 'explicit' | 'system';
   /**
-   * The provider already chosen as primary. `null` when `source` is
-   * `'primary'`, because that is the choice being made.
+   * The provider already chosen as primary. `null` exactly when `source` is
+   * `'primary'`, because that is the choice being made; for `'explicit'` and
+   * `'system'` it is always set. At the call-time gate, a call to the primary
+   * itself under one of those sources (an explicit `agent.provider`, or an
+   * unrecorded primary-position call asked as `'explicit'`) carries its own
+   * slug here; an unrecorded fallback carries the real primary's.
    *
    * NOT guaranteed absent from `candidates`. The system fill excludes it, but
    * an agent's own `fallbackProviders` list is passed through as the operator
@@ -384,11 +398,12 @@ export async function resolveEligibleProviders(
  * and remedied in different places; a shared throw here would force all of them
  * through one error type that fits none.
  *
- * Only call this where SUNRISE chose the provider. A provider reached through
- * an operator's recorded choice — an explicit `agent.provider`, a step's
- * `modelOverride`, a pinned audio default, an `EVALUATION_*` env var — is out
- * of scope by the seam's rule, and passing one here would reroute a decision
- * that was made deliberately.
+ * Call this where SUNRISE chose the provider. A provider reached through an
+ * operator's recorded choice — an explicit `agent.provider`, a step's
+ * `modelOverride`, an `EVALUATION_*` env var — is left to the call-time gate,
+ * which refuses rather than reroutes. The exception is a choice whose own
+ * contract is to fall through when unusable (the pinned audio default, asked
+ * as `'explicit'` in `tryAudioRow`).
  */
 export async function isProviderEligible(
   slug: string,
@@ -396,4 +411,219 @@ export async function isProviderEligible(
 ): Promise<boolean> {
   const eligible = await resolveEligibleProviders([slug], context);
   return eligible.length > 0;
+}
+
+// ---------------------------------------------------------------------------
+// The call-time gate (§120 t-741)
+// ---------------------------------------------------------------------------
+
+/**
+ * Where the provider for a resolved binding came from, carried from the
+ * resolver to the call so the gate can tell the rule.
+ *
+ * Two answers because a binding holds two kinds of provider: its primary
+ * (auto-picked, or the operator's explicit `agent.provider`) and its fallbacks
+ * (the agent's own list, or the system fill). Hand it to
+ * `getProviderWithFallbacks`, or turn it into one call's context with
+ * {@link primaryCallContext} / {@link fallbackCallContext}.
+ */
+export interface BindingProvenance {
+  task: TaskType;
+  primary: 'primary' | 'explicit';
+  fallbacks: 'explicit' | 'system';
+}
+
+/** The gate context for a call to a binding's primary. */
+export function primaryCallContext(
+  provenance: BindingProvenance | undefined
+): ProviderEligibilityContext | undefined {
+  if (!provenance) return undefined;
+  return { task: provenance.task, source: provenance.primary, primarySlug: null };
+}
+
+/** The gate context for a call to one of a binding's fallbacks. */
+export function fallbackCallContext(
+  provenance: BindingProvenance | undefined,
+  primarySlug: string
+): ProviderEligibilityContext | undefined {
+  if (!provenance) return undefined;
+  return { task: provenance.task, source: provenance.fallbacks, primarySlug };
+}
+
+/**
+ * Thrown by the call-time gate when the eligibility rule refuses a vendor call.
+ *
+ * A `ProviderError` with code `provider_not_permitted`, which `isRequestFault`
+ * counts: a policy answer is the same for every attempt and every provider
+ * position, so nothing retries it, fails over from it, or records it against
+ * the provider's circuit breaker. Failing over would be the reroute the gate
+ * exists not to do, and a breaker failure would let one org's policy take a
+ * healthy provider offline for every other org.
+ *
+ * The message carries no slug, because executors forward `ProviderError`
+ * messages to clients. The slug is on `providerSlug`, and in the log line the
+ * gate writes before throwing.
+ */
+export class ProviderCallRefusedError extends ProviderError {
+  readonly providerSlug: string;
+  /**
+   * Why: `'policy'` when the rule refused the provider, `'no_org_scope'` when
+   * at `multi` there was no org to ask it for. A caller that tells someone what
+   * to change needs the difference — choosing another provider fixes the
+   * first and never the second.
+   */
+  readonly reason: 'policy' | 'no_org_scope';
+  constructor(providerSlug: string, reason: 'policy' | 'no_org_scope' = 'policy') {
+    super(
+      reason === 'policy'
+        ? 'The provider for this call is not permitted by this deployment’s provider policy'
+        : 'This call ran outside any organisation scope, so no provider policy could permit it',
+      { code: PROVIDER_NOT_PERMITTED, retriable: false }
+    );
+    this.name = 'ProviderCallRefusedError';
+    this.providerSlug = providerSlug;
+    this.reason = reason;
+  }
+}
+
+/**
+ * Keep the context's contract: `primarySlug` is `null` only for `'primary'`.
+ * A call-time context for the primary position has no other primary to name,
+ * so for `'explicit'` (an operator's named provider) it is the provider itself.
+ * A fork rule written against the selection-time contract may dereference it
+ * for any non-`'primary'` source, and a `null` there would refuse, or throw and
+ * refuse, a call the rule means to allow.
+ */
+function withPrimarySlug(
+  context: ProviderEligibilityContext,
+  slug: string
+): ProviderEligibilityContext {
+  if (context.source === 'primary' || context.primarySlug !== null) return context;
+  return { ...context, primarySlug: slug };
+}
+
+/**
+ * A call whose caller recorded no provenance, made in a FALLBACK position:
+ * `getProviderWithFallbacks` without a binding provenance, reaching past the
+ * primary. Distinct from `undefined` (an unrecorded call in the primary
+ * position) because a fallback is asked as a fallback — as `'explicit'` or
+ * `'system'`, with the real primary — which a lone call cannot be.
+ */
+export interface UnrecordedFallback {
+  unrecordedFallbackOf: string;
+}
+
+/** Everything the call-time gate can know about where a provider came from. */
+export type CallOrigin = ProviderEligibilityContext | UnrecordedFallback | undefined;
+
+/**
+ * The sources an unrecorded call is asked under. An unrecorded call is one
+ * provider fetched by name, which is a call in the PRIMARY position, and a
+ * primary is either Sunrise's pick (`'primary'`) or an operator's (`'explicit'`).
+ * `'system'` is not asked: it describes a fill drawn alongside a different
+ * primary, and no honest `primarySlug` exists for it here — giving the provider
+ * as its own primary contradicts the contract a rule is written to, that the
+ * fill excludes the primary.
+ */
+const PRIMARY_POSITION_SOURCES: readonly ProviderEligibilityContext['source'][] = [
+  'primary',
+  'explicit',
+];
+
+/**
+ * The sources an unrecorded FALLBACK is asked under: the two a fallback can
+ * be, the agent's own list or the system fill, each with the real primary.
+ * Without `'system'` here a rule that refuses a provider only as the silent
+ * fill would be skipped whenever a caller left provenance out.
+ */
+const FALLBACK_POSITION_SOURCES: readonly ProviderEligibilityContext['source'][] = [
+  'explicit',
+  'system',
+];
+
+/**
+ * Refuse a vendor call the eligibility rule does not permit.
+ *
+ * The provider manager's Proxy calls this before every vendor-reaching method
+ * (`chat`, `chatStream`, `embed`, `embedMany`, `transcribe`, `transcribeStream`),
+ * once per CALL — never once per cached instance, so a rule whose answer changes
+ * takes effect on the next call rather than after the 5-minute instance cache
+ * expires. The selection sites still filter so that Sunrise chooses well; this
+ * is what makes the policy complete for every call core makes through the
+ * manager, including the ones no selection site saw. It is not a boundary
+ * around a fork's own code, which can construct a provider directly (decided
+ * 2026-09-07).
+ *
+ * `slug` is the BUILT row's slug, never the string a caller asked
+ * `getProvider` for: a lookup that resolved a different row than the caller
+ * checked is refused for that row, not waved through on the caller's check.
+ *
+ * **No provenance is not permission.** A call whose caller recorded no
+ * `context` is permitted only if the rule permits it both as Sunrise's pick
+ * (`'primary'`) and as an operator's (`'explicit'`) — the two things a lone
+ * provider fetched by name can be. Whichever way a fork's rule treats those
+ * two, an unrecorded call gets the stricter answer, and recording provenance
+ * can only ever relax a refusal. (`'system'` is the fill drawn beside some
+ * other primary, which an unrecorded call is not; see
+ * `PRIMARY_POSITION_SOURCES`.)
+ *
+ * **The org.** The rule runs in the caller's async context, so a rule reads
+ * `getTenantContext()` itself. A call with no org to answer for is decided
+ * here, before the rule: at `single` it is the install org, as
+ * `requireTenantContext` answers. At `multi`, a call stack that entered no org
+ * scope, or entered `runAsSystem` (which bypasses row isolation and names no
+ * org), is refused — there is no org whose policy could permit it. At `multi`
+ * the request paths, jobs and `scripts/seed-embeddings.ts` all enter an org
+ * before they reach a vendor; a path that does not is already a tenancy bug.
+ *
+ * Not called for `listModels` and `testConnection`. They send no prompt or
+ * document text, and providers are platform-admin configuration: gating them
+ * by the admin's active org would stop a platform admin testing a provider
+ * before granting it to anyone.
+ *
+ * @throws ProviderCallRefusedError when the rule refuses, or when at `multi`
+ *   there is no org to evaluate it for.
+ */
+export async function assertProviderCallPermitted(
+  slug: string,
+  origin: CallOrigin,
+  task: TaskType
+): Promise<void> {
+  const context = origin && 'source' in origin ? origin : undefined;
+  const fallbackOf =
+    origin && 'unrecordedFallbackOf' in origin ? origin.unrecordedFallbackOf : null;
+  const tenant = getTenantContext();
+  if (isMultiTenant() && (tenant === null || tenant.orgId === null)) {
+    logger.error('Refusing a provider call made outside any org scope', {
+      providerSlug: slug,
+      task,
+      tenantSource: tenant?.source ?? null,
+      fix: 'At TENANCY_MODE=multi every vendor call must run inside runAsOrg / forEachOrg, so the provider policy of the org it acts for can be applied. runAsSystem names no org.',
+    });
+    throw new ProviderCallRefusedError(slug, 'no_org_scope');
+  }
+
+  // The contexts the rule is asked, exactly as it sees them: one for a recorded
+  // call and, for an unrecorded one, every source its position can have.
+  const asked = context
+    ? [withPrimarySlug(context, slug)]
+    : fallbackOf !== null
+      ? FALLBACK_POSITION_SOURCES.map((source) => ({ task, source, primarySlug: fallbackOf }))
+      : PRIMARY_POSITION_SOURCES.map((source) =>
+          withPrimarySlug({ task, source, primarySlug: null }, slug)
+        );
+  for (const askedContext of asked) {
+    if (await isProviderEligible(slug, askedContext)) continue;
+    logger.error('Refusing a provider call the eligibility rule does not permit', {
+      providerSlug: slug,
+      recorded: context !== undefined,
+      // What the rule was given, so the refusal can be reproduced from the log.
+      task: askedContext.task,
+      source: askedContext.source,
+      primarySlug: askedContext.primarySlug,
+      orgId: tenant?.orgId ?? null,
+      fix: 'The rule registered via registerProviderEligibility() in lib/app/llm-providers.ts did not permit this provider for this call — by policy, or because it threw. A call with no recorded provenance must be permitted as both an auto-picked and an operator-chosen primary.',
+    });
+    throw new ProviderCallRefusedError(slug);
+  }
 }

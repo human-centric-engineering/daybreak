@@ -27,7 +27,10 @@ import { getDefaultModelForTask } from '@/lib/orchestration/llm/settings-resolve
 // `resolveEligibleProviders`. It used to be a module-load side effect here,
 // which made registration depend on who imported this file — see that module's
 // `ensureWired` for why that was wrong.
-import { resolveEligibleProviders } from '@/lib/orchestration/llm/provider-eligibility';
+import {
+  resolveEligibleProviders,
+  type BindingProvenance,
+} from '@/lib/orchestration/llm/provider-eligibility';
 import type { TaskType } from '@/types/orchestration';
 
 /** Number of system fallbacks to attach when an agent has no explicit provider. */
@@ -37,6 +40,19 @@ export interface ResolvedAgentBinding {
   providerSlug: string;
   model: string;
   fallbacks: string[];
+  /**
+   * Whether the primary was auto-picked or the agent's own, and whether the
+   * fallbacks are the agent's list or the system fill. Pass it to
+   * `getProviderWithFallbacks` (or `primaryCallContext` / `fallbackCallContext`
+   * for `getProvider`) so the call-time gate gives the eligibility rule the
+   * right `source`. Always set by this resolver; optional so a binding built
+   * elsewhere still type-checks. A call made without it is evaluated as
+   * unrecorded for its position — the primary as both kinds of primary, a
+   * fallback as both kinds of fallback — which a rule cannot answer more
+   * leniently than the recorded source, but which no longer tells the rule
+   * which of the two it is (§120 t-741). Pass it.
+   */
+  provenance?: BindingProvenance;
 }
 
 /** Pick of the AiAgent fields the resolver actually reads. */
@@ -99,6 +115,7 @@ export async function resolveAgentProviderAndModel(
           primarySlug: agent.provider,
         })),
       ],
+      provenance: { task, primary: 'explicit', fallbacks: 'explicit' },
     };
   }
 
@@ -186,7 +203,16 @@ export async function resolveAgentProviderAndModel(
     fallbackCount: fallbacks.length,
   });
 
-  return { providerSlug, model, fallbacks };
+  return {
+    providerSlug,
+    model,
+    fallbacks,
+    provenance: {
+      task,
+      primary: providerSet ? 'explicit' : 'primary',
+      fallbacks: usingExplicit ? 'explicit' : 'system',
+    },
+  };
 }
 
 /**

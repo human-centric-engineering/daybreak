@@ -82,8 +82,54 @@ release process.
   one, and refuse redirects. `OpenAiCompatibleProvider` asks for
   `encoding_format: 'float'`, because the `openai` SDK's base64 default decodes
   to `Float32Array`.
+- **A call-time provider gate** (§120 t-741). Every vendor call through the
+  provider manager (`chat`, `chatStream`, `embed`, `embedMany`, `transcribe`,
+  `transcribeStream`) now asks the provider eligibility rule first, per call,
+  and a refused call throws `ProviderCallRefusedError` (a `ProviderError`,
+  code `provider_not_permitted`, with a `reason` of `'policy'` or
+  `'no_org_scope'`) from `provider-eligibility.ts`. Until now the
+  rule was only consulted where a provider was chosen, from a hand-maintained
+  list of sites; a site missing from it now chooses less well but cannot send
+  a call the rule refuses. To tell the rule where a provider came from,
+  `getProvider(slug, context?)` and `getProviderWithFallbacks(primary,
+  fallbacks, provenance?)` take a new optional argument, and
+  `ResolvedAgentBinding` gains `provenance`. **A call made without one is
+  permitted only if the rule permits it both as `'primary'` and as
+  `'explicit'`**, the two things a lone provider fetched by name can be, so a fork
+  calling `getProvider` directly should pass a context. At `TENANCY_MODE=multi`
+  a vendor call outside any org scope, or inside `runAsSystem`, is refused.
+  At `single` with no rule registered (the default), nothing changes.
+  `listModels` and `testConnection` are not gated. See
+  [`llm-providers.md` → The call-time gate](./.context/orchestration/llm-providers.md#the-call-time-gate).
 
 ### Changed
+
+- **An eligibility rule now also decides operator-chosen providers, at call
+  time** (§120 t-741). Selection still never reroutes an explicit
+  `agent.provider`, a step's `modelOverride`, a pinned embedding default, or an
+  `EVALUATION_*` env var, but the call-time gate refuses one the rule refuses,
+  asking it with `source: 'explicit'` and `primarySlug` set to that provider
+  (the context keeps its contract: `primarySlug` is `null` only for
+  `'primary'`). So a fork rule that barred a provider only for `'primary'` /
+  `'system'` behaves as before, and one that barred it for `'explicit'` too
+  now stops agents that name it, where before it only removed it from their
+  fallback lists. The pinned **audio** default is now asked at selection, as
+  `'explicit'`, and a refused pin falls through to the next permitted audio
+  row, as an unreachable pin already did. A refusal counts as a request fault:
+  chat does not fail over from it, a workflow step does not retry it and fails
+  with code `provider_not_permitted` (as a refused task default already did)
+  whichever executor wraps it, a fork's included — `ExecutorError` now takes
+  that code and a non-retriable verdict from a refusal within ten levels of
+  its `cause` chain (the engine's `executor_threw` wrapper keeps its code and
+  only becomes non-retriable),
+  no circuit breaker records it, and the retroactive-review route answers 403
+  `provider_not_permitted` for a refused `modelOverride` or
+  `EVALUATION_JUDGE_MODEL`.
+- **`getProvider` prefers a slug match over a name match** (§120 t-741). It
+  used one unordered `findFirst` over both, so a caller holding one row's slug
+  could be handed a different row whose name equalled it. A name lookup is no
+  longer cached under the name: it queries on each call, and reuses the slug's
+  cached instance rather than rebuilding it.
 
 - **Admin edits to a system agent's platform-owned fields no longer
   survive** (§116 t-724). This is the upgrade to look at. On the first
