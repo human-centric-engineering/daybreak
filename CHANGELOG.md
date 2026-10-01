@@ -102,8 +102,41 @@ release process.
   `listModels` and `testConnection` are not gated. See
   [`llm-providers.md` → The call-time gate](./.context/orchestration/llm-providers.md#the-call-time-gate).
 
+- **A provider credential seam: `lib/app/provider-credentials.ts`**
+  (`initAppProviderCredentials`, primitive `registerProviderCredentialResolver`
+  in `lib/orchestration/llm/provider-credentials.ts`) (§120 t-744). Where a
+  provider row's API key comes from: by default the env var it names, as
+  before; a fork can resolve keys from a gateway, a vault reference or workload
+  federation, or give each org its own. A resolver returns the key and a
+  non-secret `identity`, and is asked on every `getProvider` with the org in
+  context. Sunrise still stores no tenant's key. A resolver or registration
+  that throws refuses the credential (`credential_unavailable`) rather than
+  falling back to the environment. Also exported: `hasProviderCredential`
+  (can this row be called), `hasProviderKey` (does it have a key — the admin
+  `apiKeyPresent` flag), `filterProvidersWithCredential` and `readEnvKey` from
+  the seam module; `breakerKeyOf` and `getProviderIfBreakerClosed` from the
+  provider manager; `getCircuitBreakerStatusForProvider` /
+  `resetBreakersForProvider` from the circuit breaker. The
+  `circuit_breaker_opened` webhook gains `perCredential`, and its
+  `providerSlug` stays the plain slug. See
+  [`llm-providers.md` → Provider credentials](./.context/orchestration/llm-providers.md#provider-credentials-fork-seam).
+
 ### Changed
 
+- **Provider clients, circuit breakers and in-flight counts are keyed per
+  credential** (§120 t-744), on `credentialKey(slug, identity)`: the bare slug
+  for the install's shared credential, so nothing changes until a credential
+  resolver returns another identity. `getProviderWithFallbacks` now also
+  returns `breakerKey`; pass it (or `breakerKeyOf(provider)`) to `getBreaker`
+  instead of the slug. The admin provider list and health route aggregate a
+  provider's breakers, and the live-engine dashboard's in-flight `provider` is
+  that key. A provider's breaker is checked once it is fetched (that is what
+  says which credential applies), and a chat turn that fails over credits its
+  success to the provider that served it, not the primary it left — which had
+  cleared the failure just recorded. Reachability checks (auto-pick, the agent
+  form preview, the clean-up agent's pin, the admin model routes) and the admin
+  `apiKeyPresent` flag now ask the credential seam instead of reading
+  `process.env`.
 - **An eligibility rule now also decides operator-chosen providers, at call
   time** (§120 t-741). Selection still never reroutes an explicit
   `agent.provider`, a step's `modelOverride`, a pinned embedding default, or an

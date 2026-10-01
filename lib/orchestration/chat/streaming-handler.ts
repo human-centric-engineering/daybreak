@@ -46,15 +46,15 @@ import { narrowReasoningEffort } from '@/lib/orchestration/llm/model-heuristics'
 import { getModel } from '@/lib/orchestration/llm/model-registry';
 import {
   assertModelSupportsAttachments,
-  getProvider,
   getProviderWithFallbacks,
+  getProviderIfBreakerClosed,
   type AttachmentCapability,
 } from '@/lib/orchestration/llm/provider-manager';
 import { fallbackCallContext } from '@/lib/orchestration/llm/provider-eligibility';
 import { resolveAgentProviderAndModel } from '@/lib/orchestration/llm/agent-resolver';
 import { resolveEffectivePrompt } from '@/lib/orchestration/agents/resolve-effective-prompt';
 import { touchAgentLastActive } from '@/lib/orchestration/agents/touch-last-active';
-import { isRequestFault, ProviderError } from '@/lib/orchestration/llm/provider';
+import { isRequestFault, ProviderError, type LlmProvider } from '@/lib/orchestration/llm/provider';
 import { calculateCost, checkBudget, logCost } from '@/lib/orchestration/llm/cost-tracker';
 import { resolveMaxCostPerTurn } from '@/lib/orchestration/llm/cost-caps';
 import { withAgentBudgetLock } from '@/lib/orchestration/llm/budget-mutex';
@@ -413,6 +413,9 @@ export class StreamingChatHandler {
         : logger;
     let conversationId: string | null = null;
     let resolvedProviderSlug: string | null = null;
+    // The breaker key for the credential in use (§120 t-744): the slug for the
+    // shared credential, slug + identity for a per-org one.
+    let resolvedBreakerKey: string | null = null;
     let chatSpanError: unknown = undefined;
     try {
       registerBuiltInCapabilities();
@@ -1172,12 +1175,17 @@ export class StreamingChatHandler {
         initialBreakdown.totalEstimated += tokens;
       }
 
-      const { provider, usedSlug } = await getProviderWithFallbacks(
+      const {
+        provider,
+        usedSlug,
+        breakerKey: usedBreakerKeyOrUndefined,
+      } = await getProviderWithFallbacks(
         resolvedBinding.providerSlug,
         resolvedFallbackProviders,
         resolvedBinding.provenance
       );
       resolvedProviderSlug = usedSlug;
+      resolvedBreakerKey = usedBreakerKeyOrUndefined ?? usedSlug;
 
       // Extract responseFormat from agent metadata if configured
       const agentMetadata =
@@ -1189,8 +1197,17 @@ export class StreamingChatHandler {
 
       // Remaining fallback providers for mid-stream retry
       const remainingFallbacks = [...resolvedFallbackProviders];
+      // Slugs this turn has already streamed through, so failover never
+      // retries one (the first may also be in the fallback list).
+      const triedSlugs = new Set<string>([usedSlug]);
       let currentProvider = provider;
       let currentProviderSlug = usedSlug;
+      // The breaker of the provider that is serving the turn — after a
+      // mid-stream failover, the fallback's, not the one first resolved. Its
+      // success is credited here: crediting the primary cleared the failure it
+      // had just recorded, so a primary failing every first attempt never
+      // tripped its breaker (§120 t-744).
+      let currentBreakerKey = resolvedBreakerKey;
 
       // Track consecutive per-tool failures to avoid burning iterations
       // on a tool that keeps crashing. After 2 failures the tool is
@@ -1485,11 +1502,48 @@ export class StreamingChatHandler {
                   throw streamErr;
                 }
 
-                getBreaker(currentProviderSlug).recordFailure();
+                getBreaker(currentBreakerKey).recordFailure();
 
-                // Try next fallback provider
-                const nextSlug = remainingFallbacks.shift();
-                if (!nextSlug || streamRetries > MAX_STREAM_RETRIES) {
+                // Pick the next fallback BEFORE telling the client a retry is
+                // coming (§120 t-744 review). A candidate whose credential's
+                // breaker is open, that cannot be built, or that this turn has
+                // already used is skipped and the next one tried, as
+                // getProviderWithFallbacks does — one unusable fallback must not
+                // end a turn a later fallback could serve, and the provider that
+                // just failed (it may sit in the fallback list too, when it was
+                // the one getProviderWithFallbacks chose) must not be retried.
+                let next: { slug: string; provider: LlmProvider; breakerKey: string } | null = null;
+                if (streamRetries <= MAX_STREAM_RETRIES) {
+                  // A fallback without a recorded provenance is still gated AS a
+                  // fallback, as getProviderWithFallbacks gates one.
+                  const fallbackOrigin = fallbackCallContext(
+                    resolvedBinding.provenance,
+                    resolvedBinding.providerSlug
+                  ) ?? { unrecordedFallbackOf: resolvedBinding.providerSlug };
+                  while (!next && remainingFallbacks.length > 0) {
+                    const candidate = remainingFallbacks.shift()!;
+                    if (triedSlugs.has(candidate)) continue;
+                    triedSlugs.add(candidate);
+                    try {
+                      const acquired = await getProviderIfBreakerClosed(candidate, fallbackOrigin);
+                      if (acquired) {
+                        next = { slug: candidate, ...acquired };
+                      } else {
+                        log.warn('Skipping fallback provider — circuit breaker open', {
+                          agentSlug: request.agentSlug,
+                          provider: candidate,
+                        });
+                      }
+                    } catch (loadErr) {
+                      log.warn('Skipping fallback provider — not available', {
+                        agentSlug: request.agentSlug,
+                        provider: candidate,
+                        error: loadErr instanceof Error ? loadErr.message : String(loadErr),
+                      });
+                    }
+                  }
+                }
+                if (!next) {
                   log.error('Stream failed, no more fallback providers', streamErr, {
                     agentSlug: request.agentSlug,
                     userId: request.userId,
@@ -1503,6 +1557,7 @@ export class StreamingChatHandler {
                   });
                   throw streamErr;
                 }
+                const nextSlug = next.slug;
 
                 log.warn('Stream failed, retrying with fallback provider', {
                   agentSlug: request.agentSlug,
@@ -1553,23 +1608,11 @@ export class StreamingChatHandler {
                 // truncated.
                 finishReason = undefined;
 
-                try {
-                  currentProvider = await getProvider(
-                    nextSlug,
-                    fallbackCallContext(resolvedBinding.provenance, resolvedBinding.providerSlug)
-                  );
-                  currentProviderSlug = nextSlug;
-                  resolvedProviderSlug = nextSlug;
-                } catch {
-                  log.error(
-                    'Failed to load fallback provider',
-                    new Error(`Provider ${nextSlug} not available`),
-                    {
-                      agentSlug: request.agentSlug,
-                    }
-                  );
-                  throw streamErr;
-                }
+                currentProvider = next.provider;
+                currentProviderSlug = nextSlug;
+                resolvedProviderSlug = nextSlug;
+                currentBreakerKey = next.breakerKey;
+                resolvedBreakerKey = currentBreakerKey;
               }
             },
             { manualStatus: true }
@@ -1859,7 +1902,8 @@ export class StreamingChatHandler {
             });
           }
 
-          getBreaker(usedSlug).recordSuccess();
+          // The provider that served the turn — see `currentBreakerKey`.
+          getBreaker(currentBreakerKey).recordSuccess();
           if (citations.length > 0) {
             yield { type: 'citations', citations };
           }
@@ -2276,7 +2320,8 @@ export class StreamingChatHandler {
           }
 
           if (result.skipFollowup) {
-            getBreaker(usedSlug).recordSuccess();
+            // The provider that served the turn — see `currentBreakerKey`.
+            getBreaker(currentBreakerKey).recordSuccess();
             if (citations.length > 0) {
               yield { type: 'citations', citations };
             }
@@ -2570,7 +2615,8 @@ export class StreamingChatHandler {
           }
 
           if (anySkipFollowup) {
-            getBreaker(usedSlug).recordSuccess();
+            // The provider that served the turn — see `currentBreakerKey`.
+            getBreaker(currentBreakerKey).recordSuccess();
             if (citations.length > 0) {
               yield { type: 'citations', citations };
             }
@@ -2679,7 +2725,7 @@ export class StreamingChatHandler {
       // guards the shape a FORK adapter can still produce: a raw `AbortError`,
       // or anything else not funnelled through `toProviderError`.
       if (resolvedProviderSlug && !isClientAbort(err, request.signal)) {
-        getBreaker(resolvedProviderSlug).recordFailure();
+        getBreaker(resolvedBreakerKey ?? resolvedProviderSlug).recordFailure();
       }
       log.error('Streaming chat handler crashed', err, {
         agentSlug: request.agentSlug,
