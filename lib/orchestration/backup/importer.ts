@@ -26,6 +26,9 @@ import {
 } from '@/lib/orchestration/workflows/template-catalogue';
 import { createInitialVersion } from '@/lib/orchestration/workflows/version-service';
 import { workflowDefinitionSchema } from '@/lib/validations/orchestration';
+import type { WorkflowDefinition } from '@/types/orchestration';
+import { importedAgentProviderWarnings } from '@/lib/orchestration/agents/provider-approval';
+import { findUnapprovedModelOverridesIn } from '@/lib/orchestration/workflows/semantic-validator';
 
 export interface ImportResult {
   agents: { created: number; updated: number };
@@ -57,6 +60,18 @@ export async function importOrchestrationConfig(
     settingsUpdated: false,
     warnings: [],
   };
+
+  // At multi, agents and workflow steps naming a provider the org is not
+  // approved for are imported and flagged, not refused (§120 t-743). Asked
+  // once, before the transaction, so the policy read neither holds its
+  // connection nor fails the import: these are warnings.
+  const [agentProviders, workflowProviders] = await Promise.all([
+    importedAgentProviderWarnings(parsed.data.agents),
+    importedWorkflowProviderWarnings(parsed.data.workflows),
+  ]);
+  for (const unchecked of [agentProviders.unchecked, workflowProviders.unchecked]) {
+    if (unchecked) result.warnings.push(unchecked);
+  }
 
   await prisma.$transaction(async (tx) => {
     // Knowledge tags first — agents reference them by slug, so create/refresh
@@ -124,6 +139,9 @@ export async function importOrchestrationConfig(
         );
         continue;
       }
+      // Imported and flagged, not refused (§120 t-743).
+      const unapproved = agentProviders.bySlug.get(agent.slug);
+      if (unapproved) result.warnings.push(unapproved);
       if (existing) {
         await tx.aiAgent.update({
           where: { id: existing.id },
@@ -403,6 +421,8 @@ export async function importOrchestrationConfig(
         result.warnings.push(`Workflow '${wf.slug}' skipped — definition failed validation`);
         continue;
       }
+      const unapprovedSteps = workflowProviders.bySlug.get(wf.slug);
+      if (unapprovedSteps) result.warnings.push(unapprovedSteps);
       if (existing) {
         // Promote the imported snapshot to a new version on the existing workflow.
         const lastVersion = await tx.aiWorkflowVersion.findFirst({
@@ -585,4 +605,46 @@ export async function importOrchestrationConfig(
 
   logger.info('Orchestration config imported', { ...result });
   return result;
+}
+
+/**
+ * A warning per imported workflow with a step overriding to a model whose
+ * provider the org is not approved for, keyed by workflow slug (§120 t-743).
+ * The workflow is still imported and published — the call-time gate refuses
+ * those steps — as agents are; see `importedAgentProviderWarnings`. One batched
+ * policy question for every workflow; a policy that cannot be read yields one
+ * general warning instead.
+ */
+async function importedWorkflowProviderWarnings(
+  workflows: ReadonlyArray<{ slug: string; workflowDefinition: unknown }>
+): Promise<{ bySlug: Map<string, string>; unchecked: string | null }> {
+  const defs = new Map<string, WorkflowDefinition>();
+  for (const wf of workflows) {
+    const parsed = workflowDefinitionSchema.safeParse(wf.workflowDefinition);
+    // An unparseable one is reported as a skip by the import loop.
+    if (parsed.success) defs.set(wf.slug, parsed.data);
+  }
+  let found: Map<string, { stepId: string }[]>;
+  try {
+    found = await findUnapprovedModelOverridesIn(defs);
+  } catch (error) {
+    logger.error('Backup import could not check workflows against the org provider policy', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return {
+      bySlug: new Map(),
+      unchecked:
+        "Workflows were imported without checking their model overrides against this organisation's approved providers, which could not be read",
+    };
+  }
+  const bySlug = new Map<string, string>();
+  for (const [slug, errors] of found) {
+    if (errors.length === 0) continue;
+    bySlug.set(
+      slug,
+      `Workflow '${slug}': imported, but steps ${errors.map((e) => `"${e.stepId}"`).join(', ')} ` +
+        'override to providers this organisation is not approved to use — those steps are refused until a platform admin grants them'
+    );
+  }
+  return { bySlug, unchecked: null };
 }

@@ -121,10 +121,19 @@ async function loadProviderRows(
           const row =
             found.find((candidate) => candidate.slug === slug) ??
             found.find((candidate) => candidate.name === slug);
+          if (!row) {
+            // A miss is not cached: the write-time check is handed whatever
+            // an admin typed, so caching misses would grow this map without
+            // bound, and a row created in another process would read as
+            // missing here until the TTL ran out. (The entry is already set
+            // by now; callers holding its promise still get this answer.)
+            providerRowCache.delete(slug);
+            return null;
+          }
           // Upper-cased to match the stored restriction, which the schema
           // upper-cases; a row written before the column was validated still
           // matches its own code.
-          return row ? { id: row.id, jurisdiction: row.jurisdiction?.toUpperCase() ?? null } : null;
+          return { id: row.id, jurisdiction: row.jurisdiction?.toUpperCase() ?? null };
         })
       );
     }
@@ -133,6 +142,19 @@ async function loadProviderRows(
     slugs.map((slug) => providerRowCache.get(slug)?.value ?? Promise.resolve(null))
   );
   return new Map(slugs.map((slug, index) => [slug, answers[index]]));
+}
+
+/**
+ * Whether core's policy restricts the org in context: `'open'` at `single` and
+ * for the install org, `'no-org'` at `multi` with no org in scope (nothing is
+ * permitted), `'enforced'` otherwise. For write-time callers that word their
+ * refusal, or skip work, by it.
+ */
+export function orgProviderPolicyScope(): 'open' | 'no-org' | 'enforced' {
+  if (!isMultiTenant()) return 'open';
+  const orgId = getTenantContext()?.orgId ?? null;
+  if (orgId === null) return 'no-org';
+  return orgId === INSTALL_ORG_ID ? 'open' : 'enforced';
 }
 
 /**
@@ -184,6 +206,28 @@ export async function applyOrgProviderPolicy(
     // provider nobody has said is in the EU.
     return allowed === null || (row.jurisdiction !== null && allowed.has(row.jurisdiction));
   });
+}
+
+/**
+ * The providers among `slugs` the org in context is NOT approved for, by core's
+ * policy alone — the write-time question (§120 t-743): "may this org save a
+ * configuration naming these?". Blank entries (an inherited provider) and
+ * duplicates are ignored; order is kept.
+ *
+ * Empty at `single`, for the install org, and whenever every slug is approved.
+ * Deliberately not the fork's eligibility rule: that rule answers per call and
+ * per source, and may be a network lookup, so a save would fail whenever the
+ * fork's policy backend was down. The call-time gate still asks it on every
+ * call.
+ *
+ * Throws when the org's policy cannot be read, so a save fails loudly rather
+ * than being waved through on a read that never happened.
+ */
+export async function unapprovedProviders(slugs: readonly string[]): Promise<string[]> {
+  const named = [...new Set(slugs.filter((slug) => slug.length > 0))];
+  if (named.length === 0) return [];
+  const permitted = new Set(await applyOrgProviderPolicy(named));
+  return named.filter((slug) => !permitted.has(slug));
 }
 
 /**

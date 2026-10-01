@@ -11,6 +11,29 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// The org's provider policy (§120 t-743): approves everything unless a test
+// refuses a slug.
+const mockUnapprovedProviders = vi.hoisted(() =>
+  vi.fn(async (_slugs: readonly string[]): Promise<string[]> => [])
+);
+// The workflow approval check, mocked at its boundary; the real one is tested
+// in semantic-validator.test.ts.
+const mockFindUnapprovedModelOverridesIn = vi.hoisted(() =>
+  vi.fn(
+    async (
+      _defs: ReadonlyMap<string, unknown>
+    ): Promise<Map<string, { code: string; message: string; stepId: string }[]>> => new Map()
+  )
+);
+vi.mock('@/lib/orchestration/workflows/semantic-validator', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/orchestration/workflows/semantic-validator')>()),
+  findUnapprovedModelOverridesIn: mockFindUnapprovedModelOverridesIn,
+}));
+vi.mock('@/lib/orchestration/llm/org-provider-policy', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/orchestration/llm/org-provider-policy')>()),
+  unapprovedProviders: mockUnapprovedProviders,
+}));
+
 // ─── Mocks (declared before imports) ────────────────────────────────────────
 
 const mockTx = {
@@ -36,6 +59,7 @@ vi.mock('@/lib/logging', () => ({
   logger: {
     info: vi.fn(),
     warn: vi.fn(),
+    error: vi.fn(),
   },
 }));
 
@@ -230,6 +254,23 @@ describe('importOrchestrationConfig', () => {
     expect(createData).not.toHaveProperty('knowledgeCategories');
   });
 
+  it('imports an agent naming a non-approved provider and warns, rather than skipping it (§120 t-743)', async () => {
+    mockUnapprovedProviders.mockImplementationOnce(async (slugs) =>
+      slugs.filter((slug) => slug === 'openai')
+    );
+    mockTx.aiAgent.findFirst.mockResolvedValue(null);
+    mockTx.aiAgent.create.mockResolvedValue({});
+
+    const payload = { ...minPayload, data: { ...minPayload.data, agents: [makeAgent()] } };
+    const result = await importOrchestrationConfig(payload, 'user-1');
+
+    expect(result.agents.created).toBe(1);
+    expect(mockTx.aiAgent.create).toHaveBeenCalledOnce();
+    expect(result.warnings).toContain(
+      'Agent \'support-bot\': imported, but this organisation is not approved to use "openai" — its calls are refused until a platform admin grants it'
+    );
+  });
+
   it('updates existing agent when record already exists → agents.updated = 1', async () => {
     mockTx.aiAgent.findFirst.mockResolvedValue({ id: 'existing-id', slug: 'support-bot' });
     mockTx.aiAgent.update.mockResolvedValue({});
@@ -269,6 +310,55 @@ describe('importOrchestrationConfig', () => {
     expect(mockTx.aiWorkflow.create).toHaveBeenCalledOnce();
     expect(mockTx.aiWorkflowVersion.create).toHaveBeenCalledOnce();
     expect(result.workflows.created).toBe(1);
+  });
+
+  it('imports a workflow whose steps use non-approved providers, and warns naming the steps (§120 t-743)', async () => {
+    mockFindUnapprovedModelOverridesIn.mockResolvedValueOnce(
+      new Map([
+        [
+          'onboarding-flow',
+          [{ code: 'PROVIDER_NOT_APPROVED', message: 'not approved', stepId: 'step-1' }],
+        ],
+      ])
+    );
+    mockTx.aiWorkflow.findUnique.mockResolvedValue(null);
+    mockTx.aiWorkflow.create.mockResolvedValue({ id: 'wf-1' });
+    mockTx.aiWorkflow.update.mockResolvedValue({ id: 'wf-1' });
+    mockTx.aiWorkflowVersion.create.mockResolvedValue({ id: 'wfv-1', version: 1 });
+
+    const payload = { ...minPayload, data: { ...minPayload.data, workflows: [makeWorkflow()] } };
+    const result = await importOrchestrationConfig(payload, 'user-1');
+
+    expect(result.workflows.created).toBe(1);
+    expect(result.warnings).toEqual([
+      expect.stringContaining(
+        'Workflow \'onboarding-flow\': imported, but steps "step-1" override to providers'
+      ),
+    ]);
+  });
+
+  it('imports anyway, with one general warning, when the policy cannot be read (§120 t-743)', async () => {
+    mockFindUnapprovedModelOverridesIn.mockRejectedValueOnce(new Error('connection reset'));
+    mockUnapprovedProviders.mockRejectedValueOnce(new Error('connection reset'));
+    mockTx.aiAgent.findFirst.mockResolvedValue(null);
+    mockTx.aiAgent.create.mockResolvedValue({});
+    mockTx.aiWorkflow.findUnique.mockResolvedValue(null);
+    mockTx.aiWorkflow.create.mockResolvedValue({ id: 'wf-1' });
+    mockTx.aiWorkflow.update.mockResolvedValue({ id: 'wf-1' });
+    mockTx.aiWorkflowVersion.create.mockResolvedValue({ id: 'wfv-1', version: 1 });
+
+    const payload = {
+      ...minPayload,
+      data: { ...minPayload.data, agents: [makeAgent()], workflows: [makeWorkflow()] },
+    };
+    const result = await importOrchestrationConfig(payload, 'user-1');
+
+    expect(result.agents.created).toBe(1);
+    expect(result.workflows.created).toBe(1);
+    expect(result.warnings).toEqual([
+      expect.stringContaining('Agents were imported without checking'),
+      expect.stringContaining('Workflows were imported without checking'),
+    ]);
   });
 
   it('creates a new webhook when no existing record found → webhooks.created = 1', async () => {

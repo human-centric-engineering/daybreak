@@ -733,14 +733,28 @@ configuration does not name: harder to diagnose than a refusal, and a worse
 failure than the one being prevented. The call-time gate does not reroute it
 either. It refuses the call, which is the difference.
 
-The intended enforcement for an explicit choice is at the point of **choosing**:
-a per-org install should not offer a provider the org has not approved, so the
-value never reaches the row. That is write-time work with a UX question attached
-(hide the option, or show it disabled with a reason?), and it belongs with the
-per-org rules. **Both layers are needed** — write-time validation cannot reach
-agents configured while a provider was permitted and stranded when the policy
-later changed, and it does not see writes that bypass the form (config import,
-seeds, the admin API). The call-time gate is the runtime backstop for those.
+The enforcement for an explicit choice is at the point of **choosing**, and at
+`multi` it is in place for every route that saves one (§120 t-743):
+
+| Write                                                                                 | At `multi`, naming a provider the org is not approved for                                                                                                                                                             |
+| ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Agent create, update, clone, version restore                                          | **Refused**, 400 `VALIDATION_ERROR`, `details.unapprovedProviders` and a per-field `details.errors` entry                                                                                                             |
+| Agent bundle import, backup import                                                    | **Imported, with a warning** naming the agent and providers — skipping would drop what other rows reference                                                                                                           |
+| Workflow step `modelOverride` (create, save-as-template, publish, rollback, validate) | **Refused**, semantic error `PROVIDER_NOT_APPROVED`; publish and rollback only for a provider the new version introduces. Not at execution or dry-run, where the gate refuses the step and its error strategy applies |
+| Workflows in a backup import                                                          | **Imported, with a warning** naming the steps                                                                                                                                                                         |
+
+Only what a write **introduces** is checked: a provider an agent already holds,
+as primary or fallback, is not re-checked, so an agent stranded by a later policy change can still be
+edited. The check is core's org policy (`unapprovedProviders` in
+`org-provider-policy.ts`), not a fork's eligibility rule, which answers per
+call and may depend on a backend a save should not wait on. At `single`, and
+for the install org, nothing is refused.
+
+**Both layers are needed** — write-time validation cannot reach agents
+configured while a provider was permitted and stranded when the policy later
+changed, and it does not see writes that bypass the routes (seeds, the
+platform-agent reconcile, direct database writes). The call-time gate is the
+runtime backstop for those.
 
 ### Per-path coverage: where Sunrise chooses
 

@@ -126,14 +126,15 @@ Lives in `lib/orchestration/workflows/semantic-validator.ts`. Requires Prisma + 
 
 ### Semantic error codes
 
-| `code`                   | `stepId` | Meaning                                                       |
-| ------------------------ | -------- | ------------------------------------------------------------- |
-| `UNKNOWN_MODEL_OVERRIDE` | yes      | Step references a model not in the registry                   |
-| `INACTIVE_PROVIDER`      | yes      | Step's model override belongs to an inactive provider         |
-| `INACTIVE_CAPABILITY`    | yes      | `tool_call` step references an inactive or unknown capability |
-| `INACTIVE_AGENT`         | yes      | `agent_call` step references an inactive or unknown agent     |
+| `code`                   | `stepId` | Meaning                                                                             |
+| ------------------------ | -------- | ----------------------------------------------------------------------------------- |
+| `UNKNOWN_MODEL_OVERRIDE` | yes      | Step references a model not in the registry                                         |
+| `INACTIVE_PROVIDER`      | yes      | Step's model override belongs to an inactive provider                               |
+| `PROVIDER_NOT_APPROVED`  | yes      | At `multi`, the override's provider is not one the org is approved for (§120 t-743) |
+| `INACTIVE_CAPABILITY`    | yes      | `tool_call` step references an inactive or unknown capability                       |
+| `INACTIVE_AGENT`         | yes      | `agent_call` step references an inactive or unknown agent                           |
 
-The `/validate` and `/dry-run` endpoints run both structural and semantic validation. The workflow builder UI currently runs structural checks only (semantic checks require DB access).
+The `/validate` and `/dry-run` endpoints run both structural and semantic validation. `PROVIDER_NOT_APPROVED` is checked on the save paths only — workflow create (`POST /workflows`) and save-as-template, which otherwise publish a v1 without semantic checks, plus publish, rollback and `/validate` — and not by execution or `/dry-run`, where a step the call-time gate refuses takes its own error strategy rather than failing the whole run up front. Publish and rollback re-check only providers the new version **introduces**: one the replaced published version already used is not refused, so a workflow stranded by a later policy change can still publish an unrelated edit. Unlike the other semantic checks, an unreadable provider policy fails the save (500) rather than being skipped; `/validate`, which saves nothing, skips it with a logged error instead. This check also covers `supervisor` steps' overrides, which the existence checks above do not. On create and save-as-template, which run no existence check, an override whose model the registry cannot resolve is refused too where the policy applies, since its provider cannot be checked. At `single` and for the install org none of this runs. The workflow builder UI currently runs structural checks only (semantic checks require DB access).
 
 ## Consumers
 
