@@ -57,6 +57,8 @@ import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
 import { getProvider } from '@/lib/orchestration/llm/provider-manager';
 import { ProviderCallRefusedError } from '@/lib/orchestration/llm/provider-eligibility';
+import { getTenantContext } from '@/lib/tenancy/context';
+import { INSTALL_ORG_ID } from '@/lib/tenancy/constants';
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -77,6 +79,7 @@ function makeProvider(overrides: Record<string, unknown> = {}) {
     metadata: null,
     timeoutMs: null,
     maxRetries: null,
+    jurisdiction: null,
     createdBy: 'cmjbv4i3x00003wsloputgwul',
     createdAt: new Date('2025-01-01'),
     updatedAt: new Date('2025-01-01'),
@@ -225,6 +228,39 @@ describe('POST /api/v1/admin/orchestration/providers/:id/test-model', () => {
       expect(typeof body.data.latencyMs).toBe('number');
       expect(body.data.latencyMs).toBeGreaterThanOrEqual(0);
       expect(body.data.model).toBe(MODEL);
+    });
+
+    it('fetches the provider as the acting org and calls it as the install org (§120 t-742)', async () => {
+      // A platform admin must be able to test a provider before granting it to
+      // any org, so the probe never runs under the admin's active org's policy;
+      // but a fork's per-org credential is the one being tested.
+      vi.mocked(auth.api.getSession).mockResolvedValue(mockAdminUser());
+      vi.mocked(prisma.aiProviderConfig.findUnique).mockResolvedValue(makeProvider());
+      // The scope each step sees. The fetch resolves the credential, so it
+      // stays in the admin's context; only the vendor call is moved.
+      const seen: unknown[] = [];
+      const scope = () => {
+        const ctx = getTenantContext();
+        return { orgId: ctx?.orgId ?? null, source: ctx?.source ?? null };
+      };
+      const chat = vi.fn(async () => {
+        seen.push(scope());
+        return { content: 'Hello!' };
+      });
+      vi.mocked(getProvider).mockImplementation(async () => {
+        seen.push(scope());
+        return makeMockProvider(chat) as never;
+      });
+
+      const response = await POST(makePostRequest(), makeParams(PROVIDER_ID));
+
+      expect(response.status).toBe(200);
+      expect(seen).toEqual([
+        // The fetch, and so the credential, is the request's own scope...
+        { orgId: INSTALL_ORG_ID, source: 'session' },
+        // ...and the probe runs in the install org entered for it.
+        { orgId: INSTALL_ORG_ID, source: 'job' },
+      ]);
     });
 
     it('calls getProvider with the provider slug', async () => {

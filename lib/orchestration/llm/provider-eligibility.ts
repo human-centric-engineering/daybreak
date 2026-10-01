@@ -12,12 +12,20 @@
  * `resolveEligibleProviders(ctx)`; default = today's behaviour at `single`,
  * deny-by-default at `multi`.*
  *
- * **Inert until a fork registers something.** With no resolver registered,
- * `resolveEligibleProviders` returns its input unchanged, so a single-tenant
- * install behaves byte-for-byte as it did before this file existed — the
- * programme's "inert at `single`, literally" principle. There is no dormant
- * second code path: the same call runs either way, and by default it is
- * identity.
+ * **Inert at `single` until a fork registers something.** At `single`, with no
+ * resolver registered, `resolveEligibleProviders` returns its input unchanged,
+ * so a single-tenant install behaves byte-for-byte as it did before this file
+ * existed — the programme's "inert at `single`, literally" principle. There is
+ * no dormant second code path: the same call runs either way, and by default
+ * it is identity.
+ *
+ * **At `multi`, core has a rule of its own** (§120 t-742,
+ * `lib/orchestration/llm/org-provider-policy.ts`): the install org may use
+ * every provider, and every other org only those a platform admin approved it
+ * for — none until one is granted — within the jurisdictions it is held to.
+ * It runs first, and a fork's rule is handed only what it permitted, so a fork
+ * rule can narrow core's answer and never widen it. The org is read from tenant
+ * context; `ProviderEligibilityContext` deliberately does not carry it.
  *
  * ## What it does and does not constrain
  *
@@ -117,6 +125,7 @@
  */
 
 import { logger } from '@/lib/logging';
+import { applyOrgProviderPolicy } from '@/lib/orchestration/llm/org-provider-policy';
 import { PROVIDER_NOT_PERMITTED, ProviderError } from '@/lib/orchestration/llm/provider';
 import { getTenantContext, isMultiTenant } from '@/lib/tenancy/context';
 import type { TaskType } from '@/types/orchestration';
@@ -323,10 +332,12 @@ export function hasProviderEligibilityResolver(): boolean {
 }
 
 /**
- * Filter `candidates` to those the caller may use.
+ * Filter `candidates` to those the caller may use: core's org policy first
+ * (identity at `single`), then the fork's rule, if one is registered, over
+ * what survived.
  *
- * With no registered resolver this returns `candidates` unchanged — the
- * identity default that keeps single-tenant behaviour byte-identical.
+ * At `single` with no registered resolver this returns `candidates` unchanged
+ * — the identity default that keeps single-tenant behaviour byte-identical.
  */
 export async function resolveEligibleProviders(
   candidates: readonly string[],
@@ -354,26 +365,45 @@ export async function resolveEligibleProviders(
     return [];
   }
 
-  if (!appResolver) return candidates;
-  // Nothing to decide, and a fork's rule may be a policy lookup. Every chat
-  // turn of a fully-configured agent with no fallback list reaches here with an
-  // empty list, so without this the rule runs — and a throwing one logs — for
+  // Nothing to decide, and both rules may be a policy lookup. Every chat turn
+  // of a fully-configured agent with no fallback list reaches here with an
+  // empty list, so without this the rules run — and a throwing one logs — for
   // an answer that can only be `[]`.
   if (candidates.length === 0) return candidates;
 
+  // Core's own rule first (§120 t-742): identity at `single`; at `multi` the
+  // install org is open and every other org is held to its approved set. The
+  // fork's rule is handed only what survived, so it can narrow and never widen.
+  let permitted: readonly string[];
   try {
-    const eligible = await appResolver(candidates, context);
+    permitted = await applyOrgProviderPolicy(candidates);
+  } catch (error) {
+    logger.error('org provider policy could not be read; denying every candidate', {
+      task: context.task,
+      source: context.source,
+      orgId: getTenantContext()?.orgId ?? null,
+      error: error instanceof Error ? error.message : String(error),
+      fix: "The org's provider policy (Org.settings.providers) could not be loaded. Until it can, no provider is eligible for the org — a policy that cannot be read must not be read as permission.",
+    });
+    return [];
+  }
+
+  if (!appResolver || permitted.length === 0) return permitted;
+
+  try {
+    const eligible = await appResolver(permitted, context);
     const allowed = new Set(eligible);
-    // Intersect rather than trust: a resolver cannot introduce a provider the
-    // resolver never considered, nor reorder them. Order is load-bearing —
-    // fallbacks are tried in sequence — so it comes from `candidates`.
-    return candidates.filter((slug) => allowed.has(slug));
+    // Intersect rather than trust: a resolver cannot introduce a provider it
+    // was not handed, nor reorder them. Order is load-bearing — fallbacks are
+    // tried in sequence — so it comes from `permitted`, which kept the
+    // caller's order.
+    return permitted.filter((slug) => allowed.has(slug));
   } catch (error) {
     logger.error('provider eligibility resolver threw; denying every candidate', {
       task: context.task,
       primarySlug: context.primarySlug,
       source: context.source,
-      candidateCount: candidates.length,
+      candidateCount: permitted.length,
       error: error instanceof Error ? error.message : String(error),
       fix: "A restriction that cannot be evaluated must not be treated as permission. With source 'primary' this fails the request (NoEligibleProviderError); otherwise the request keeps its provider and runs without fallbacks.",
     });
@@ -548,7 +578,9 @@ const FALLBACK_POSITION_SOURCES: readonly ProviderEligibilityContext['source'][]
  * (`chat`, `chatStream`, `embed`, `embedMany`, `transcribe`, `transcribeStream`),
  * once per CALL — never once per cached instance, so a rule whose answer changes
  * takes effect on the next call rather than after the 5-minute instance cache
- * expires. The selection sites still filter so that Sunrise chooses well; this
+ * expires. (A fork rule is asked afresh every call. Core's per-org policy is
+ * read through a 60-second cache: a change applies at once in the process that
+ * wrote it and within 60 seconds in any other — see `org-provider-policy.ts`.) The selection sites still filter so that Sunrise chooses well; this
  * is what makes the policy complete for every call core makes through the
  * manager, including the ones no selection site saw. It is not a boundary
  * around a fork's own code, which can construct a provider directly (decided
@@ -622,7 +654,7 @@ export async function assertProviderCallPermitted(
       source: askedContext.source,
       primarySlug: askedContext.primarySlug,
       orgId: tenant?.orgId ?? null,
-      fix: 'The rule registered via registerProviderEligibility() in lib/app/llm-providers.ts did not permit this provider for this call — by policy, or because it threw. A call with no recorded provenance must be permitted as both an auto-picked and an operator-chosen primary.',
+      fix: "At TENANCY_MODE=multi, check the org's approved providers first (GET /api/v1/admin/orgs/[id]/providers): an org other than the install org may call only the providers granted to it, within its jurisdictions. Otherwise the rule registered via registerProviderEligibility() in lib/app/llm-providers.ts did not permit this provider for this call — by policy, or because it threw. A call with no recorded provenance must be permitted as both an auto-picked and an operator-chosen primary.",
     });
     throw new ProviderCallRefusedError(slug);
   }
