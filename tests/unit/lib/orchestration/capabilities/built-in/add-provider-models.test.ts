@@ -269,6 +269,12 @@ describe('AddProviderModelsCapability', () => {
     });
   });
 
+  describe('shared settings (§107 t-751)', () => {
+    it('declares that it changes a shared setting, so the dispatcher refuses it outside the install org', () => {
+      expect(new AddProviderModelsCapability().writesSharedSettings).toBe(true);
+    });
+  });
+
   describe('execute() — empty newModels', () => {
     it('short-circuits with zero counts and never touches Prisma or the cache', async () => {
       // Source: add-provider-models.ts:165-170 — when the approval

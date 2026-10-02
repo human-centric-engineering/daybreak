@@ -388,6 +388,9 @@ export abstract class BaseCapability<TArgs = unknown, TData = unknown> {
   /** PII declaration — set true if args or results carry personal data. */
   readonly processesPii: boolean; // default: false
 
+  /** Shared-settings declaration — set true if it writes a GLOBAL_CONFIG_MODELS row. */
+  readonly writesSharedSettings: boolean; // default: false
+
   abstract execute(args: TArgs, context: CapabilityContext): Promise<CapabilityResult<TData>>;
 
   validate(rawArgs: unknown): TArgs; // throws CapabilityValidationError
@@ -421,6 +424,10 @@ If your capability handles emails, phone numbers, customer records, free-text us
 
 The registry refuses to register a capability that declares `processesPii = true` without an override — startup fails fast. Six built-ins ship with overrides today: `call_external_api`, `escalate_to_human`, `run_workflow`, `read_user_memory`, `write_user_memory`, `upload_to_storage`. See [`.context/security/pii-redaction.md`](../security/pii-redaction.md) for the full contract, a worked example, and the masking primitives in `lib/security/redact.ts`.
 
+### Shared-settings obligation
+
+If your capability creates, changes or deletes a shared setting — a row of one of the `GLOBAL_CONFIG_MODELS` (providers, provider models, capabilities, agent profiles, knowledge tags, feature flags, MCP config, orchestration settings) — set `readonly writesSharedSettings = true`. At `TENANCY_MODE=multi` the dispatcher then refuses it outside the install org with `{ code: 'shared_settings_install_org_only' }`, before approval or execution: any org's workflow can reach a capability through a `tool_call` step, and one org's change would land in every org (§107 t-751). Three built-ins declare it: `add_provider_models`, `deactivate_provider_models`, `apply_audit_changes`. `tests/unit/scripts/ci/shared-settings-writes.test.ts` fails naming a capability class that writes one of those models without the flag. See [Row Isolation](../tenancy/isolation.md#the-policy).
+
 ## Dispatch Pipeline
 
 `capabilityDispatcher.dispatch(slug, rawArgs, context)` runs this pipeline, returning as soon as any step fails:
@@ -432,6 +439,7 @@ The registry refuses to register a capability that declares `processesPii = true
 4. **Per-agent binding** — `prisma.aiAgentCapability.findMany({ agentId })`, cached per agent for 5 minutes. An explicit row with `isEnabled: false` → `{ code: 'capability_disabled_for_agent' }`. Missing row = default-allow with base-capability defaults.
    4a. **Capability guard** — if a `guard` was attached at registration (a fork seam; core attaches none), it's `await`ed here with the full `context`. `{ allow: false }` → `{ code: 'capability_guard_denied' }` (the guard's optional `reason` is folded into the client-surfaced message; no internal ids). A guard that **throws** fails **closed** — same denial, logged via `logger.error`. Placed after enablement and before the rate limiter, so a denied call consumes no rate token. See [App-contributed capabilities](#app-contributed-capabilities-forks).
    4b. **Scope binding** — when the capability declared `scopedBy` **and** the caller's scope is authoritative, each bound key is filled if the caller omitted it and refused with `{ code: 'scope_conflict' }` if the caller named a different value. Placed beside the guard, and for the guard's reason: a cross-scope call is an authorization failure, not a malformed request, so it must not spend the legitimate tenant's rate token. Inert for a capability that declared nothing. See [The scope binding](#the-scope-binding-scopedby-dispatch-steps-4b--7a).
+   4c. **Shared settings** — a handler declaring `writesSharedSettings`, at `multi`, outside the install org or a system scope → `{ code: 'shared_settings_install_org_only' }`, with a message that names the rule rather than telling an end user to switch org. After the binding, so an unbound agent keeps its own refusal; before the rate limit and approval. No `skipFollowup`, because an `agent_call` step reads that flag as its final answer (§107 t-751).
 5. **Rate limit** — effective limit = `binding.effectiveRateLimit ?? entry.rateLimit`. If non-null, a sliding-window `RateLimiter` keyed by slug (token = `agentId`) checks the request. Exceeded → `{ code: 'rate_limited' }`.
 6. **Approval gate** — `entry.requiresApproval: true` → `{ code: 'requires_approval', skipFollowup: true }`. The handler never runs. (The admin queue that resolves approvals is a later slice.)
 7. **Validate args** — `handler.validate(dispatchArgs)`. `CapabilityValidationError` → `{ code: 'invalid_args', message }`.

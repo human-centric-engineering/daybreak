@@ -170,6 +170,14 @@ export const ALWAYS_RUN_TESTS: readonly AlwaysRunEntry[] = [
       'new model with `orgId`, or a migration, reaches no test through the module graph.',
   },
   {
+    path: 'tests/unit/scripts/ci/shared-settings-writes.test.ts',
+    reason:
+      'parses every route and module under app/ and lib/ and fails naming any route ' +
+      'handler or capability class that changes a shared setting (a GLOBAL_CONFIG_MODELS ' +
+      'row) without declaring `writesSharedSettings`. A new route or capability writing ' +
+      'one is exactly the change no import chain connects to this test (§107 t-751).',
+  },
+  {
     path: 'tests/unit/scripts/ci/ownerless-surfaces.test.ts',
     reason:
       'lists every source file under app/, lib/ and components/ that reads ' +
