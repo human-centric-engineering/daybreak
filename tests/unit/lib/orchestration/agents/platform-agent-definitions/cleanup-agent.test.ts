@@ -12,11 +12,48 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
+// The org provider policy (§120 t-746) runs for real; only the tenancy mode
+// and the global client it reads the policy through are stubbed. Single by
+// default, so the picker's own tests below are unaffected by it.
+const mockMode = vi.hoisted(() => ({ value: 'single' }));
+vi.mock('@/lib/env', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/env')>();
+  return {
+    ...actual,
+    env: new Proxy(actual.env, {
+      get: (target, key) =>
+        key === 'TENANCY_MODE' ? mockMode.value : (Reflect.get(target, key) as unknown),
+    }),
+  };
+});
+
+vi.mock('@/lib/db/client', () => ({
+  prisma: {
+    org: { findUnique: vi.fn() },
+    aiProviderConfig: { findMany: vi.fn() },
+  },
+}));
+
+vi.mock('@/lib/logging', () => ({
+  logger: { info: vi.fn(), debug: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
+import { prisma } from '@/lib/db/client';
 import type { TenancyClient } from '@/lib/db/tenancy-extension';
 import {
   CLEANUP_AGENT,
   pickCleanupBinding,
 } from '@/lib/orchestration/agents/platform-agent-definitions/cleanup-agent';
+import {
+  forgetOrgProviderPolicy,
+  forgetProviderRow,
+} from '@/lib/orchestration/llm/org-provider-policy';
+import {
+  registerProviderEligibility,
+  resetProviderEligibility,
+} from '@/lib/orchestration/llm/provider-eligibility';
+import { INSTALL_ORG_ID } from '@/lib/tenancy/constants';
+import { runAsOrg } from '@/lib/tenancy/context';
 
 function providerRow(slug: string, apiKeyEnvVar: string | null, isLocal = false) {
   return { slug, isLocal, apiKeyEnvVar };
@@ -155,5 +192,139 @@ describe('CLEANUP_AGENT', () => {
     expect(CLEANUP_AGENT.defaultBinding).toBe(pickCleanupBinding);
     // Content only the current prompt has.
     expect(CLEANUP_AGENT.agent.systemInstructions).toContain('join_wrapped_lines');
+  });
+});
+
+describe('pickCleanupBinding — the org provider policy (§120 t-746)', () => {
+  const ORG = 'cmorg00000000000000grant';
+  const saved = { openai: process.env.OPENAI_API_KEY, anthropic: process.env.ANTHROPIC_API_KEY };
+
+  /**
+   * Both providers reachable; openai has the stronger pick. The model query
+   * honours its `providerSlug` filter, as the real one does.
+   */
+  function reachableBoth() {
+    const models = [
+      modelRow('openai', 'gpt-4.1'),
+      modelRow('anthropic', 'claude-sonnet', 'thinking'),
+    ];
+    const handle = db(
+      [providerRow('openai', 'OPENAI_API_KEY'), providerRow('anthropic', 'ANTHROPIC_API_KEY')],
+      models
+    );
+    handle.modelFindMany.mockImplementation(
+      async (args: { where: { providerSlug: { in: string[] } } }) =>
+        models.filter((m) => args.where.providerSlug.in.includes(m.providerSlug))
+    );
+    return handle;
+  }
+
+  /** The org is approved for these provider rows (by id). */
+  function approve(...slugs: string[]) {
+    vi.mocked(prisma.org.findUnique).mockResolvedValue({
+      settings: { providers: { approved: slugs.map((slug) => `id-${slug}`) } },
+    } as never);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockMode.value = 'multi';
+    forgetOrgProviderPolicy();
+    forgetProviderRow();
+    resetProviderEligibility();
+    process.env.OPENAI_API_KEY = 'test-key';
+    process.env.ANTHROPIC_API_KEY = 'test-key';
+    vi.mocked(prisma.aiProviderConfig.findMany).mockImplementation((async (args: {
+      where: { OR: [{ slug: { in: string[] } }, unknown] };
+    }) =>
+      args.where.OR[0].slug.in.map((slug) => ({
+        id: `id-${slug}`,
+        slug,
+        name: slug,
+        jurisdiction: null,
+      }))) as never);
+  });
+  afterEach(() => {
+    mockMode.value = 'single';
+    resetProviderEligibility();
+    for (const [name, value] of [
+      ['OPENAI_API_KEY', saved.openai],
+      ['ANTHROPIC_API_KEY', saved.anthropic],
+    ] as const) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  });
+
+  it('picks only among providers the org is approved for', async () => {
+    approve('anthropic');
+    const { client } = reachableBoth();
+
+    expect(await runAsOrg(ORG, () => pickCleanupBinding(client))).toEqual({
+      provider: 'anthropic',
+      model: 'claude-sonnet',
+    });
+  });
+
+  it('pins nothing for an org approved for no provider, so the agent inherits', async () => {
+    approve();
+    const { client, modelFindMany } = reachableBoth();
+
+    expect(await runAsOrg(ORG, () => pickCleanupBinding(client))).toBeNull();
+    expect(modelFindMany).not.toHaveBeenCalled(); // test-review:accept no_arg_called — nothing usable, so no model read at all
+  });
+
+  it('throws when the policy cannot be read, so the reconcile fails and is retried', async () => {
+    // Answering null here would be recorded as done: the reconcile writes its
+    // marker and never asks again.
+    vi.mocked(prisma.org.findUnique).mockRejectedValue(new Error('connection reset'));
+    const { client } = reachableBoth();
+
+    await expect(runAsOrg(ORG, () => pickCleanupBinding(client))).rejects.toThrow(
+      'connection reset'
+    );
+  });
+
+  it("does not pin a provider a fork's eligibility rule refuses to an explicit provider", async () => {
+    const contexts: unknown[] = [];
+    registerProviderEligibility((candidates, context) => {
+      contexts.push(context);
+      return candidates.filter((slug) => slug !== 'openai');
+    });
+    const { client } = reachableBoth();
+
+    expect(await runAsOrg(INSTALL_ORG_ID, () => pickCleanupBinding(client))).toEqual({
+      provider: 'anthropic',
+      model: 'claude-sonnet',
+    });
+    // Asked as the call-time gate asks it of a pinned provider.
+    expect(contexts).toEqual([{ task: 'chat', source: 'explicit', primarySlug: null }]);
+  });
+
+  it('pins nothing with no org in scope', async () => {
+    const { client } = reachableBoth();
+
+    expect(await pickCleanupBinding(client)).toBeNull();
+  });
+
+  it('is unchanged for the install org, which may use every provider', async () => {
+    const { client } = reachableBoth();
+
+    expect(await runAsOrg(INSTALL_ORG_ID, () => pickCleanupBinding(client))).toEqual({
+      provider: 'openai',
+      model: 'gpt-4.1',
+    });
+    expect(prisma.org.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('is unchanged at single, whatever the org has been granted', async () => {
+    mockMode.value = 'single';
+    approve();
+    const { client } = reachableBoth();
+
+    expect(await runAsOrg(ORG, () => pickCleanupBinding(client))).toEqual({
+      provider: 'openai',
+      model: 'gpt-4.1',
+    });
   });
 });
