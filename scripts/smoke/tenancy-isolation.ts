@@ -46,6 +46,12 @@
  *     `createOrg` lists all twelve, served from code; one org's custom
  *     template is not in another's list; and a workflow created from a
  *     built-in, with its first version, carries the creating org.
+ *   - the org export and erasure (§106 t-735, t-730): B's export, asked
+ *     from inside A (an admin's session) and from no org (an admin API key),
+ *     holds B's rows and none of A's; B, holding a knowledge base with
+ *     documents and chunks, is erased from inside A, and no row in any
+ *     tenant-owned table carries its org afterwards, A's rows untouched; A is
+ *     then erased from no org the same way.
  *
  * Run it against a THROWAWAY database, never the dev one — it creates two
  * orgs and enables nothing itself; the sequence around it is the CI job's
@@ -60,7 +66,8 @@
  * It refuses to run at `single` (the policies are dormant there; the whole
  * point is the policy), and skips clean when no database is reachable.
  * Self-cleaning: everything it creates is removed on the way out, under the
- * system scope, whether or not the assertions held.
+ * system scope, whether or not the assertions held — and a cleanup that
+ * fails, fails the run.
  */
 import '@/prisma/load-env';
 import { NextRequest } from 'next/server';
@@ -74,6 +81,9 @@ import {
   runAsSystem,
 } from '@/lib/tenancy/context';
 import { createOrg } from '@/lib/tenancy/lifecycle';
+import { tenantOwnedModels } from '@/lib/tenancy/classification';
+import { exportOrgData } from '@/lib/privacy/export-org';
+import { eraseOrg } from '@/lib/privacy/erase-org';
 import { writeOrgProviderPolicy } from '@/lib/tenancy/org-settings';
 import { forgetOrgProviderPolicy } from '@/lib/orchestration/llm/org-provider-policy';
 import { hashApiKey } from '@/lib/auth/api-keys';
@@ -1410,6 +1420,131 @@ async function main(): Promise<void> {
     );
     check(seenFromA.length === 0, 'A cannot see it');
 
+    // ── [14] Org export: the target org's rows, whoever is asking ─────────
+    // A platform admin exports from inside their own active org (the session
+    // guard enters it), and an admin API key enters none (§106 t-735).
+    console.log('\n[14] org export: B’s bundle, asked from inside A and from no org at all');
+    const rowIds = (rows: unknown[] | undefined): string[] =>
+      (rows ?? []).flatMap((r) =>
+        typeof r === 'object' && r !== null && 'id' in r && typeof r.id === 'string' ? [r.id] : []
+      );
+    for (const [label, run] of [
+      ['from inside A', <T>(fn: () => Promise<T>) => runAsOrg(a.orgId, fn, { source: 'session' })],
+      ['from no org (an admin API key)', <T>(fn: () => Promise<T>) => fn()],
+    ] as const) {
+      let bundle: Awaited<ReturnType<typeof exportOrgData>> | null = null;
+      try {
+        bundle = await run(() => exportOrgData({ orgId: b.orgId, actorUserId: a.ownerId }));
+      } catch (err) {
+        check(
+          false,
+          `B’s export ${label} — it threw: ${err instanceof Error ? err.message : String(err)}`
+        );
+        continue;
+      }
+      const sections: Array<[string, string[]]> = [
+        ['agents', [b.agentId]],
+        ['knowledgeBases', [b.kbId]],
+        ['knowledgeDocuments', [b.documentId]],
+        ['knowledgeChunks', b.chunkIds],
+        ['conversations', [b.conversationId]],
+        ['messages', b.messageIds],
+        ['workflows', [b.workflowId]],
+      ];
+      const missing = sections.filter(
+        ([section, ids]) => !ids.every((id) => rowIds(bundle.data[section]).includes(id))
+      );
+      check(
+        missing.length === 0,
+        `B’s export ${label} holds B’s rows${missing.length ? ` — missing: ${missing.map(([s]) => s).join(', ')}` : ''}`
+      );
+      const aIds = new Set([
+        a.agentId,
+        a.kbId,
+        a.documentId,
+        ...a.chunkIds,
+        a.conversationId,
+        ...a.messageIds,
+        a.workflowId,
+        a.executionId,
+        a.costLogId,
+      ]);
+      const leaked = Object.values(bundle.data).flatMap((rows) =>
+        rowIds(rows).filter((id) => aIds.has(id))
+      );
+      check(leaked.length === 0, `B’s export ${label} holds none of A’s`);
+    }
+
+    // ── [15] Org erasure: from inside another org, with knowledge documents ─
+    // `ai_knowledge_document.knowledgeBaseId` is ON DELETE RESTRICT, and both
+    // rows also cascade from the org: erasure must still go through (t-730).
+    console.log('\n[15] org erasure: B, holding documents and chunks, erased from inside A');
+    // Every tenant-owned table, counted by the org's id, as the bypass. A
+    // `SetNull` relation (`AiCostLog`, a billing record) keeps its row with the
+    // org detached, so "no row carries the org" is the claim, not "no row".
+    const tenantTables = [...tenantOwnedModels(prisma).values()];
+    const tenantRowsOf = (orgId: string) =>
+      runAsSystem('smoke: count an org’s rows', async () => {
+        const counts: Record<string, number> = {};
+        for (const table of tenantTables) {
+          const [row] = await prisma.$queryRawUnsafe<Array<{ n: bigint }>>(
+            `SELECT count(*) AS n FROM "${table}" WHERE "orgId" = $1`,
+            orgId
+          );
+          counts[table] = Number(row.n);
+        }
+        return counts;
+      });
+    const nonZero = (counts: Record<string, number>) =>
+      Object.entries(counts).filter(([, n]) => n > 0);
+    const beforeB = await tenantRowsOf(b.orgId);
+    check(
+      beforeB.ai_knowledge_document > 0 &&
+        beforeB.ai_knowledge_chunk > 0 &&
+        beforeB.ai_knowledge_base > 0,
+      `B holds a knowledge base, documents and chunks before erasure (${beforeB.ai_knowledge_document} documents, ${beforeB.ai_knowledge_chunk} chunks)`
+    );
+    const beforeA = await tenantRowsOf(a.orgId);
+    try {
+      const erased = await runAsOrg(
+        a.orgId,
+        () => eraseOrg({ orgId: b.orgId, actorUserId: a.ownerId }),
+        { source: 'session' }
+      );
+      check(erased.members === 1, `the erasure counts B’s one member (${erased.members})`);
+    } catch (err) {
+      check(
+        false,
+        `B’s erasure from inside A — it threw: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+    const afterB = await tenantRowsOf(b.orgId);
+    const orgLeft = await prisma.org.findUnique({ where: { id: b.orgId }, select: { id: true } });
+    check(
+      orgLeft === null && nonZero(afterB).length === 0,
+      `B is gone, and no row in any of the ${tenantTables.length} tenant-owned tables carries its org${nonZero(afterB).length ? ` — left: ${JSON.stringify(nonZero(afterB))}` : ''}`
+    );
+    const afterA = await tenantRowsOf(a.orgId);
+    check(
+      JSON.stringify(afterA) === JSON.stringify(beforeA),
+      `A’s rows are untouched, in every tenant-owned table (${nonZero(afterA).length} hold some)`
+    );
+    // An admin API key enters no org: the same erasure, of A, from nowhere.
+    try {
+      await eraseOrg({ orgId: a.orgId, actorUserId: a.ownerId });
+    } catch (err) {
+      check(
+        false,
+        `A’s erasure from no org — it threw: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+    const afterErasingA = await tenantRowsOf(a.orgId);
+    check(
+      (await prisma.org.findUnique({ where: { id: a.orgId }, select: { id: true } })) === null &&
+        nonZero(afterErasingA).length === 0,
+      `A, erased from no org (an admin API key), is gone, and no row carries its org${nonZero(afterErasingA).length ? ` — left: ${JSON.stringify(nonZero(afterErasingA))}` : ''}`
+    );
+
     if (failures > 0) throw new Error(`${failures} check(s) failed`);
     console.log('\n✓ smoke:tenancy-isolation passed');
   } finally {
@@ -1440,7 +1575,12 @@ async function main(): Promise<void> {
         }
       }
     }).catch((err: unknown) => {
-      console.error('cleanup failed — remove the smoke-iso rows by hand', err);
+      // A failed cleanup fails the run (t-730): `org.deleteMany` here erases
+      // whatever org [15] did not, and an org that could not be erased is a
+      // finding, not housekeeping. Set rather than thrown, so a run that has
+      // already failed keeps its own error as the one reported.
+      console.error('✗ cleanup failed — remove the smoke-iso rows by hand', err);
+      process.exitCode = 1;
     });
     await prisma.$disconnect();
   }

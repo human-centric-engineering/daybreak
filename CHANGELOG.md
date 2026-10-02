@@ -451,6 +451,19 @@ release process.
   `010-model-auditor` or the audit template it hashes changes, so a wrongly-set flag needs a direct
   database update.
 
+- **An org export at `multi` now holds the exported org's data** (t-735).
+  `exportOrgData()` read its sources as whichever org the caller was in. The
+  admin route's guard enters the admin's own active org, so exporting any
+  other org gave a bundle whose tenant sections were all empty, with no
+  error. With an admin API key, which enters no org, it threw. It now reads
+  every source inside `runAsOrg(orgId)`. Nothing changes at `single`.
+  The export also reads its sources one at a time now, not all 42 at once,
+  so at `multi` a large org's reads don't queue behind the connection pool
+  and time out. `eraseOrg()` needed no change. The two-org smoke now erases
+  an org holding knowledge documents, from inside another org and from no
+  org, and checks that afterwards no tenant-owned table holds a row carrying
+  that org (a cost row stays, with its org cleared, by design) (t-730).
+
 ## [0.13.0] — 2026-09-24
 
 > **Alpha release.** Nineteenth tagged Sunrise release. **MINOR bump**. It
