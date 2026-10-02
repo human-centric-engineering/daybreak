@@ -40,6 +40,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { apiClient, APIClientError } from '@/lib/api/client';
 import { API } from '@/lib/api/endpoints';
+import { cn } from '@/lib/utils';
 import { fieldLabels, fieldToTab } from '@/lib/orchestration/agents/agent-field-registry';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -199,6 +200,11 @@ export type AgentWithGrants = AiAgent & {
     tunableFields: string[];
     bindingsLocked: boolean;
   } | null;
+  /**
+   * Providers the agent names that its org is no longer approved for (§120
+   * t-745), from `GET /agents/:id`. `null` when unknown (no org in scope, or the policy could not be read).
+   */
+  _unapprovedProviders?: string[] | null;
 };
 
 /** Slim profile summary passed to the form for the dropdown + preview. */
@@ -214,7 +220,13 @@ export interface AgentProfileSummary {
 export interface AgentFormProps {
   mode: 'create' | 'edit';
   agent?: AgentWithGrants;
-  providers: (AiProviderConfig & { apiKeyPresent?: boolean })[] | null;
+  /**
+   * `approvedForOrg` is whether the org in context may use the provider
+   * (§120 t-745): `false` disables the option, absent or `null` (unknown)
+   * leaves it to the save to refuse.
+   */
+  providers:
+    (AiProviderConfig & { apiKeyPresent?: boolean; approvedForOrg?: boolean | null })[] | null;
   models: ModelOption[] | null;
   /**
    * Server-resolved effective defaults. Used to pre-fill provider/model
@@ -293,6 +305,18 @@ export function AgentForm({
   const authorModel = () => setAuthored((a) => ({ ...a, model: true }));
 
   const providerFallback = !providers || providers.length === 0;
+
+  // A provider the org is not approved for is offered disabled, with the
+  // reason, rather than hidden (§120 t-745) — unless the agent already holds
+  // it: the save refuses only what a write introduces, so keeping, swapping
+  // or dropping a held provider stays possible.
+  const heldProviders = useMemo(
+    () => new Set(isEdit ? [agent?.provider ?? '', ...(agent?.fallbackProviders ?? [])] : []),
+    [isEdit, agent?.provider, agent?.fallbackProviders]
+  );
+  const notApproved = (p: { slug: string; approvedForOrg?: boolean | null }): boolean =>
+    p.approvedForOrg === false && !heldProviders.has(p.slug);
+  const someNotApproved = (providers ?? []).some((p) => p.approvedForOrg === false);
   const modelFallback = !models || models.length === 0;
 
   // Resolve the provider/model to seed into the form. Important: use `||`
@@ -668,6 +692,11 @@ export function AgentForm({
         // Authorship describes edits made since the form was last seeded. The
         // save re-seeds it, so the slate is clean again.
         setAuthored({ provider: false, model: false });
+        // Re-render the server page with the saved row, so what it derives
+        // from the agent follows the save: the stranded-provider banner, and
+        // which providers this form treats as held (§120 t-745). Form state
+        // is seeded from `defaultValues` only, so this does not reset it.
+        router.refresh();
         setSaved(true);
         schedule(() => setSaved(false), 2500);
       } else {
@@ -1048,6 +1077,18 @@ export function AgentForm({
                 the dropdown. There is no default vendor: the field is pre-filled with the provider
                 this agent would actually use, and left empty when none could be resolved.
               </FieldHelp>
+              {someNotApproved && (
+                <FieldHelp
+                  title="Providers not approved for this organisation"
+                  ariaLabel="Why some providers are unavailable"
+                >
+                  An organisation may use only the providers a platform admin has approved it for. A
+                  provider it is not approved for is shown greyed out and cannot be chosen, here or
+                  as a fallback — every call to it would be refused. A platform admin grants
+                  providers on the organisation&apos;s page under Management → Organisations. A
+                  provider this agent already uses stays selectable, so it can be kept or removed.
+                </FieldHelp>
+              )}
             </Label>
             {providerFallback ? (
               <Input
@@ -1068,13 +1109,18 @@ export function AgentForm({
                 </SelectTrigger>
                 <SelectContent>
                   {providers.map((p) => (
-                    <SelectItem key={p.id} value={p.slug}>
+                    <SelectItem key={p.id} value={p.slug} disabled={notApproved(p)}>
                       <span className="flex items-center gap-2">
                         {p.name}
                         {p.apiKeyPresent ? (
                           <span className="text-xs text-green-600">● key set</span>
                         ) : (
                           <span className="text-xs text-red-600">● no key</span>
+                        )}
+                        {p.approvedForOrg === false && (
+                          <span className="text-muted-foreground text-xs">
+                            · not approved for this organisation
+                          </span>
                         )}
                       </span>
                     </SelectItem>
@@ -1113,7 +1159,9 @@ export function AgentForm({
                 <FieldHelp title="Automatic provider failover">
                   If the primary provider is experiencing errors, the agent will try these providers
                   in order. Failover kicks in after repeated failures within a short window. Only
-                  providers other than the primary are shown. Leave unchecked to disable failover.
+                  providers other than the primary are shown. Leave unchecked to disable failover. A
+                  provider this organisation is not approved for is greyed out: a fallback to it
+                  would be refused like any other call.
                 </FieldHelp>
               </Label>
               <div className="space-y-2 rounded-md border p-3">
@@ -1121,12 +1169,20 @@ export function AgentForm({
                   .filter((p) => p.slug !== currentProvider)
                   .map((p) => {
                     const checked = watch('fallbackProviders').includes(p.slug);
+                    const disabled = notApproved(p);
                     return (
-                      <label key={p.id} className="flex items-center gap-2 text-sm">
+                      <label
+                        key={p.id}
+                        className={cn(
+                          'flex items-center gap-2 text-sm',
+                          disabled && 'text-muted-foreground'
+                        )}
+                      >
                         <input
                           type="checkbox"
                           className="rounded border-gray-300"
                           checked={checked}
+                          disabled={disabled}
                           onChange={(e) => {
                             const current = watch('fallbackProviders');
                             setValue(
@@ -1139,6 +1195,11 @@ export function AgentForm({
                         />
                         {p.name}
                         <span className="text-muted-foreground font-mono text-xs">{p.slug}</span>
+                        {p.approvedForOrg === false && (
+                          <span className="text-muted-foreground text-xs">
+                            · not approved for this organisation
+                          </span>
+                        )}
                       </label>
                     );
                   })}
@@ -2204,6 +2265,10 @@ export function AgentForm({
                     // defect this form exists to prevent, arriving through the
                     // restore path.
                     setAuthored({ provider: false, model: false });
+                    // A restore can change the provider and fallbacks, so the
+                    // server page re-derives the stranded-provider banner and
+                    // the held set, as after a save (§120 t-745).
+                    router.refresh();
                   } catch {
                     // Silent — the version tab already shows its own error state.
                   }

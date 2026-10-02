@@ -26,7 +26,10 @@ import {
 } from '@/lib/orchestration/agents/agent-versioning';
 import { logger } from '@/lib/logging';
 import type { BudgetSummary } from '@/types/orchestration';
-import { assertAgentProvidersApproved } from '@/lib/orchestration/agents/provider-approval';
+import {
+  assertAgentProvidersApproved,
+  strandedAgentProviders,
+} from '@/lib/orchestration/agents/provider-approval';
 
 export const GET = withAdminAuth(async (request, _session) => {
   const log = await getRouteLogger(request);
@@ -95,6 +98,12 @@ export const GET = withAdminAuth(async (request, _session) => {
     prisma.aiAgent.count({ where }),
   ]);
 
+  // Agents naming a provider their org is no longer approved for (§120 t-745);
+  // `null` per row when that is unknown (no org in scope, or the policy could
+  // not be read). Started now so it runs
+  // alongside the budget reads; it never rejects.
+  const strandedLookup = rawAgents.length > 0 ? strandedAgentProviders(rawAgents) : null;
+
   let budgetMap: Record<string, BudgetSummary> = {};
   if (rawAgents.length > 0) {
     try {
@@ -145,9 +154,12 @@ export const GET = withAdminAuth(async (request, _session) => {
     }
   }
 
+  const stranded = await strandedLookup;
+
   const agents = rawAgents.map((agent) => ({
     ...agent,
     _budget: budgetMap[agent.id] ?? null,
+    _unapprovedProviders: stranded ? (stranded.get(agent.id) ?? []) : null,
   }));
 
   log.info('Agents listed', { count: agents.length, total, page, limit });

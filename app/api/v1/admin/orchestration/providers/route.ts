@@ -3,7 +3,10 @@
  *
  * GET  /api/v1/admin/orchestration/providers — paginated list. Every row
  *      is hydrated with `apiKeyPresent: boolean` via `listProvidersWithStatus`.
- *      The env var *value* is NEVER returned or logged.
+ *      The env var *value* is NEVER returned or logged. Each row also carries
+ *      `approvedForOrg`: whether the org in context may use it (§120 t-745) —
+ *      always `true` at `single` and for the install org, `null` when it is
+ *      unknown (no org in scope, or the policy could not be read).
  * POST /api/v1/admin/orchestration/providers — create a new provider row.
  *
  * Authentication: Admin role required.
@@ -19,6 +22,7 @@ import { getRouteLogger } from '@/lib/api/context';
 import { getClientIP } from '@/lib/security/ip';
 import { clearCache as clearProviderCache } from '@/lib/orchestration/llm/provider-manager';
 import { hasProviderKey } from '@/lib/orchestration/llm/provider-credentials';
+import { refusedProvidersOrUnknown } from '@/lib/orchestration/agents/provider-approval';
 import { getCircuitBreakerStatusForProvider } from '@/lib/orchestration/llm/circuit-breaker';
 import { listProvidersQuerySchema, providerConfigSchema } from '@/lib/validations/orchestration';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
@@ -56,10 +60,14 @@ export const GET = withAdminAuth(async (request, _session) => {
 
   // `apiKeyPresent` asks the credential seam (§120 t-744): with a fork
   // resolver registered the env var may be deliberately empty.
-  const keyPresent = await Promise.all(rows.map((config) => hasProviderKey(config)));
+  const [keyPresent, refused] = await Promise.all([
+    Promise.all(rows.map((config) => hasProviderKey(config))),
+    refusedProvidersOrUnknown(rows.map((config) => config.slug)),
+  ]);
   const data = rows.map((config, index) => ({
     ...config,
     apiKeyPresent: keyPresent[index],
+    approvedForOrg: refused ? !refused.has(config.slug) : null,
     circuitBreaker: getCircuitBreakerStatusForProvider(config.slug) ?? {
       state: 'closed' as const,
       failureCount: 0,

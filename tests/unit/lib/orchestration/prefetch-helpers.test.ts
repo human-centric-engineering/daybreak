@@ -99,6 +99,10 @@ describe('getProviders', () => {
     const result = await getProviders();
 
     expect(result).toEqual(PROVIDERS);
+    // The endpoint's default page is 10; the agent form wants every provider.
+    expect(serverFetch).toHaveBeenCalledWith(
+      '/api/v1/admin/orchestration/providers?page=1&limit=100'
+    );
   });
 
   it('returns null when res.ok is false', async () => {
@@ -291,6 +295,43 @@ describe('getAgentModels', () => {
     expect(tierOf('m-unknown')).toBeUndefined();
     // sovereign wins over tierRole — a sovereign deployment collapses to local
     expect(tierOf('m-sovereign')).toBe('local');
+  });
+
+  it('reads rows wrapped as { data: [...] }, and maps missing matrix metadata to undefined', async () => {
+    vi.mocked(serverFetch).mockResolvedValue(okRes());
+    vi.mocked(parseApiResponse).mockResolvedValue({
+      success: true,
+      data: {
+        data: [
+          {
+            providerSlug: 'openai',
+            modelId: 'gpt-4o',
+            capabilities: null,
+            tierRole: null,
+            deploymentProfiles: null,
+          },
+        ],
+      },
+    } as never);
+
+    expect(await getAgentModels()).toEqual([
+      { provider: 'openai', id: 'gpt-4o', tier: undefined, capabilities: undefined },
+    ]);
+  });
+
+  it('keeps the rows of one capability when the other response is refused or unreadable', async () => {
+    vi.mocked(serverFetch).mockResolvedValue(okRes());
+    vi.mocked(parseApiResponse)
+      .mockResolvedValueOnce({ success: true, data: [makeMatrixRow()] } as never)
+      .mockResolvedValueOnce({ success: false, error: { code: 'X', message: 'no' } } as never);
+
+    expect((await getAgentModels())?.map((m) => m.id)).toEqual(['claude-3-5-sonnet']);
+
+    vi.mocked(parseApiResponse)
+      .mockResolvedValueOnce({ success: true, data: [makeMatrixRow()] } as never)
+      .mockResolvedValueOnce({ success: true, data: { unexpected: true } } as never);
+
+    expect((await getAgentModels())?.map((m) => m.id)).toEqual(['claude-3-5-sonnet']);
   });
 
   it('fetches /provider-models with capability=chat AND capability=reasoning in parallel', async () => {
