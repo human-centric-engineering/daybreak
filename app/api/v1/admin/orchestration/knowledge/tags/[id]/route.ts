@@ -33,6 +33,7 @@ import { updateKnowledgeTagSchema } from '@/lib/validations/orchestration';
 import { cuidSchema } from '@/lib/validations/common';
 import { computeChanges, logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { invalidateAllAgentAccess } from '@/lib/orchestration/knowledge/resolveAgentDocumentAccess';
+import { knowledgeTagUsage } from '@/lib/orchestration/admin/global-config-usage';
 
 export const GET = withAdminAuth<{ id: string }>(async (request, _session, { params }) => {
   const log = await getRouteLogger(request);
@@ -43,39 +44,46 @@ export const GET = withAdminAuth<{ id: string }>(async (request, _session, { par
   // the Tags admin so operators can see exactly which docs/agents a tag
   // covers, not just the count. Capped at 200 each; pagination on this view
   // can come later if a tag ever spans more than that.
-  const tag = await prisma.knowledgeTag.findUnique({
-    where: { id },
-    include: {
-      _count: { select: { documents: true, agents: true } },
-      documents: {
-        include: {
-          document: {
-            select: { id: true, name: true, fileName: true, scope: true, status: true },
+  // The lists are the caller's org's; the counts are every org's, as the
+  // tag list and the delete check count them (t-731), with the share that is
+  // another org's alongside.
+  const [tag, usage] = await Promise.all([
+    prisma.knowledgeTag.findUnique({
+      where: { id },
+      include: {
+        documents: {
+          include: {
+            document: {
+              select: { id: true, name: true, fileName: true, scope: true, status: true },
+            },
           },
+          orderBy: { createdAt: 'asc' },
+          take: 200,
         },
-        orderBy: { createdAt: 'asc' },
-        take: 200,
-      },
-      agents: {
-        include: {
-          agent: {
-            select: { id: true, name: true, slug: true, isActive: true },
+        agents: {
+          include: {
+            agent: {
+              select: { id: true, name: true, slug: true, isActive: true },
+            },
           },
+          orderBy: { createdAt: 'asc' },
+          take: 200,
         },
-        orderBy: { createdAt: 'asc' },
-        take: 200,
       },
-    },
-  });
+    }),
+    knowledgeTagUsage(id),
+  ]);
   if (!tag) throw new NotFoundError(`Knowledge tag ${id} not found`);
 
   log.info('Knowledge tag fetched', { tagId: id });
 
-  const { _count, documents, agents, ...rest } = tag;
+  const { documents, agents, ...rest } = tag;
   return successResponse({
     ...rest,
-    documentCount: _count.documents,
-    agentCount: _count.agents,
+    documentCount: usage.documentLinks,
+    agentCount: usage.agentGrants,
+    otherOrgDocumentCount: usage.otherOrgDocumentLinks,
+    otherOrgAgentCount: usage.otherOrgAgentGrants,
     documents: documents.map((d) => d.document),
     agents: agents.map((a) => a.agent),
   });
@@ -140,51 +148,48 @@ export const DELETE = withAdminAuth<{ id: string }>(async (request, session, { p
   const { searchParams } = new URL(request.url);
   const force = searchParams.get('force') === 'true';
 
-  // Eagerly include the agent grants so we can name them in the 409
-  // response when the operator tries to delete a tag that's still bound
-  // to one or more agents. Capped at 50 — the dialog lists them as
-  // links; beyond 50 we trust the operator to follow up by tag drill-
-  // down. Documents are not enumerated here because doc linkage can be
-  // force-stripped, so the operator doesn't need the per-row list to
-  // make a decision.
-  const current = await prisma.knowledgeTag.findUnique({
-    where: { id },
-    include: {
-      _count: { select: { documents: true, agents: true } },
-      agents: {
-        include: { agent: { select: { id: true, name: true, slug: true } } },
-        orderBy: { createdAt: 'asc' },
-        take: 50,
-      },
-    },
-  });
+  const current = await prisma.knowledgeTag.findUnique({ where: { id } });
   if (!current) throw new NotFoundError(`Knowledge tag ${id} not found`);
+
+  // In every org (t-731): the tag is global config, and a grant or a
+  // document link in another org is as real as one in the caller's. The
+  // caller's granted agents are named (at most 50, which the dialog lists as
+  // links); another org's are a count.
+  const usage = await knowledgeTagUsage(id);
 
   // Agent grants are sacred: deleting a tag that's actively granting an
   // agent access would silently shrink that agent's knowledge scope.
   // Block unconditionally — the operator must remove the grant from
   // each agent first. `force=true` does NOT bypass this guard; it only
   // bypasses the document-only path below.
-  if (current._count.agents > 0) {
+  if (usage.agentGrants > 0) {
+    const elsewhere =
+      usage.otherOrgAgentGrants > 0
+        ? ` (${usage.otherOrgAgentGrants} of them in other organisations)`
+        : '';
     throw new ConflictError(
-      `Tag "${current.name}" is granted to ${current._count.agents} agent(s). Remove the grant from each agent before deleting this tag.`,
+      `Tag "${current.name}" is granted to ${usage.agentGrants} agent(s)${elsewhere}. Remove the grant from each agent before deleting this tag.`,
       {
-        agentCount: current._count.agents,
-        documentCount: current._count.documents,
-        agents: current.agents.map((row) => ({
-          id: row.agent.id,
-          name: row.agent.name,
-          slug: row.agent.slug,
-        })),
+        agentCount: usage.agentGrants,
+        documentCount: usage.documentLinks,
+        otherOrgAgentCount: usage.otherOrgAgentGrants,
+        agents: usage.agents,
       }
     );
   }
 
-  if (current._count.documents > 0 && !force) {
+  // A forced delete strips the tag from every org's documents, so the
+  // operator is told how many of them are another org's before forcing.
+  if (usage.documentLinks > 0 && !force) {
+    const elsewhere =
+      usage.otherOrgDocumentLinks > 0
+        ? ` (${usage.otherOrgDocumentLinks} of them in other organisations)`
+        : '';
     throw new ConflictError(
-      `Tag "${current.name}" is applied to ${current._count.documents} document(s). Re-send with ?force=true to delete the tag and strip it from those documents.`,
+      `Tag "${current.name}" is applied to ${usage.documentLinks} document(s)${elsewhere}. Re-send with ?force=true to delete the tag and strip it from those documents.`,
       {
-        documentCount: current._count.documents,
+        documentCount: usage.documentLinks,
+        otherOrgDocumentCount: usage.otherOrgDocumentLinks,
         agentCount: 0,
       }
     );
@@ -197,8 +202,8 @@ export const DELETE = withAdminAuth<{ id: string }>(async (request, session, { p
     tagId: id,
     slug: current.slug,
     force,
-    documentLinks: current._count.documents,
-    agentLinks: current._count.agents,
+    documentLinks: usage.documentLinks,
+    agentLinks: usage.agentGrants,
     adminId: session.user.id,
   });
 

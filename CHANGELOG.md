@@ -490,6 +490,36 @@ release process.
   the same module is for the backup importer, which still fails to import a
   slug another org holds until t-738 moves it onto this check.
 
+- **Deleting global config at `multi` now counts every org's usage**
+  (t-731). Providers, provider models, knowledge tags and agent profiles are
+  shared by every org, but the in-use checks counted through the caller's
+  org only. So `DELETE /providers/:id?permanent=true`,
+  `DELETE /provider-models/:id` and `DELETE /knowledge/tags/:id` could remove
+  something another org's agents or workflows still used. An agent profile's
+  `agentCount` (list) and `detachedAgentCount` (delete) were short too. The
+  checks now go through the new `lib/orchestration/admin/global-config-usage.ts`
+  (`providerUsage`, `providerModelUsage`, `knowledgeTagUsage`,
+  `agentProfileUsage`, `knowledgeTagCounts`), which counts under the system
+  scope at `multi`. A refusal names only the caller's own rows. Other orgs'
+  usage is a count, in the new `otherOrgAgentCount` / `otherOrgWorkflowCount`
+  / `otherOrgDocumentCount` details fields and in the message. A forced tag
+  delete, which strips the tag from every org's documents, is now told how
+  many of them are another org's first. The read surfaces count every org
+  too:
+  - the tag list's `documentCount` / `agentCount`, so "unused" and the bulk
+    delete mean unused by any org;
+  - `GET /knowledge/tags/:id` and `GET /agent-profiles/:id`, which add
+    `otherOrgDocumentCount` / `otherOrgAgentCount` beside the caller's own
+    lists.
+
+  The tag-delete dialog, the tag drill-down, the model-delete dialog and the
+  profile edit form show those counts. The model check now also counts a
+  model pinned through a `supervisor` step, which it used to miss even at
+  `single`. Not yet moved: the provider-models matrix list and
+  `GET /providers/:id/models` still count the caller's org (t-751, which
+  also makes shared settings editable only from the install org). Nothing
+  else changes at `single`.
+
 ## [0.13.0] — 2026-09-24
 
 > **Alpha release.** Nineteenth tagged Sunrise release. **MINOR bump**. It

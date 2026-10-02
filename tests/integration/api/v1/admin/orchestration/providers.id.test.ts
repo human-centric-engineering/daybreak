@@ -65,8 +65,17 @@ vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({
 
 // ─── Imports after mocks ─────────────────────────────────────────────────────
 
+// The real count runs (against the mocked client, at single); a test
+// overrides one answer to stand in for another org's references (t-731).
+vi.mock('@/lib/orchestration/admin/global-config-usage', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/lib/orchestration/admin/global-config-usage')>();
+  return { ...actual, providerUsage: vi.fn(actual.providerUsage) };
+});
+
 import { auth } from '@/lib/auth/config';
 import { prisma } from '@/lib/db/client';
+import { providerUsage } from '@/lib/orchestration/admin/global-config-usage';
 import { clearCache } from '@/lib/orchestration/llm/provider-manager';
 import { hasProviderKey } from '@/lib/orchestration/llm/provider-credentials';
 
@@ -542,6 +551,26 @@ describe('DELETE /api/v1/admin/orchestration/providers/:id?permanent=true', () =
       where: { fallbackProviders: { has: 'anthropic' } },
     });
     expect(prisma.aiCostLog.count).toHaveBeenCalledWith({ where: { provider: 'anthropic' } });
+  });
+
+  it('refuses on every org’s references, as providerUsage counts them (t-731)', async () => {
+    // providerUsage counts in every org (its own tests run it at multi);
+    // here only another org's agents reference the provider.
+    vi.mocked(prisma.aiProviderConfig.findUnique).mockResolvedValue(makeProvider());
+    vi.mocked(providerUsage).mockResolvedValueOnce({
+      primaryAgents: 0,
+      fallbackAgents: 2,
+      costLogRows: 0,
+    });
+
+    const response = await DELETE(
+      makeRequest('DELETE', undefined, { permanent: 'true' }),
+      makeParams(PROVIDER_ID)
+    );
+
+    expect(response.status).toBe(409);
+    expect(providerUsage).toHaveBeenCalledWith('anthropic');
+    expect(prisma.aiProviderConfig.delete).not.toHaveBeenCalled();
   });
 
   it('returns 409 when agents reference the slug as primary provider', async () => {

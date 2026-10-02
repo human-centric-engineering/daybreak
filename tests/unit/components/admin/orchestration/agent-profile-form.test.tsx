@@ -238,4 +238,36 @@ describe('AgentProfileForm — edit mode', () => {
     render(<AgentProfileForm mode="edit" profile={makeProfile({ agents: [] })} />);
     expect(screen.queryByText(/agents using this profile/i)).not.toBeInTheDocument();
   });
+
+  it('counts, without listing, other orgs’ agents that inherit from it (t-731)', () => {
+    render(
+      <AgentProfileForm
+        mode="edit"
+        profile={makeProfile({
+          agents: [{ id: 'a1', slug: 'support', name: 'Support', isActive: true }],
+          otherOrgAgentCount: 2,
+        })}
+      />
+    );
+
+    expect(screen.getByText('Agents using this profile (1)')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Also, 2 agents in other organisations inherit from this profile\. Changes here reach them too/
+      )
+    ).toBeInTheDocument();
+  });
+
+  it('shows the panel when only other orgs’ agents inherit from it', () => {
+    render(
+      <AgentProfileForm mode="edit" profile={makeProfile({ agents: [], otherOrgAgentCount: 1 })} />
+    );
+
+    // No own list, so no own count or "each of these agents" blurb over an empty list.
+    expect(screen.getByRole('heading', { name: 'Agents using this profile' })).toBeInTheDocument();
+    expect(screen.queryByText(/each of these agents/)).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/^1 agent in other organisations inherits from this profile/)
+    ).toBeInTheDocument();
+  });
 });
