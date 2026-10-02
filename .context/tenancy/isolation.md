@@ -54,6 +54,18 @@ CREATE POLICY "org_isolation" ON "ai_agent"
 - `NULL` `orgId` rows match no org. `db:tenancy:enable` backfills them to the
   install org before enforcing, so a row born before the chokepoint stamped
   the column, or written under `runAsSystem`, does not vanish.
+- **A unique index still spans every org, but a read doesn't.** Where a
+  column stays unique across the install, `AiWorkflow.slug` (the inbound
+  trigger URL's segment), a plain `findUnique` in one org calls a slug free
+  that another org holds, and the create then fails on the index however
+  often it is retried. Ask availability with
+  `isWorkflowSlugTaken` / `findFreeWorkflowSlug`
+  ([`lib/orchestration/workflows/slug-availability.ts`](../../lib/orchestration/workflows/slug-availability.ts),
+  §107 t-728). Each probe runs under the system scope and returns only a
+  yes/no answer or a free slug, never the other org's row. Save-as-template
+  uses it. The backup importer still reads the slug the plain way, so
+  importing a slug another org holds fails until §109 t-738 moves it onto
+  `isWorkflowSlugTaken`.
 
 The text is defined once, in
 [`lib/tenancy/isolation.ts`](../../lib/tenancy/isolation.ts)
