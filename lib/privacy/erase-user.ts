@@ -22,6 +22,7 @@
 import { createHash } from 'node:crypto';
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
+import { isMultiTenant, runAsSystem } from '@/lib/tenancy/context';
 import { getErasureCleanupHooks } from '@/lib/privacy/erasure-hooks';
 
 export type ErasureReason = 'self_service' | 'admin_action';
@@ -53,13 +54,41 @@ function hashEmail(email: string): string {
  * guard with their own existence/authorization checks first.
  */
 export async function eraseUser(params: EraseUserParams): Promise<EraseUserResult> {
-  const { userId, userEmail, actorUserId, reason } = params;
+  const { userId, actorUserId, reason } = params;
 
   // 1. Object-storage blobs (avatars) — best-effort, outside the DB transaction.
   const { deleteByPrefix, isStorageEnabled } = await import('@/lib/storage/upload');
   if (isStorageEnabled()) {
     await deleteByPrefix(`avatars/${userId}/`);
   }
+
+  // At `multi`, everything below runs as the audited system scope (§107
+  // t-748). A person's rows can sit in several orgs, and the routes call this
+  // from inside the session's active org (or, with an admin API key, from
+  // none). Core's own deletes need no scope — `user.delete`'s cascades are FK
+  // actions, which RLS does not filter, and the audit-log scrub touches a
+  // system model — but a fork's hook that clears a tenant-owned table would
+  // otherwise reach only the caller's org, or throw "No tenant context". Every
+  // hook is handed the `userId` and nothing else, so the bypass widens it to
+  // that person's rows in every org. At `single` there is one org and no
+  // policy, so nothing is entered: a hook keeps the implicit install org.
+  const receipt = isMultiTenant()
+    ? await runAsSystem(
+        // Whose rows, and who asked: logged before the work, so a failed
+        // erasure still leaves its audit line.
+        `subject erasure: user ${userId}'s rows in every org, for ${actorUserId}`,
+        () => eraseRows(params)
+      )
+    : await eraseRows(params);
+
+  logger.info('User erased', { userId, actorUserId, reason, receiptId: receipt.id });
+
+  return { receiptId: receipt.id, erasedAt: receipt.erasedAt };
+}
+
+/** The hooks and the transaction — at `multi`, as {@link eraseUser} runs them in the system scope. */
+async function eraseRows(params: EraseUserParams): Promise<{ id: string; erasedAt: Date }> {
+  const { userId, userEmail, actorUserId, reason } = params;
 
   // 1b. App-registered external cleanup (object storage, search indexes, …).
   // Best-effort like the avatar cleanup above: a hook failure is logged and
@@ -78,7 +107,7 @@ export async function eraseUser(params: EraseUserParams): Promise<EraseUserResul
   }
 
   // 2. Scrub residual PII, write the receipt, and delete — atomically.
-  const receipt = await prisma.$transaction(async (tx) => {
+  return prisma.$transaction(async (tx) => {
     // Retained admin-audit rows keep their IP after `userId` is SetNull'd.
     await tx.aiAdminAuditLog.updateMany({
       where: { userId },
@@ -107,8 +136,4 @@ export async function eraseUser(params: EraseUserParams): Promise<EraseUserResul
 
     return created;
   });
-
-  logger.info('User erased', { userId, actorUserId, reason, receiptId: receipt.id });
-
-  return { receiptId: receipt.id, erasedAt: receipt.erasedAt };
 }

@@ -65,6 +65,9 @@ vi.mock('@/lib/logging', () => ({
   logger: mockLogger,
 }));
 
+const mockEnv = vi.hoisted(() => ({ TENANCY_MODE: 'single' }));
+vi.mock('@/lib/env', () => ({ env: mockEnv }));
+
 vi.mock('@/lib/db/client', () => ({
   prisma: mockPrisma,
 }));
@@ -86,6 +89,7 @@ vi.mock('@/lib/storage/upload', () => ({
 // ---------------------------------------------------------------------------
 
 import { eraseUser } from '@/lib/privacy/erase-user';
+import { getTenantContext, runAsOrg } from '@/lib/tenancy/context';
 
 // ---------------------------------------------------------------------------
 // Shared test fixtures
@@ -110,6 +114,7 @@ function sha256Hex(input: string): string {
 describe('eraseUser', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockEnv.TENANCY_MODE = 'single';
     // Re-apply default implementations after clearAllMocks() wiped call
     // history. Note: it is vi.restoreAllMocks() in afterEach that resets
     // spy implementations back to their originals; clearAllMocks() only
@@ -564,5 +569,60 @@ describe('eraseUser', () => {
     // Each scrub received { tx, userId }
     expect(scrubA).toHaveBeenCalledWith(expect.objectContaining({ userId: BASE_PARAMS.userId }));
     expect(scrubB).toHaveBeenCalledWith(expect.objectContaining({ userId: BASE_PARAMS.userId }));
+  });
+
+  describe('the tenant scope (§107 t-748)', () => {
+    const ACTIVE_ORG = 'cmorg00000000000000active';
+
+    /** The context each phase saw: the external hook, the in-transaction scrub, the delete. */
+    function recordPhases(): Array<{ phase: string; orgId: string | null; source: string } | null> {
+      const seen: Array<{ phase: string; orgId: string | null; source: string } | null> = [];
+      const record = (phase: string) => {
+        const ctx = getTenantContext();
+        seen.push(ctx ? { phase, orgId: ctx.orgId, source: ctx.source } : null);
+      };
+      registerErasureCleanupHook({
+        name: 'hook-scope',
+        cleanupExternal: async () => record('external'),
+        scrubInTransaction: async () => record('scrub'),
+      });
+      mockUserDelete.mockImplementation(async () => {
+        record('delete');
+        return { id: BASE_PARAMS.userId };
+      });
+      return seen;
+    }
+
+    it('runs every hook phase and the transaction in the system scope at multi, whatever org the caller is in', async () => {
+      // A person's rows can sit in several orgs. A session enters its active
+      // org, where a hook clearing a tenant-owned table would reach only that
+      // org; an admin API key enters none, where it would throw.
+      mockEnv.TENANCY_MODE = 'multi';
+      const seen = recordPhases();
+
+      await runAsOrg(ACTIVE_ORG, () => eraseUser(BASE_PARAMS), { source: 'session' });
+      await eraseUser(BASE_PARAMS);
+
+      const phases = ['external', 'scrub', 'delete'].map((phase) => ({
+        phase,
+        orgId: null,
+        source: 'system',
+      }));
+      expect(seen).toEqual([...phases, ...phases]);
+    });
+
+    it('enters no scope at single, so a hook keeps the caller’s org (or the implicit install org)', async () => {
+      const seen = recordPhases();
+
+      await runAsOrg(ACTIVE_ORG, () => eraseUser(BASE_PARAMS), { source: 'session' });
+      await eraseUser(BASE_PARAMS);
+
+      const inSession = ['external', 'scrub', 'delete'].map((phase) => ({
+        phase,
+        orgId: ACTIVE_ORG,
+        source: 'session',
+      }));
+      expect(seen).toEqual([...inSession, null, null, null]);
+    });
   });
 });
