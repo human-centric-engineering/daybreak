@@ -490,6 +490,14 @@ release process.
 
 ### Fixed
 
+- **An evaluation run where every case errored is now `failed`, not `completed`**
+  (#801). A run with no scored result (no provider configured, a provider
+  outage) used to look the same as a clean one, so a fork polling run `status`
+  for `completed` read an empty evaluation as a result. It now ends `failed`
+  with `summary.note = 'all_cases_failed'`, `summary.casesFailed` and
+  `summary.dominantErrorCode`; a run where only some cases failed stays
+  `completed`. The experiment compare page no longer reports a failed or
+  cancelled variant run as still queued.
 - **At `multi`, the models matrix, a provider's model list and the
   capabilities pages no longer call a shared model or capability unused while
   another org uses it** (§107 t-752). They counted only the entered org, so
