@@ -1189,6 +1189,159 @@ describe('StreamingChatHandler', () => {
     expect(provider.chatStream).toHaveBeenCalledTimes(1);
   });
 
+  // 12c — fallback provenance (#810) ----------------------------------------
+  type PersistedMessage = {
+    data: {
+      role: string;
+      providerSlug?: string;
+      metadata?: { pendingApproval?: unknown };
+    };
+  };
+  const persistedMessages = (): PersistedMessage[] =>
+    (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls.map(
+      (c: unknown[]) => c[0] as PersistedMessage
+    );
+
+  it('persists the fallback provider slug on the terminal assistant message', async () => {
+    const provider = mockProvider([
+      [
+        { type: 'text', content: 'Hi' },
+        { type: 'done', usage: { inputTokens: 1, outputTokens: 1 }, finishReason: 'stop' },
+      ],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'fallback-provider',
+    });
+
+    await collect(streamChat(baseRequest));
+
+    const assistantCalls = persistedMessages().filter((m) => m.data.role === 'assistant');
+    const terminal = assistantCalls[assistantCalls.length - 1];
+    expect(terminal).toBeDefined();
+    expect(terminal.data.providerSlug).toBe('fallback-provider');
+  });
+
+  it('persists the fallback provider slug on the pending-approval message', async () => {
+    const provider = mockProvider([
+      [
+        {
+          type: 'tool_call',
+          toolCall: { id: 'tc-rw', name: 'run_workflow', arguments: { workflowSlug: 'x' } },
+        },
+        { type: 'done', usage: { inputTokens: 8, outputTokens: 2 }, finishReason: 'tool_use' },
+      ],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'fallback-provider',
+    });
+    (capabilityDispatcher.dispatch as ReturnType<typeof vi.fn>).mockResolvedValue({
+      success: true,
+      data: {
+        status: 'pending_approval',
+        executionId: 'exec-99',
+        stepId: 'step-approve',
+        prompt: 'Refund?',
+        expiresAt: '2030-01-01T00:00:00.000Z',
+        approveToken: 'a',
+        rejectToken: 'r',
+      },
+      skipFollowup: true,
+    });
+
+    await collect(streamChat(baseRequest));
+
+    const pending = persistedMessages().find(
+      (m) => m.data.role === 'assistant' && m.data.metadata?.pendingApproval
+    );
+    expect(pending).toBeDefined();
+    expect(pending?.data.providerSlug).toBe('fallback-provider');
+  });
+
+  it('persists the fallback provider slug on a parallel-batch pending-approval message', async () => {
+    const provider = mockProvider([
+      [
+        {
+          type: 'tool_call',
+          toolCall: { id: 'tc-s', name: 'search_knowledge_base', arguments: { query: 'r' } },
+        },
+        {
+          type: 'tool_call',
+          toolCall: { id: 'tc-rw', name: 'run_workflow', arguments: { workflowSlug: 'x' } },
+        },
+        { type: 'done', usage: { inputTokens: 10, outputTokens: 2 }, finishReason: 'tool_use' },
+      ],
+    ]);
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider,
+      usedSlug: 'fallback-provider',
+    });
+    vi.mocked(capabilityDispatcher.dispatch).mockImplementation((slug: string) =>
+      Promise.resolve(
+        slug === 'run_workflow'
+          ? {
+              success: true,
+              data: {
+                status: 'pending_approval',
+                executionId: 'exec-par',
+                stepId: 'step-1',
+                prompt: 'Refund?',
+                expiresAt: '2030-01-01T00:00:00.000Z',
+                approveToken: 'ta',
+                rejectToken: 'tr',
+              },
+              skipFollowup: true,
+            }
+          : { success: true, data: { results: [] } }
+      )
+    );
+
+    await collect(streamChat(baseRequest));
+
+    const pending = persistedMessages().find(
+      (m) => m.data.role === 'assistant' && m.data.metadata?.pendingApproval
+    );
+    expect(pending).toBeDefined();
+    expect(pending?.data.providerSlug).toBe('fallback-provider');
+  });
+
+  it('persists the failover provider slug on the terminal message after a mid-stream failover', async () => {
+    const failingProvider = {
+      name: 'failing',
+      isLocal: false,
+      chat: vi.fn(),
+      embed: vi.fn(),
+      listModels: vi.fn(),
+      testConnection: vi.fn(),
+      chatStream: vi.fn(async function* () {
+        yield { type: 'text', content: 'partial...' };
+        throw new Error('Connection reset');
+      }),
+    };
+    const fallbackProvider = mockProvider([
+      [
+        { type: 'text', content: 'Recovered response' },
+        { type: 'done', usage: { inputTokens: 5, outputTokens: 3 }, finishReason: 'stop' },
+      ],
+    ]);
+    (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+      makeAgent({ fallbackProviders: ['openai'] })
+    );
+    (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+      provider: failingProvider,
+      usedSlug: 'anthropic',
+    });
+    (getProvider as ReturnType<typeof vi.fn>).mockResolvedValue(fallbackProvider);
+
+    await collect(streamChat(baseRequest));
+
+    const assistantCalls = persistedMessages().filter((m) => m.data.role === 'assistant');
+    const terminal = assistantCalls[assistantCalls.length - 1];
+    expect(terminal).toBeDefined();
+    expect(terminal.data.providerSlug).toBe('openai');
+  });
+
   // 13 ----------------------------------------------------------------------
   it('invalidateContext called after tool call when contextType/contextId are set', async () => {
     (buildContext as ReturnType<typeof vi.fn>).mockResolvedValue('=== LOCKED CONTEXT ===\ndata');

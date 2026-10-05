@@ -1201,6 +1201,12 @@ export class StreamingChatHandler {
       // retries one (the first may also be in the fallback list).
       const triedSlugs = new Set<string>([usedSlug]);
       let currentProvider = provider;
+      // A provider slug is the stable identifier of a configured LLM provider
+      // (e.g. 'anthropic', 'openai'). This is the slug of the provider actually
+      // serving the turn: it starts as the one `getProviderWithFallbacks`
+      // returned and moves to the fallback's slug on mid-stream failover.
+      // Persisted messages record this, not `resolvedBinding.providerSlug`
+      // (the primary), so the transcript matches the cost log (#810).
       let currentProviderSlug = usedSlug;
       // The breaker of the provider that is serving the turn — after a
       // mid-stream failover, the fallback's, not the one first resolved. Its
@@ -1816,7 +1822,7 @@ export class StreamingChatHandler {
             role: 'assistant',
             content: assistantText,
             modelId: resolvedModel,
-            providerSlug: resolvedBinding.providerSlug,
+            providerSlug: currentProviderSlug,
             ...(assistantWorkflowExecutionId
               ? { workflowExecutionId: assistantWorkflowExecutionId }
               : {}),
@@ -2313,7 +2319,7 @@ export class StreamingChatHandler {
               role: 'assistant',
               content: '',
               modelId: resolvedModel,
-              providerSlug: resolvedBinding.providerSlug,
+              providerSlug: currentProviderSlug,
               metadata: { pendingApproval },
             });
             yield { type: 'approval_required', pendingApproval };
@@ -2607,7 +2613,7 @@ export class StreamingChatHandler {
                 role: 'assistant',
                 content: '',
                 modelId: resolvedModel,
-                providerSlug: resolvedBinding.providerSlug,
+                providerSlug: currentProviderSlug,
                 metadata: { pendingApproval: pa },
               });
               yield { type: 'approval_required', pendingApproval: pa };
