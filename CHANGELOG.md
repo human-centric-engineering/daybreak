@@ -226,6 +226,20 @@ release process.
 
 ### Changed
 
+- **`@sentry/nextjs` 11, mermaid 12 and dotenv 18** (t-758). Core calls Sentry
+  only through `lib/errors/sentry.ts`, whose calls are unchanged, and ships no
+  `Sentry.init`. **A fork that configures Sentry:** v11 collects request and
+  response bodies, headers, cookies, query and database parameters and gen-AI
+  inputs and outputs by default, and Sunrise's agents carry personal data
+  through all of them; set `dataCollection` as
+  [`sentry-setup.md`](./.context/monitoring/sentry-setup.md) shows, and import
+  `withSentryConfig` from `@sentry/nextjs/config`. Mermaid 12 lays diagrams out
+  with ELK and a new default look. dotenv 18 adds a CLI and an opt-in fast
+  parser, and `config({ path })` is unchanged, but **its `-r dotenv/config`
+  preload no longer reads `dotenv_config_path=` from the command line**: it
+  loads `.env` and ignores the argument. Set `DOTENV_CONFIG_PATH=.env.local`
+  in the environment instead (`scripts/diagnose-eval-run.ts` and
+  `verify-eval-run.ts` now say so).
 - **At `multi`, a fork's erasure hooks and subject-export collector run as the
   system scope** (§107 t-748). `registerErasureCleanupHook`'s
   `cleanupExternal` and `scrubInTransaction`, and `collectAppSubjectData()`
@@ -644,6 +658,16 @@ release process.
   note:** a PR whose changed files only cleared 80% on average now fails
   `/pre-pr`, which is what the gate always claimed to do. The failure names the
   file.
+
+### Security
+
+- **The email-preview server's copy of Next is no longer in the `next/og`
+  remote-code-execution range** (t-758). `@react-email/ui` (dev-only) pins
+  `next` 16.3.3; a scoped `overrides` entry makes it use the app's own `next`,
+  with its removal condition in `overrideReasons`. engine.io, undici,
+  brace-expansion and fast-uri move to fixed versions in range. `npm audit` now
+  reports 9 high and no critical, all pre-existing: Prisma 7.10's CLI pins
+  `mysql2` and `deepmerge-ts`, and `braces` has no fixed release.
 
 ## [0.13.0] — 2026-09-24
 

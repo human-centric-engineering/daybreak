@@ -27,8 +27,12 @@ npx @sentry/wizard@latest -i nextjs
 
 The wizard will:
 
-- Create `sentry.client.config.ts`, `sentry.server.config.ts`, `sentry.edge.config.ts`
-- Create `instrumentation.ts` and `instrumentation-client.ts` for Next.js 16+
+- Create `instrumentation-client.ts` (the browser SDK's init on Next.js 16,
+  which builds with Turbopack), `sentry.server.config.ts` and
+  `sentry.edge.config.ts`, loaded from `instrumentation.ts`
+- Older wizard runs also wrote `sentry.client.config.ts`; `@sentry/nextjs` 11
+  loads it only on a webpack build, so on Next 16 the client's `Sentry.init` is
+  the one in `instrumentation-client.ts`
 - Update `next.config.js` with the Sentry wrapper
 - Create example pages to test the integration
 - Configure the tunnel route to bypass ad blockers
@@ -73,6 +77,67 @@ See the [Sentry Next.js documentation](https://docs.sentry.io/platforms/javascri
 ```bash
 npm run dev
 ```
+
+## Sentry 11: Set What It Collects
+
+`@sentry/nextjs` 11 (Sunrise 0.14.0) **collects request and response bodies,
+headers, cookies, query parameters, database query parameters, local variables
+in stack frames and gen-AI prompts and outputs by default**. Sunrise's agents
+carry user chat content and personal data through every one of those, so a
+fork that turns Sentry on without setting this sends that data to Sentry. Set
+`dataCollection` in every `Sentry.init` the wizard writes
+(`instrumentation-client.ts`, `sentry.server.config.ts`,
+`sentry.edge.config.ts`), and widen it only for what you have decided to send:
+
+```typescript
+import * as Sentry from '@sentry/nextjs';
+
+Sentry.init({
+  dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
+  // Collect nothing about the request, the user or the data by default.
+  // (Session Replay is separate; see below.)
+  dataCollection: {
+    userInfo: false,
+    cookies: false,
+    httpHeaders: false,
+    httpBodies: [],
+    urlQueryParams: false,
+    graphQL: { document: false, variables: false },
+    genAI: { inputs: false, outputs: false },
+    databaseQueryData: false,
+    queues: false,
+    stackFrameVariables: false,
+  },
+});
+```
+
+`setErrorTrackingUser()` still attaches the user you pass it; `userInfo: false`
+stops only the SDK filling in `user.*` from request data on its own.
+
+**Session Replay is not governed by `dataCollection`.** The wizard adds
+`replayIntegration()` to the client init, and a replay records what the admin
+saw, chat content included. Either leave it out, or mask everything and record
+only sessions that errored:
+
+```typescript
+Sentry.init({
+  // …dsn and dataCollection as above
+  replaysSessionSampleRate: 0,
+  replaysOnErrorSampleRate: 1.0,
+  integrations: [Sentry.replayIntegration({ maskAllText: true, blockAllMedia: true })],
+});
+```
+
+Two other v11 changes a setup written for v10 hits:
+
+- **`withSentryConfig` moved** to `@sentry/nextjs/config`:
+  `import { withSentryConfig } from '@sentry/nextjs/config';`
+- **Node 20.19+** is required; Sunrise runs on Node 24.
+
+The calls `lib/errors/sentry.ts` makes (`withScope`, `captureException`,
+`captureMessage`, `setUser`) are unchanged. See Sentry's
+[v10 → v11 migration guide](https://docs.sentry.io/platforms/javascript/migration/v10-to-v11/)
+for the rest.
 
 ## Using the Abstraction Layer
 
@@ -281,7 +346,7 @@ If you're getting too many events:
    ```typescript
    Sentry.init({
      tracesSampleRate: 0.1, // 10% of transactions
-     replaysSessionSampleRate: 0.01, // 1% of sessions
+     replaysSessionSampleRate: 0.01, // 1% of sessions, masked as in "Sentry 11" above
    });
    ```
 
