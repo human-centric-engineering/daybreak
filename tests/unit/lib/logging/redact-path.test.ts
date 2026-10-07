@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { collapseDynamicSegments, loggablePath } from '@/lib/logging/redact-path';
+import { collapseDynamicSegments, loggablePath, loggableUrl } from '@/lib/logging/redact-path';
 
 describe('collapseDynamicSegments', () => {
   it.each([
@@ -81,5 +81,53 @@ describe('loggablePath', () => {
   it('passes undefined through and collapses a present path', () => {
     expect(loggablePath(undefined)).toBeUndefined();
     expect(loggablePath('/api/v1/x/cmtd5heg2001804ky8pgo6odx')).toBe('/api/v1/x/[param]');
+  });
+});
+
+describe('loggableUrl (#953)', () => {
+  it('collapses a credential-shaped path segment and keeps the origin', () => {
+    expect(
+      loggableUrl('https://hooks.slack.com/services/T0000/B0000/AbCdEfGhIjKlMnOpQrStUvWx')
+    ).toBe('https://hooks.slack.com/services/T0000/B0000/[param]');
+  });
+
+  it('drops the query string and fragment', () => {
+    expect(loggableUrl('https://files.example.com/doc.pdf?sig=abc123&expires=1#page=2')).toBe(
+      'https://files.example.com/doc.pdf'
+    );
+  });
+
+  it('drops userinfo', () => {
+    expect(loggableUrl('https://user:hunter2@example.com/hook')).toBe('https://example.com/hook');
+  });
+
+  it('keeps a non-default port and an ordinary path', () => {
+    expect(loggableUrl('http://localhost:8080/api/notify')).toBe(
+      'http://localhost:8080/api/notify'
+    );
+  });
+
+  it('passes null and undefined through', () => {
+    expect(loggableUrl(null)).toBeNull();
+    expect(loggableUrl(undefined)).toBeUndefined();
+  });
+
+  it.each([
+    ['a data: URL', 'data:text/plain,qs-secret'],
+    ['a non-http scheme with userinfo', 'foo://user:pw@host.example.com/p'],
+  ])('replaces %s rather than logging what follows a null origin', (_label, url) => {
+    expect(loggableUrl(url)).toBe('[non-http-url]');
+  });
+
+  // Documented limit, recorded so a change to it is deliberate: a path segment
+  // containing `:` is outside LONG_TOKEN, so it is kept.
+  it('keeps a token-shaped path segment that contains a colon (documented limit)', () => {
+    expect(loggableUrl('https://api.example.com/bot123456789:AbCdEfGhIjKlMnOpQrStUvWx/send')).toBe(
+      'https://api.example.com/bot123456789:AbCdEfGhIjKlMnOpQrStUvWx/send'
+    );
+  });
+
+  it('never echoes a value it cannot parse', () => {
+    expect(loggableUrl('not a url ?api_key=abc')).toBe('[unparseable-url]');
   });
 });
