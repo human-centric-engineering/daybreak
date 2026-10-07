@@ -928,6 +928,25 @@ release process.
   `.context/privacy/data-export.md` into `lib/app/data-export.ts`, or used the
   same match anywhere else keyed by email, should change it the same way.
 
+- **Erasing an account now deletes the contact-form messages sent from its
+  address, and both erasure and export attribute those messages only to a
+  verified address** (t-767). `ContactSubmission` has no FK to `User`, so the
+  erasure cascade never reached it: `eraseUser()` reported success and left the
+  person's name, address and messages behind, while the export already treated
+  those rows as theirs. They are now deleted inside the erasure transaction,
+  matched exactly on the account's stored address, trimmed and lower-cased,
+  through `contactSubmissionsOf()`, the matcher the export also uses. The
+  contact form proves nothing about who typed an address, so an account whose
+  `emailVerified` is false now matches none of them: its erasure leaves them,
+  and **its export no longer includes them** (it previously did, so with email
+  verification off an account opened under someone else's address received
+  their enquiries). Where verification is required (the production default)
+  this affects only sign-ups that never verified; when one leaves messages
+  behind, erasure logs a warning with the count so an operator can handle them
+  by hand. A fork with its own table keyed by email needs the same step in an
+  erasure hook's `scrubInTransaction`, and the same verified-only
+  rule if a public form fills it; `.context/privacy/data-erasure.md` shows how.
+
 - **The email-preview server's copy of Next is no longer in the `next/og`
   remote-code-execution range** (t-758). `@react-email/ui` (dev-only) pins
   `next` 16.3.3; a scoped `overrides` entry makes it use the app's own `next`,
