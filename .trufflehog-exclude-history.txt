@@ -15,7 +15,9 @@
 # (`user:pass@db`, `postgres:postgres@db`, `user:password@host`) in the
 # since-removed `.instructions/` build guides and in CLAUDE.md's original Docker
 # section. They are why the weekly sweep exited 183 from at least 2026-09-07.
-# CLAUDE.md today holds no connection string, and the `Postgres DSN tripwire`
-# step still checks it on every run.
+# CLAUDE.md today holds no connection string. What the sweep gives up is
+# TruffleHog on CLAUDE.md's history; every commit reaching main still passes a
+# PR or push scan with all detectors, and the `Postgres DSN tripwire` checks the
+# current file (not its history) on every run.
 ^\.instructions/
 ^CLAUDE\.md$
