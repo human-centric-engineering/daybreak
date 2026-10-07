@@ -18,6 +18,12 @@ release process.
 
 ### Added
 
+- **`ComputedCost.unpriced`, `ModelInfo.pricingUnknown` and
+  `isMatrixOwnedFigure(id, field)`** (#813, t-769). `calculateCost` returns
+  `unpriced: true` when no rate was available, so a caller can tell "not
+  priced" from "free"; `pricingUnknown` marks a registry entry that only a
+  null-cost Model Matrix row supplied; `isMatrixOwnedFigure` says whether a
+  registry figure follows its matrix row. See **Fixed**.
 - **Platform agents: Sunrise's own agents, defined in code, with one instance
   per org** (multi-tenancy §116 t-724). The sixteen agents seeds used to write
   once, as the install org's rows, are now definitions in
@@ -226,6 +232,12 @@ release process.
 
 ### Changed
 
+- **The Model Matrix no longer overrides the price or context window of a
+  model the registry already knows** (#813, t-769). A positive figure from the
+  static map or OpenRouter now wins over the row's blended rate and context
+  bucket, at runtime and in `GET /admin/orchestration/models`. An operator who
+  relied on editing the matrix to re-price a known model must now do it
+  elsewhere; a model only the matrix knows is still priced from its row.
 - **Log keys renamed so word-based redaction leaves them readable** (#951).
   The logger now redacts any key containing a sensitive word (see Security),
   which would also hide non-secret keys such as `tokenId` or `hasApiKey`, as
@@ -242,7 +254,6 @@ release process.
     `usage` replaces `tokenUsage` (evaluation completed).
   - The sensitive-field lists drop their `_` spellings (`api_key`,
     `first_name`, …): one letters-only spelling now covers every form.
-
 - **A `tool_call` step interpolates its `args`** (t-770). Every string in an
   authored `args` object now resolves `{{input.…}}`, `{{<stepId>.output}}`,
   `{{trigger.…}}` and the rest, as every other step type's config already did;
@@ -582,6 +593,31 @@ release process.
 
 ### Fixed
 
+- **Recorded AI costs use the model's real rates, and a turn nobody could
+  price is marked as such** (#813, t-769). **Recorded costs change.** Three
+  defects, one fix each:
+  - Once the Model Matrix had been loaded into the model registry, a matrix
+    row's single blended rate replaced the registry's separate input and output
+    rates (gpt-4o-mini cost its 0.375 blend on both sides), and its coarse
+    context bucket (`high` → 200,000) replaced the model's real window, which
+    the chat handler uses as its history budget. `registerModels()` now keeps a
+    positive registry figure and lets a row fill only a zero. A model only the
+    matrix knows keeps its own row's figures, and an edit to that row,
+    clearing included, takes effect on the next hydrate. See **Changed** for what this
+    takes away from operators.
+  - A model only the matrix knows (a dated snapshot id such as
+    `gpt-4o-mini-2024-07-18`, a discovered model) was costed at \$0 on the chat
+    path and in the evaluation worker: neither ever loaded the matrix into the
+    registry. `getProvider`, `resolveAgentProviderAndModel`, `runLlmCall`,
+    keyword enrichment, the cleanup page's context window and the retroactive
+    execution review now do: one query a minute (every 10 s while it fails,
+    once one has landed). An OpenRouter refresh no longer
+    drops the matrix's models until the next hydrate.
+  - A turn with no price (a model the registry still does not know, or a
+    matrix row whose cost is null) was stored at \$0 exactly like a free one,
+    and a null-cost row did not even log the "unknown model" warning.
+    `logCost` now stamps `metadata.pricing = 'unknown'` on the `AiCostLog`
+    row (not on a local turn). An explicit cost of 0 is still a free model.
 - **The SMS / WhatsApp inbound-reply template sends its reply** (t-770). Its
   `send_reply` step is a `tool_call`, and `tool_call` was the one step type
   that did not interpolate its config, so `{{trigger.conversationId}}` and
