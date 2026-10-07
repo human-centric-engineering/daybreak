@@ -29,20 +29,6 @@
 ^docs/
 ^DOCKER-TESTING\.md$
 
-# History only — both are why the weekly full-history sweep failed every run.
-# The initial commit (316963fb) carried placeholder DSNs (`user:pass@db`,
-# `postgres:postgres@db`) in the since-removed `.instructions/` build guides and
-# in CLAUDE.md's original Docker section. A PR or push scan never reaches that
-# commit; only the sweep does, and a path rule is the only exemption TruffleHog
-# offers for history.
-#
-# `.instructions/` no longer exists, so excluding it costs nothing. CLAUDE.md
-# does, and it is the same AI-agent substrate as `.claude/` and `.context/`
-# above: what is given up is TruffleHog's non-Postgres detectors on that one
-# file. The `Postgres DSN tripwire` still scans it on every run.
-^\.instructions/
-^CLAUDE\.md$
-
 # Environment and deployment templates — placeholder credentials by definition.
 ^\.env\.example$
 ^docker-compose(\.[a-z]+)?\.yml$
