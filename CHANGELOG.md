@@ -783,6 +783,23 @@ release process.
 
 ### Security
 
+- **The `api-key` and `embed-token` rate-limit key strategies key on a
+  verified credential** (#701). Both built the bucket from the header value
+  as presented, so a caller could open a new bucket per request and the cap
+  never engaged. The middleware now looks the presented key or token up
+  (`lib/security/rate-limit-credentials.ts`, cached 60s per verified
+  credential) and keys on the stored row's id; a value that names no live
+  credential gets the IP bucket. Lookups of unverified values are capped by a
+  separate per-IP lookup budget (30/min). The proxy now parses
+  `Authorization` exactly as the routes do (case-sensitive `Bearer `). A
+  fork rule using either strategy (via `registerRateLimitRule()`) gets the
+  same behaviour, and the identifier segment changes from the raw value to
+  `key:sk:<id>` / `key:mcp:<id>` / `embed:<id>:<ip>`. The embed chat
+  stream's per-flow `embedChatLimiter` now runs after the token is resolved
+  and keys on the visitor id derived from the token row, not the raw header.
+  `API_KEY_PREFIX` (`lib/auth/api-keys.ts`) and `MCP_API_KEY_PREFIX`
+  (`lib/orchestration/mcp/auth.ts`) are exported.
+
 - **`send_message_to_channel` sends only within the conversation being
   handled** (t-770). It sent on whatever `conversationId` its caller passed, so
   a model steered by the person chatting, by an inbound message or by content
