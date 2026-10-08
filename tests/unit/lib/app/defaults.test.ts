@@ -477,9 +477,20 @@ const SEAM_DEFAULTS: SeamDefault[] = [
         'eval-judge-framework-rubric',
       ]);
       CORE_PLATFORM_AGENTS.forEach((d) => expect(getPlatformAgent(d.slug)).toBe(d));
-      expect(getPlatformAgent('eval-judge-framework-rubric')?.agent.systemInstructions).toMatch(
-        /^You are the Framework-Rubric Judge/
-      );
+      // The framework's judge, as the framework defines it — not a leaf's modified copy.
+      expect(getPlatformAgent('eval-judge-framework-rubric')).toMatchObject({
+        audience: 'every-org',
+        agent: {
+          name: 'Framework-Rubric Judge',
+          kind: 'judge',
+          temperature: 0.2,
+          maxTokens: 1000,
+          knowledgeAccessMode: 'restricted',
+          systemInstructions: expect.stringMatching(/^You are the Framework-Rubric Judge/),
+        },
+        capabilities: [],
+        knowledgeTags: [],
+      });
       // And calling the seam directly registers nothing new.
       const before = listPlatformAgents().length;
       initLeafPlatformAgents();

@@ -50,7 +50,14 @@ process.
     seed `framework/001-framework-rubric-judge` is removed. An existing
     install's seeded row is adopted in place, with no new row. An admin edit to
     the judge's prompt is now refused, as for Sunrise's own judges. Clone it to
-    customise it.
+    customise it. Two upgrade checks:
+    - **A judge you switched off comes back on.** `isActive` is the
+      platform's, so the reconcile re-enables it and the API refuses switching
+      it off. To stop rubric scoring, set the eval-sweep step's `rubric: false`.
+    - **At `multi`, an org with its own (non-system) agent under
+      `eval-judge-framework-rubric` keeps it.** The reconcile never takes over
+      an org's own agent, so that org never gets the platform judge. Rename or
+      delete that agent to receive it.
   - **`lib/app/provider-credentials.ts`** is a new reserved leaf seam. Daybreak
     keeps it empty: where a provider's API key comes from is the leaf's call.
   - The two-org smoke (`smoke:tenancy-isolation`) checks core's 12/4 split

@@ -60,20 +60,19 @@ reserves for its own forks.**
   `initFramework()`), `admin-nav.ts` (client sidebar → the framework nav
   section), `data-export.ts` (subject access → the framework's own GDPR Art. 15
   manifest), `brand.ts` (product name + legal entity → `lib/brand.ts`),
-  `db-drift.ts` (Prisma-unmodelled DB objects), `ci.ts` (coverage exclusions
-  - always-run tests → `vitest.config.ts` and `ALWAYS_RUN_TESTS`) and
-    `platform-agents.ts` (the framework's platform agents — the rubric judge —
-    into core's per-org registry, Sunrise §116). CLAUDE.md's
-    banner carries the same roster; count them there rather than from an ordinal
-    in a docblock. A
-    framework registration that must run in a realm `initFramework()` can't reach —
-    server-boot, the client sidebar, a lazy seam whose init core owns, or a static
-    value core imports directly — has nowhere else to go; each delegates to a
-    reserved leaf hook (`leaf-bootstrap.ts` / `leaf-admin-nav.ts` /
-    `leaf-data-export.ts` / `leaf-brand.ts` / `leaf-platform-agents.ts`). `brand.ts` is the one where the leaf
-    **overrides** rather than appends — brand identity is single-valued, so a leaf
-    replaces Daybreak's name rather than composing with it. Otherwise Daybreak does
-    **not** fill `lib/app/*` (see next).
+  `db-drift.ts` (Prisma-unmodelled DB objects), `ci.ts` (coverage exclusions and
+  always-run tests → `vitest.config.ts` and `ALWAYS_RUN_TESTS`) and
+  `platform-agents.ts` (the framework's platform agents — the rubric judge — into
+  core's per-org registry, Sunrise §116). CLAUDE.md's banner carries the same
+  roster; count them there rather than from an ordinal in a docblock. A framework
+  registration that must run in a realm `initFramework()` can't reach —
+  server-boot, the client sidebar, a lazy seam whose init core owns, or a static
+  value core imports directly — has nowhere else to go; each delegates to a
+  reserved leaf hook (`leaf-bootstrap.ts` / `leaf-admin-nav.ts` /
+  `leaf-data-export.ts` / `leaf-brand.ts` / `leaf-platform-agents.ts`). `brand.ts` is the one where the leaf
+  **overrides** rather than appends — brand identity is single-valued, so a leaf
+  replaces Daybreak's name rather than composing with it. Otherwise Daybreak does
+  **not** fill `lib/app/*` (see next).
 
   `data-export.ts` has the most history behind it. Sunrise v0.8.0 (#467) shipped
   subject access assuming exactly **two** tiers — core declares its tables in

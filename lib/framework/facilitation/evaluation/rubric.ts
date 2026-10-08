@@ -21,6 +21,9 @@ import { loadFrameworkConversation } from '@/lib/framework/facilitation/evaluati
 import { listScorableTurns } from '@/lib/framework/facilitation/evaluation/turns';
 import { FRAMEWORK_RUBRIC_JUDGE_SLUG } from '@/lib/framework/facilitation/evaluation/rubric-judge';
 
+/** Re-exported from its new home (`rubric-judge.ts`, Hub t-142) so a deep import keeps compiling. */
+export { FRAMEWORK_RUBRIC_JUDGE_SLUG };
+
 const ENTITY_TYPE = 'framework_conversation_eval';
 
 export interface RubricScoreConversationArgs {

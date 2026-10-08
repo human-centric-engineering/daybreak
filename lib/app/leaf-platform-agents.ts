@@ -14,8 +14,16 @@
  *
  * **A throwing init takes the framework's agents down with yours.** Core runs this and the
  * framework's registrations as one unit and rolls the whole unit back on a throw (logged at
- * error), so the reconcile switches the rubric judge off in every org until the leaf is fixed.
- * `registerPlatformAgent` throws on a bad slug or a repeated capability/tag slug; test yours.
+ * error), so the reconcile switches the rubric judge off in every org until the leaf is fixed —
+ * and while it is unregistered its slug is not reserved, so an org admin could create their own
+ * agent under it, which the reconcile would then never take over. `registerPlatformAgent` throws on
+ * a slug that is not lowercase kebab-case, a repeated capability or knowledge-tag slug, and
+ * `capabilityBindings: 'org'` with a non-empty `capabilities`; test yours.
+ *
+ * **An edit here does not re-run seed `021-platform-agents` on `db:seed`**: its `hashInputs` name
+ * `lib/app/platform-agents.ts`, not this file. The maintenance tick applies it (it compares each
+ * org's registry digest); on an install with no tick scheduled, touch `lib/app/platform-agents.ts`
+ * or run the tick once.
  *
  * ```ts
  * import { registerPlatformAgent } from '@/lib/orchestration/agents/platform-agents';
