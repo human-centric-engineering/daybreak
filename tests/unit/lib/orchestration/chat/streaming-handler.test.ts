@@ -14,6 +14,17 @@ import { assertNoAttachmentPersistence } from '@/tests/helpers/no-attachment-per
 // Module mocks — hoisted before dynamic imports
 // ---------------------------------------------------------------------------
 
+// The agent read's REPEATABLE READ wrapper is proved in agent-versioning's
+// own tests; here it runs the read against the client directly.
+vi.mock('@/lib/orchestration/agents/agent-versioning', async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import('@/lib/orchestration/agents/agent-versioning')>();
+  return {
+    ...actual,
+    readAgentConsistently: vi.fn((db: unknown, read: (tx: unknown) => unknown) => read(db)),
+  };
+});
+
 vi.mock('@/lib/db/client', () => ({
   prisma: {
     // `touchAgentLastActive` (called from `createNewConversation`) does
@@ -229,6 +240,7 @@ const { buildContext, invalidateContext } =
   await import('@/lib/orchestration/chat/context-builder');
 const { emitHookEvent } = await import('@/lib/orchestration/hooks/registry');
 const { streamChat } = await import('@/lib/orchestration/chat/streaming-handler');
+const { readAgentConsistently } = await import('@/lib/orchestration/agents/agent-versioning');
 const { CostOperation } = await import('@/types/orchestration');
 const { getBreaker } = await import('@/lib/orchestration/llm/circuit-breaker');
 const { ProviderError } = await import('@/lib/orchestration/llm/provider');
@@ -296,6 +308,8 @@ function makeAgent(overrides: Partial<Record<string, unknown>> = {}) {
     createdBy: 'u1',
     createdAt: new Date(),
     updatedAt: new Date(),
+    // Latest-version include from loadAgent; empty = no version history.
+    versions: [],
     ...overrides,
   };
 }
@@ -6479,6 +6493,267 @@ describe('attachment gate', () => {
       };
       expect(user.data.modelId).toBeUndefined();
       expect(user.data.providerSlug).toBeUndefined();
+    });
+  });
+
+  describe('agent version pin (#811)', () => {
+    type Row = {
+      data: {
+        role: string;
+        agentVersionId?: string;
+        metadata?: Record<string, unknown>;
+      };
+    };
+    const persistedMessages = (): Row[] =>
+      (prisma.aiMessage.create as ReturnType<typeof vi.fn>).mock.calls.map(
+        (c: unknown[]) => c[0] as Row
+      );
+    const assistantRows = (): Row[] =>
+      persistedMessages().filter((m) => m.data.role === 'assistant');
+
+    function setupTextTurn() {
+      const provider = mockProvider([
+        [
+          { type: 'text', content: 'Hello.' },
+          { type: 'done', usage: { inputTokens: 5, outputTokens: 2 }, finishReason: 'stop' },
+        ],
+      ]);
+      (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+        provider,
+        usedSlug: 'anthropic',
+      });
+    }
+
+    it('loads only the latest AiAgentVersion id alongside the agent', async () => {
+      setupTextTurn();
+      await collect(streamChat(baseRequest));
+
+      const query = (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mock.calls[0][0] as {
+        include: { versions?: unknown };
+      };
+      expect(query.include.versions).toEqual({
+        orderBy: { version: 'desc' },
+        take: 1,
+        select: { id: true },
+      });
+    });
+
+    it('reads the agent and its newest version through one consistent read', async () => {
+      setupTextTurn();
+      await collect(streamChat(baseRequest));
+
+      // A bare `prisma.aiAgent.findFirst` would read the version in a second
+      // snapshot and could pin a turn to a version it did not run (t-779).
+      expect(readAgentConsistently).toHaveBeenCalledWith(prisma, expect.any(Function));
+    });
+
+    it('pins the latest version id on the terminal assistant message', async () => {
+      (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeAgent({ versions: [{ id: 'ver-latest' }] })
+      );
+      setupTextTurn();
+      await collect(streamChat(baseRequest));
+
+      const rows = assistantRows();
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        expect(row.data.agentVersionId).toBe('ver-latest');
+      }
+    });
+
+    it('pins the version on the error marker once the agent has loaded', async () => {
+      const failingProvider = {
+        name: 'failing',
+        isLocal: false,
+        chat: vi.fn(),
+        embed: vi.fn(),
+        listModels: vi.fn(),
+        testConnection: vi.fn(),
+        // eslint-disable-next-line require-yield
+        chatStream: vi.fn(async function* () {
+          throw new ProviderError('hit max_completion_tokens', {
+            code: 'truncated_no_output',
+            retriable: false,
+          });
+        }),
+      };
+      (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeAgent({ fallbackProviders: [], versions: [{ id: 'ver-latest' }] })
+      );
+      (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+        provider: failingProvider,
+        usedSlug: 'anthropic',
+      });
+      await collect(streamChat(baseRequest));
+
+      const marker = assistantRows().find((m) => m.data.metadata?.error === true);
+      expect(marker).toBeDefined();
+      expect(marker?.data.agentVersionId).toBe('ver-latest');
+    });
+
+    it('leaves the pin unset on every row for an agent with no version history', async () => {
+      (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeAgent({ versions: [] })
+      );
+      setupTextTurn();
+      await collect(streamChat(baseRequest));
+
+      const rows = persistedMessages();
+      expect(rows.length).toBeGreaterThan(1);
+      for (const row of rows) {
+        expect(row.data).not.toHaveProperty('agentVersionId');
+      }
+    });
+
+    it('pins the user message too, matching the workflow chat_turn executor', async () => {
+      (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeAgent({ versions: [{ id: 'ver-latest' }] })
+      );
+      setupTextTurn();
+      await collect(streamChat(baseRequest));
+
+      const user = persistedMessages().find((m) => m.data.role === 'user');
+      expect(user).toBeDefined();
+      expect(user?.data.agentVersionId).toBe('ver-latest');
+    });
+
+    it('leaves tool-result rows unpinned', async () => {
+      (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeAgent({ versions: [{ id: 'ver-latest' }] })
+      );
+      const provider = mockProvider([
+        [
+          { type: 'tool_call', toolCall: { id: 'tc1', name: 'search', arguments: {} } },
+          { type: 'done', usage: { inputTokens: 1, outputTokens: 1 }, finishReason: 'tool_use' },
+        ],
+        [
+          { type: 'text', content: 'Done.' },
+          { type: 'done', usage: { inputTokens: 1, outputTokens: 1 }, finishReason: 'stop' },
+        ],
+      ]);
+      (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+        provider,
+        usedSlug: 'anthropic',
+      });
+      (capabilityDispatcher.dispatch as ReturnType<typeof vi.fn>).mockResolvedValue({
+        success: true,
+        data: 'result',
+      });
+      await collect(streamChat(baseRequest));
+
+      const tools = persistedMessages().filter((m) => m.data.role === 'tool');
+      expect(tools.length).toBeGreaterThan(0);
+      for (const row of tools) expect(row.data).not.toHaveProperty('agentVersionId');
+    });
+
+    it('pins the budget-exceeded assistant message', async () => {
+      (checkBudget as ReturnType<typeof vi.fn>).mockResolvedValue({
+        withinBudget: true,
+        spent: 0.1,
+        limit: 100,
+        remaining: 99.9,
+      });
+      // The default cost fixture is $0.03 per iteration; a $0.02 cap trips it.
+      (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeAgent({ maxCostPerTurnUsd: 0.02, versions: [{ id: 'ver-latest' }] })
+      );
+      const provider = mockProvider([
+        [
+          { type: 'tool_call', toolCall: { id: 'tc1', name: 'search', arguments: {} } },
+          { type: 'done', usage: { inputTokens: 1000, outputTokens: 500 } },
+        ],
+      ]);
+      (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+        provider,
+        usedSlug: 'anthropic',
+      });
+      await collect(streamChat(baseRequest));
+
+      const breach = assistantRows().find(
+        (m) =>
+          (m.data.metadata as { endedReason?: string } | undefined)?.endedReason ===
+          'budget_exceeded'
+      );
+      expect(breach).toBeDefined();
+      expect(breach?.data.agentVersionId).toBe('ver-latest');
+    });
+
+    const pendingApproval = {
+      status: 'pending_approval',
+      executionId: 'exec-99',
+      stepId: 'step-approve',
+      prompt: 'Refund?',
+      expiresAt: '2030-01-01T00:00:00.000Z',
+      approveToken: 'a',
+      rejectToken: 'r',
+    };
+
+    it('pins the pending-approval placeholder from a single tool call', async () => {
+      (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeAgent({ versions: [{ id: 'ver-latest' }] })
+      );
+      const provider = mockProvider([
+        [
+          {
+            type: 'tool_call',
+            toolCall: { id: 'tc-rw', name: 'run_workflow', arguments: { workflowSlug: 'x' } },
+          },
+          { type: 'done', usage: { inputTokens: 8, outputTokens: 2 }, finishReason: 'tool_use' },
+        ],
+      ]);
+      (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+        provider,
+        usedSlug: 'anthropic',
+      });
+      (capabilityDispatcher.dispatch as ReturnType<typeof vi.fn>).mockResolvedValue({
+        success: true,
+        data: pendingApproval,
+        skipFollowup: true,
+      });
+      await collect(streamChat(baseRequest));
+
+      const pending = assistantRows().find(
+        (m) => (m.data.metadata as { pendingApproval?: unknown } | undefined)?.pendingApproval
+      );
+      expect(pending).toBeDefined();
+      expect(pending?.data.agentVersionId).toBe('ver-latest');
+    });
+
+    it('pins the pending-approval placeholder from a parallel tool batch', async () => {
+      (prisma.aiAgent.findFirst as ReturnType<typeof vi.fn>).mockResolvedValue(
+        makeAgent({ versions: [{ id: 'ver-latest' }] })
+      );
+      const provider = mockProvider([
+        [
+          {
+            type: 'tool_call',
+            toolCall: { id: 'tc-s', name: 'search_knowledge_base', arguments: { query: 'r' } },
+          },
+          {
+            type: 'tool_call',
+            toolCall: { id: 'tc-rw', name: 'run_workflow', arguments: { workflowSlug: 'x' } },
+          },
+          { type: 'done', usage: { inputTokens: 10, outputTokens: 2 }, finishReason: 'tool_use' },
+        ],
+      ]);
+      (getProviderWithFallbacks as ReturnType<typeof vi.fn>).mockResolvedValue({
+        provider,
+        usedSlug: 'anthropic',
+      });
+      vi.mocked(capabilityDispatcher.dispatch).mockImplementation((slug: string) =>
+        Promise.resolve(
+          slug === 'run_workflow'
+            ? { success: true, data: pendingApproval, skipFollowup: true }
+            : { success: true, data: { results: [] } }
+        )
+      );
+      await collect(streamChat(baseRequest));
+
+      const pending = assistantRows().find(
+        (m) => (m.data.metadata as { pendingApproval?: unknown } | undefined)?.pendingApproval
+      );
+      expect(pending).toBeDefined();
+      expect(pending?.data.agentVersionId).toBe('ver-latest');
     });
   });
 
