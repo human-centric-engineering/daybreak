@@ -81,7 +81,10 @@ describe('handleFacilitationGuardEvent', () => {
 
   it('names an anonymous embed visitor as embedVisitorId, never as a userId', async () => {
     vi.mocked(listEnabledFacilitationPolicies).mockResolvedValue([policy(escPayload())] as never);
-    await handleFacilitationGuardEvent(ctx({ userId: 'embed_visitor1' }), event());
+    await handleFacilitationGuardEvent(
+      ctx({ userId: 'embed_visitor1', embedVisitorId: 'embed_visitor1' }),
+      event()
+    );
     expect(notifyEscalation).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: null,

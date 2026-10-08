@@ -56,11 +56,13 @@ process.
     into a `User` foreign key must check `isEmbedUserId` (`lib/embed/auth.ts`)
     first, and decide what a visitor gets. Daybreak's framework tools now refuse
     an anonymous visitor with `anonymous_visitor` before touching the database:
-    the slot, feedback and guidance tools (`fill_slot`, `get_state`,
-    `record_feedback`, the five journey tools). `submit_proposal`
-    records a visitor-driven proposal as no one's. A facilitation escalation
-    names a visitor as `embedVisitorId`, with `userId: null`, as core's
-    `escalate_to_human` does.
+    `fill_slot`, `get_state`, `record_feedback`, the five journey tools and
+    `submit_proposal` (filing a structure proposal is an operator's act). The
+    module context injected into a visitor's chat skips their (nonexistent)
+    slots. A facilitation escalation names a visitor as
+    `metadata.embedVisitorId`, with `userId: null`. A framework tool of your own
+    can make the same check with `checkUserCaller()`
+    (`lib/framework/shared/caller.ts`).
   - **`/pre-pr`'s coverage floor is now per file**, as documented (Sunrise
     t-749). A PR whose changed files only cleared 80% on average now fails, and
     the failure names the file.

@@ -12,7 +12,7 @@
  * conversation-rerouting (a workflow via `drainEngine`) + user-facing resources are a follow-up.
  */
 
-import { isEmbedUserId, userIdForUserRef } from '@/lib/embed/auth';
+import { userIdForUserRef } from '@/lib/embed/auth';
 import type { GuardEvent, GuardEventContext } from '@/lib/orchestration/chat/guard-events';
 import type { GuardMode } from '@/lib/orchestration/chat/guard-floor';
 import { FACILITATION_SURFACE_CONTEXT_TYPE } from '@/lib/framework/facilitation/agents/surface';
@@ -96,9 +96,11 @@ async function dispatchEscalation(
   // Notify a human reviewer — email/webhook per the global escalationConfig, which applies its own
   // priority threshold. Never throws.
   // An embed widget visitor's `ctx.userId` is an `embed_<hash>` id, not a `User` (Sunrise #705,
-  // t-765). As core's `escalate_to_human` does, a reader of `userId` gets `null` and the visitor is
-  // named as `embedVisitorId` instead.
-  const visitor = isEmbedUserId(ctx.userId) ? { embedVisitorId: ctx.userId } : {};
+  // t-765); the guard-event seam names them as `ctx.embedVisitorId`. As in core's
+  // `escalate_to_human`, a reader of `userId` gets `null` and the visitor is named as
+  // `embedVisitorId` instead — here inside `metadata`, because the notifier's payload has no
+  // top-level field for it and would drop one.
+  const visitor = ctx.embedVisitorId ? { embedVisitorId: ctx.embedVisitorId } : {};
   await notifyEscalation({
     agentId: ctx.agentId,
     userId: userIdForUserRef(ctx.userId),

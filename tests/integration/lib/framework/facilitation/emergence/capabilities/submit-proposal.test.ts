@@ -113,11 +113,11 @@ describe('execute', () => {
     );
   });
 
-  it('records an anonymous embed visitor as no one (the audit actor is a User FK)', async () => {
-    await cap.execute(args, ctx('embed_visitor1'));
-    expect(submitStructureChangeProposal).toHaveBeenCalledWith(
-      expect.objectContaining({ actorUserId: null, createdBy: 'agent:facilitator' })
-    );
+  it('refuses an anonymous embed visitor before resolving the agent — no proposal written', async () => {
+    const result = await cap.execute(args, ctx('embed_visitor1'));
+    expect(result).toMatchObject({ success: false, error: { code: 'anonymous_visitor' } });
+    expect(prisma.aiAgent.findUnique).not.toHaveBeenCalled();
+    expect(submitStructureChangeProposal).not.toHaveBeenCalled();
   });
 
   it('errors (no_agent) when the calling agent cannot be resolved — no proposal written', async () => {

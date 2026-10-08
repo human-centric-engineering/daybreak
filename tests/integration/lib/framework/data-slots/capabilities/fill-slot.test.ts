@@ -69,6 +69,8 @@ describe('execute', () => {
     const result = await cap.execute(args(), ctx({ userId: 'embed_visitor1' }));
     expect(result).toMatchObject({ success: false, error: { code: 'anonymous_visitor' } });
     expect(appendSlotValue).not.toHaveBeenCalled();
+    expect(getSlotDefinition).not.toHaveBeenCalled();
+    expect(extractTypedValue).not.toHaveBeenCalled();
   });
 
   it('appends to an active targeted slot and returns the new version, silently', async () => {

@@ -13,12 +13,12 @@
  * "explicit module" path, authenticated and scoped by its own URL. A call outside a
  * module scope is refused, not silently mis-attributed.
  *
- * Writes the caller's own feedback (`context.userId`), so there is no cross-user write.
+ * Writes the caller's own feedback (`caller.userId`), so there is no cross-user write.
  */
 
 import { z } from 'zod';
 import { BaseCapability } from '@/lib/orchestration/capabilities/base-capability';
-import { isEmbedUserId } from '@/lib/embed/auth';
+import { checkUserCaller } from '@/lib/framework/shared/caller';
 import type {
   CapabilityContext,
   CapabilityFunctionDefinition,
@@ -94,19 +94,8 @@ export class RecordFeedbackCapability extends BaseCapability<
     args: RecordFeedbackArgs,
     context: CapabilityContext
   ): Promise<CapabilityResult<RecordFeedbackData>> {
-    if (context.userId === null) {
-      return this.error(
-        'Feedback capture is unavailable for system-initiated runs (no user context).',
-        'no_user_context'
-      );
-    }
-    // An anonymous embed widget visitor is not a `User` (Sunrise #705, t-765): the write would fail on the `User` foreign key.
-    if (isEmbedUserId(context.userId)) {
-      return this.error(
-        'Feedback capture is unavailable to anonymous embed widget visitors.',
-        'anonymous_visitor'
-      );
-    }
+    const caller = checkUserCaller(context, 'Feedback capture');
+    if (!caller.ok) return this.error(caller.message, caller.code);
 
     // Module attribution comes from the trusted surface scope, never an argument.
     const { moduleSlug } = decodeScope(context.scope);
@@ -118,7 +107,7 @@ export class RecordFeedbackCapability extends BaseCapability<
     }
 
     await recordModuleEngagement({
-      userId: context.userId,
+      userId: caller.userId,
       moduleSlug,
       type: ENGAGEMENT_EVENT_TYPE.moduleFeedback,
       payload: {

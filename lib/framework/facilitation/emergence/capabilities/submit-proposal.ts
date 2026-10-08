@@ -20,7 +20,7 @@
 
 import { z } from 'zod';
 import { BaseCapability } from '@/lib/orchestration/capabilities/base-capability';
-import { userIdForUserRef } from '@/lib/embed/auth';
+import { isEmbedUserId } from '@/lib/embed/auth';
 import type { ProvenanceRedaction } from '@/lib/orchestration/capabilities/base-capability';
 import type {
   CapabilityContext,
@@ -123,6 +123,16 @@ export class SubmitProposalCapability extends BaseCapability<
     args: SubmitProposalArgs,
     context: CapabilityContext
   ): Promise<CapabilityResult<SubmitProposalData>> {
+    // Proposing a change to a map, module config or policy is an operator-level act, so an
+    // anonymous embed widget visitor (not a `User`, Sunrise #705, t-765) is refused outright, as
+    // core refuses one `add_provider_models`. A system run (no user) still proposes.
+    if (isEmbedUserId(context.userId)) {
+      return this.error(
+        'Structure proposals are unavailable to anonymous embed widget visitors.',
+        'anonymous_visitor'
+      );
+    }
+
     // Resolve the calling agent's slug for authorship (`agent:<slug>`, F17).
     const agent = await prisma.aiAgent.findUnique({
       where: { id: context.agentId },
@@ -138,9 +148,7 @@ export class SubmitProposalCapability extends BaseCapability<
         subjectId: args.subjectId,
         proposedDefinition: args.proposedDefinition,
         createdBy: formatAgentAuthor(agent.slug),
-        // The audit actor is a `User` FK; an embed visitor is not one (Sunrise #705, t-765), so a
-        // visitor-driven proposal is recorded as no one's. It still waits on an admin's review.
-        actorUserId: userIdForUserRef(context.userId),
+        actorUserId: context.userId,
       });
       return this.success({
         proposalId: proposal.id,
