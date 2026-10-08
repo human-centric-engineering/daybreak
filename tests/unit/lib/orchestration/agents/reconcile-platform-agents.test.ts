@@ -39,6 +39,11 @@ vi.mock('@/lib/orchestration/knowledge/resolveAgentDocumentAccess', () => ({
   invalidateAgentAccess: mockInvalidateAccess,
 }));
 
+// DAYBREAK (fork edit, ledgered in .context/framework/upstream-asks.md, Sunrise #973): "the real
+// registry" below means core's. Daybreak fills `lib/app/platform-agents.ts` (the framework's rubric
+// judge), which would make it 13/17; that bridge is pinned in tests/unit/lib/app/defaults.test.ts.
+vi.mock('@/lib/app/platform-agents', () => ({ initAppPlatformAgents: () => {} }));
+
 /** The registry the reconcile sees; `null` means "the real one". */
 const registry = vi.hoisted(() => ({ definitions: null as PlatformAgentDefinition[] | null }));
 vi.mock('@/lib/orchestration/agents/platform-agents', async (importOriginal) => {
