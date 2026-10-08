@@ -24,7 +24,7 @@
  * seam — so a fork's diff here is a line, not a rewrite. See CUSTOMIZATION.md §4.
  *
  * ---------------------------------------------------------------------------
- * DAYBREAK — the two bridges this fork fills, pinned rather than deleted
+ * DAYBREAK — the bridges this fork fills, pinned rather than deleted
  * ---------------------------------------------------------------------------
  * Daybreak fills these `lib/app/*` bridges, so their rows below assert the FILLED
  * value instead of emptiness (the full roster is in CLAUDE.md's banner):
@@ -117,6 +117,7 @@ import {
 } from '@/lib/orchestration/evaluations/graders/registry';
 import {
   CORE_PLATFORM_AGENTS,
+  getPlatformAgent,
   listPlatformAgents,
   __resetPlatformAgentsForTests,
 } from '@/lib/orchestration/agents/platform-agents';
@@ -469,13 +470,20 @@ const SEAM_DEFAULTS: SeamDefault[] = [
     risk: 'a stray definition would be materialised as an agent in every org of every Daybreak leaf \u2014 and, on a framework or core slug, would replace an agent every org runs',
     assert: () => {
       __resetPlatformAgentsForTests();
-      // The read runs the bridge (framework + leaf); calling the leaf seam again must change
-      // nothing — it registers no definition of its own.
-      const before = [...listPlatformAgents()];
+      // The read runs the bridge, framework then leaf. A leaf seam that registered anything would
+      // add a slug past the framework's, or replace one: the framework judge's prompt is its own.
+      expect(listPlatformAgents().map((d) => d.slug)).toEqual([
+        ...CORE_PLATFORM_AGENTS.map((d) => d.slug),
+        'eval-judge-framework-rubric',
+      ]);
+      CORE_PLATFORM_AGENTS.forEach((d) => expect(getPlatformAgent(d.slug)).toBe(d));
+      expect(getPlatformAgent('eval-judge-framework-rubric')?.agent.systemInstructions).toMatch(
+        /^You are the Framework-Rubric Judge/
+      );
+      // And calling the seam directly registers nothing new.
+      const before = listPlatformAgents().length;
       initLeafPlatformAgents();
-      const after = listPlatformAgents();
-      expect(after).toHaveLength(before.length);
-      after.forEach((definition, i) => expect(definition).toBe(before[i]));
+      expect(listPlatformAgents()).toHaveLength(before);
     },
   },
   {

@@ -12,6 +12,11 @@
  * slug the framework or Sunrise already uses replaces that definition in every org — allowed, and
  * logged at warn, because it changes an agent every org runs.
  *
+ * **A throwing init takes the framework's agents down with yours.** Core runs this and the
+ * framework's registrations as one unit and rolls the whole unit back on a throw (logged at
+ * error), so the reconcile switches the rubric judge off in every org until the leaf is fixed.
+ * `registerPlatformAgent` throws on a bad slug or a repeated capability/tag slug; test yours.
+ *
  * ```ts
  * import { registerPlatformAgent } from '@/lib/orchestration/agents/platform-agents';
  *

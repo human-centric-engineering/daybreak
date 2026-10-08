@@ -3,7 +3,22 @@
  * registration into core's platform-agent registry through the `lib/app/platform-agents.ts` bridge.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import type { PlatformAgentDefinition } from '@/lib/orchestration/agents/platform-agents';
+
+// The leaf seam, controllable per test. `vi.mock` takes a path, not an import, so the framework
+// tier's ban on importing `@/lib/app` is not crossed.
+const leaf = vi.hoisted(() => ({ register: null as null | (() => void) }));
+vi.mock('@/lib/app/leaf-platform-agents', () => ({
+  initLeafPlatformAgents: () => leaf.register?.(),
+}));
+const mockLogger = vi.hoisted(() => ({
+  warn: vi.fn(),
+  error: vi.fn(),
+  info: vi.fn(),
+  debug: vi.fn(),
+}));
+vi.mock('@/lib/logging', () => ({ logger: mockLogger }));
 import {
   FRAMEWORK_PLATFORM_AGENTS,
   initFrameworkPlatformAgents,
@@ -16,11 +31,17 @@ import {
   CORE_PLATFORM_AGENTS,
   getPlatformAgent,
   listPlatformAgents,
+  platformAgentRegistryHash,
   platformAgentsForOrg,
+  registerPlatformAgent,
   __resetPlatformAgentsForTests,
 } from '@/lib/orchestration/agents/platform-agents';
 
-beforeEach(() => __resetPlatformAgentsForTests());
+beforeEach(() => {
+  leaf.register = null;
+  vi.clearAllMocks();
+  __resetPlatformAgentsForTests();
+});
 
 describe('the framework-rubric judge definition', () => {
   it('is a deterministic, knowledge-restricted judge every org gets', () => {
@@ -68,8 +89,40 @@ describe('registration through the bridge', () => {
 
   it('passes core’s registration checks and is idempotent', () => {
     listPlatformAgents();
-    const before = listPlatformAgents().length;
+    const hash = platformAgentRegistryHash();
     expect(() => initFrameworkPlatformAgents()).not.toThrow();
-    expect(listPlatformAgents()).toHaveLength(before);
+    expect(getPlatformAgent(FRAMEWORK_RUBRIC_JUDGE_SLUG)).toBe(FRAMEWORK_RUBRIC_JUDGE_AGENT);
+    expect(platformAgentRegistryHash()).toBe(hash);
+  });
+
+  it('lets a leaf replace the framework judge by slug, and names it at warn', () => {
+    const replacement: PlatformAgentDefinition = {
+      ...FRAMEWORK_RUBRIC_JUDGE_AGENT,
+      agent: { ...FRAMEWORK_RUBRIC_JUDGE_AGENT.agent, systemInstructions: 'A leaf rubric.' },
+    };
+    leaf.register = () => registerPlatformAgent(replacement);
+    expect(getPlatformAgent(FRAMEWORK_RUBRIC_JUDGE_SLUG)).toBe(replacement);
+    expect(mockLogger.warn).toHaveBeenCalledWith(
+      'platform-agents: a leaf definition replaced a framework platform agent',
+      { slug: FRAMEWORK_RUBRIC_JUDGE_SLUG }
+    );
+  });
+
+  it('does not warn when the leaf leaves the framework’s agents alone', () => {
+    listPlatformAgents();
+    expect(mockLogger.warn).not.toHaveBeenCalledWith(
+      'platform-agents: a leaf definition replaced a framework platform agent',
+      expect.anything()
+    );
+  });
+
+  it('a throwing leaf init rolls the framework’s agents back too (core’s gate is one unit)', () => {
+    leaf.register = () => {
+      throw new Error('leaf init broke');
+    };
+    const registered = listPlatformAgents();
+    expect(registered).toEqual(CORE_PLATFORM_AGENTS);
+    expect(getPlatformAgent(FRAMEWORK_RUBRIC_JUDGE_SLUG)).toBeUndefined();
+    expect(mockLogger.error).toHaveBeenCalled();
   });
 });

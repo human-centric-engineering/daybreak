@@ -40,7 +40,9 @@ process.
     Daybreak fills it as a bridge: it registers the framework's own platform
     agent (the rubric judge, below), then calls `initLeafPlatformAgents()`. A
     leaf registering a framework or core slug replaces that agent in every org,
-    logged at warn.
+    logged at warn. Test your init: core rolls the framework's registrations and
+    the leaf's back as one unit if it throws, so a broken leaf init switches the
+    rubric judge off in every org until it is fixed.
   - **The framework-rubric judge is now a platform agent** (Hub t-142). Every
     org gets its own `eval-judge-framework-rubric`, from `createOrg`,
     `db:seed` and the maintenance tick, and the reconcile writes its prompt and

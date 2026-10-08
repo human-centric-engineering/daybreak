@@ -1026,10 +1026,15 @@ async function main(): Promise<void> {
       installOnly.every((slug) => !inB.some((r) => r.slug === slug)),
       `B has none of the install-only agents (${installOnly.join(', ')})`
     );
+    // DAYBREAK (fork edit, ledgered): count only the registry's agents. A leaf may seed an
+    // `isSystem` agent of its own into the install org, which the reconcile leaves alone and which
+    // is not this check's subject.
+    const registered = new Set([...everyOrg, ...installOnly]);
+    const inInstallRegistered = inInstall.filter((r) => registered.has(r.slug));
     check(
       installOnly.every((slug) => inInstall.some((r) => r.slug === slug)) &&
-        inInstall.length === everyOrg.length + installOnly.length,
-      `the install org still has all ${everyOrg.length + installOnly.length}`
+        inInstallRegistered.length === registered.size,
+      `the install org still has all ${registered.size}`
     );
     check(
       inA.length === everyOrg.length && !inA.some((r) => inB.some((x) => x.id === r.id)),
