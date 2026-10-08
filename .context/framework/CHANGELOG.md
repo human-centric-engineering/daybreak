@@ -53,10 +53,17 @@ process.
     table keyed by email that a public form fills should match only a verified
     address; see Sunrise's `.context/privacy/data-erasure.md`.
   - **Embed widget chats now start.** A tool of yours that writes the caller id
-    into a `User` foreign key must check `isEmbedUserId` first. Daybreak's own
-    framework tools do not yet: a visitor reaching one that writes their slots,
-    journey or feedback fails on the foreign key, so the tool call errors and no
-    row is written (tracked on the Daybreak Hub).
+    into a `User` foreign key must check `isEmbedUserId` (`lib/embed/auth.ts`)
+    first, and decide what a visitor gets. Daybreak's framework tools now refuse
+    an anonymous visitor with `anonymous_visitor` before touching the database:
+    `fill_slot`, `get_state`, `record_feedback`, the five journey tools and
+    `submit_proposal` (a visitor's proposal could be traced to no one). The
+    module context injected into a visitor's chat skips their (nonexistent)
+    slots. A facilitation escalation records a visitor as `embedVisitorId` in
+    its audit row, with `affectedUserId: null`, and sends no caller id to the
+    escalation webhook. A framework tool of your own
+    can make the same check with `checkUserCaller()`
+    (`lib/framework/shared/caller.ts`).
   - **`/pre-pr`'s coverage floor is now per file**, as documented (Sunrise
     t-749). A PR whose changed files only cleared 80% on average now fails, and
     the failure names the file.
