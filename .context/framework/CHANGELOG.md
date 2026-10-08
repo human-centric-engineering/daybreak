@@ -25,6 +25,45 @@ process.
 
 ## [Unreleased]
 
+### Changed
+
+- **Sunrise 0.14.0 merged** (system agents per org §116, per-org provider
+  policy §120, a security batch on logging, exports and outbound messages).
+  Read Sunrise's `[0.14.0]` "What a fork has to do" before deploying: six
+  migrations, two of which lock large tables, and `retire_builtin_template_rows`
+  switches off the twelve seeded `tpl-*` workflows. Run `db:migrate:deploy`, then
+  `db:drift-check`: a vanilla Daybreak now reports 72 probes (Sunrise's new A9,
+  the conversation-owner CHECK). What changes for a leaf:
+  - **Two new reserved leaf seams, `lib/app/platform-agents.ts` and
+    `lib/app/provider-credentials.ts`.** Daybreak keeps both empty. Which
+    agents every org gets, and where a provider's API key comes from, are the
+    leaf's calls.
+    The two-org smoke (`smoke:tenancy-isolation`) now tolerates agents a fork
+    adds; Daybreak carries that edit until Sunrise
+    [#973](https://github.com/human-centric-engineering/sunrise/issues/973) lands.
+  - **Your own `getProvider(slug)` calls should pass a context.** Without one, a
+    call is permitted only if your eligibility rule permits it as both
+    `'primary'` and `'explicit'`. Daybreak's two calls now pass one.
+  - **A rule in `lib/app/llm-providers.ts` now also decides operator-chosen
+    providers, at call time**, and at `multi` it can only narrow the org's
+    approved set, never widen it. A rule that barred a provider for
+    `'explicit'` now stops agents that name it.
+  - **Your `collectLeafSubjectData()` still receives `{ userId, email }`.** Core
+    added `emailVerified` to its own `SubjectQuery`, not to the leaf's. A leaf
+    table keyed by email that a public form fills should match only a verified
+    address; see Sunrise's `.context/privacy/data-erasure.md`.
+  - **Embed widget chats now start.** A tool of yours that writes the caller id
+    into a `User` foreign key must check `isEmbedUserId` first. Daybreak's own
+    framework tools do not yet: a visitor reaching one that writes their slots,
+    journey or feedback fails on the foreign key, so the tool call errors and no
+    row is written (tracked on the Daybreak Hub).
+  - **`/pre-pr`'s coverage floor is now per file**, as documented (Sunrise
+    t-749). A PR whose changed files only cleared 80% on average now fails, and
+    the failure names the file.
+  - The framework's rubric judge is still seeded into the install org only. At
+    `multi` other orgs have no copy (tracked on the Daybreak Hub, alongside the
+    boot-sync gap noted under 0.6.0).
+
 ## [0.6.0] — 2026-09-25
 
 > **Sixth tagged Daybreak release: Sunrise 0.13.0, stage 2 of 2.** It carries
