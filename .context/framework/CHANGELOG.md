@@ -38,6 +38,9 @@ process.
     `lib/app/provider-credentials.ts`.** Daybreak keeps both empty. Which
     agents every org gets, and where a provider's API key comes from, are the
     leaf's calls.
+    The two-org smoke (`smoke:tenancy-isolation`) now tolerates agents a fork
+    adds; Daybreak carries that edit until Sunrise
+    [#973](https://github.com/human-centric-engineering/sunrise/issues/973) lands.
   - **Your own `getProvider(slug)` calls should pass a context.** Without one, a
     call is permitted only if your eligibility rule permits it as both
     `'primary'` and `'explicit'`. Daybreak's two calls now pass one.

@@ -146,7 +146,10 @@ import { callMcpTool, clearMcpToolCache } from '@/lib/orchestration/mcp/tool-reg
 import { generateCases } from '@/lib/orchestration/evaluations/synthesis/case-generator';
 import { processPendingEvaluationRuns } from '@/lib/orchestration/evaluations/run-worker';
 import { hashDatasetCases } from '@/lib/orchestration/evaluations/datasets/hash';
-import { platformAgentsForOrg } from '@/lib/orchestration/agents/platform-agents';
+import {
+  CORE_PLATFORM_AGENTS,
+  platformAgentsForOrg,
+} from '@/lib/orchestration/agents/platform-agents';
 import { capabilityDispatcher } from '@/lib/orchestration/capabilities/dispatcher';
 import {
   invalidateAgentAccess,
@@ -1002,9 +1005,14 @@ async function main(): Promise<void> {
     const inB = await platformRows(b.orgId);
     const inA = await platformRows(a.orgId);
     const inInstall = await platformRows(INSTALL_ORG_ID);
+    // DAYBREAK (fork edit, ledgered in .context/framework/upstream-asks.md): the 12/4 split is
+    // core's, so count core's definitions. A fork registering its own through
+    // `lib/app/platform-agents.ts` widens the registry, and the checks below follow the registry.
+    const coreEveryOrg = CORE_PLATFORM_AGENTS.filter((d) => d.audience === 'every-org').length;
+    const coreInstallOnly = CORE_PLATFORM_AGENTS.length - coreEveryOrg;
     check(
-      everyOrg.length === 12 && installOnly.length === 4,
-      `the registry gives every org 12 and the install org 4 more (${everyOrg.length}/${installOnly.length})`
+      coreEveryOrg === 12 && coreInstallOnly === 4,
+      `the registry gives every org 12 and the install org 4 more (${coreEveryOrg}/${coreInstallOnly})`
     );
     check(
       inB.length === everyOrg.length && everyOrg.every((slug) => inB.some((r) => r.slug === slug)),
@@ -1018,10 +1026,15 @@ async function main(): Promise<void> {
       installOnly.every((slug) => !inB.some((r) => r.slug === slug)),
       `B has none of the install-only agents (${installOnly.join(', ')})`
     );
+    // DAYBREAK (fork edit, ledgered): count only the registry's agents. A fork may seed an
+    // `isSystem` agent of its own into the install org (Daybreak's rubric judge), which is not a
+    // platform agent and is not this check's subject.
+    const registered = new Set([...everyOrg, ...installOnly]);
+    const inInstallRegistered = inInstall.filter((r) => registered.has(r.slug));
     check(
       installOnly.every((slug) => inInstall.some((r) => r.slug === slug)) &&
-        inInstall.length === everyOrg.length + installOnly.length,
-      `the install org still has all ${everyOrg.length + installOnly.length}`
+        inInstallRegistered.length === registered.size,
+      `the install org still has all ${registered.size}`
     );
     check(
       inA.length === everyOrg.length && !inA.some((r) => inB.some((x) => x.id === r.id)),
