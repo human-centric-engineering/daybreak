@@ -46,6 +46,16 @@
  *
  * Full guide: .context/orchestration/platform-agents.md
  */
+
+import { initFrameworkPlatformAgents } from '@/lib/framework/platform-agents';
+import { initLeafPlatformAgents } from '@/lib/app/leaf-platform-agents';
+
 export function initAppPlatformAgents(): void {
-  // No app platform agents by default.
+  // DAYBREAK — this is one of the `lib/app/*` bridges Daybreak fills (the roster is in CLAUDE.md's
+  // banner). The framework registers its platform agents here, NOT from `initFramework()` at boot:
+  // core's registry runs this lazily in whichever realm reads first, so a boot-time registration
+  // would fill a map the reconcile never sees. Framework first, then the leaf, so a leaf registering
+  // a framework slug replaces it (logged at warn by core's init gate; owner ruling, Hub t-142).
+  initFrameworkPlatformAgents();
+  initLeafPlatformAgents();
 }

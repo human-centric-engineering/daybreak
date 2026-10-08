@@ -55,20 +55,22 @@ reserves for its own forks.**
   **Sunrise** migration
 - Daybreak registers its framework pieces into Sunrise's seams **from within
   `lib/framework/`** (driven by `initFramework()`) — exactly as Sunrise
-  registers its own built-ins from core. The **six exceptions** are the
+  registers its own built-ins from core. The **seven exceptions** are the
   `lib/app/*` **bridges** Daybreak fills: `bootstrap.ts` (server boot →
   `initFramework()`), `admin-nav.ts` (client sidebar → the framework nav
   section), `data-export.ts` (subject access → the framework's own GDPR Art. 15
   manifest), `brand.ts` (product name + legal entity → `lib/brand.ts`),
-  `db-drift.ts` (Prisma-unmodelled DB objects) and `ci.ts` (coverage exclusions
-  - always-run tests → `vitest.config.ts` and `ALWAYS_RUN_TESTS`). CLAUDE.md's
+  `db-drift.ts` (Prisma-unmodelled DB objects), `ci.ts` (coverage exclusions
+  - always-run tests → `vitest.config.ts` and `ALWAYS_RUN_TESTS`) and
+    `platform-agents.ts` (the framework's platform agents — the rubric judge —
+    into core's per-org registry, Sunrise §116). CLAUDE.md's
     banner carries the same roster; count them there rather than from an ordinal
     in a docblock. A
     framework registration that must run in a realm `initFramework()` can't reach —
     server-boot, the client sidebar, a lazy seam whose init core owns, or a static
     value core imports directly — has nowhere else to go; each delegates to a
     reserved leaf hook (`leaf-bootstrap.ts` / `leaf-admin-nav.ts` /
-    `leaf-data-export.ts` / `leaf-brand.ts`). `brand.ts` is the one where the leaf
+    `leaf-data-export.ts` / `leaf-brand.ts` / `leaf-platform-agents.ts`). `brand.ts` is the one where the leaf
     **overrides** rather than appends — brand identity is single-valued, so a leaf
     replaces Daybreak's name rather than composing with it. Otherwise Daybreak does
     **not** fill `lib/app/*` (see next).
@@ -115,7 +117,7 @@ reserves for its own forks.**
   `knowledge-access-contributors.ts`, `guard-floor-contributors.ts`,
   `guard-event-contributors.ts`, `modules.ts`, `leaf-bootstrap.ts`,
   `leaf-admin-nav.ts`, `leaf-data-export.ts`, `tenant-resolver.ts`,
-  `platform-agents.ts`, `provider-credentials.ts`, …) — Sunrise
+  `leaf-platform-agents.ts`, `provider-credentials.ts`, …) — Sunrise
   ships these empty;
   Daybreak keeps them empty
   (and may add new empty framework-concept scaffolds like `lib/app/modules.ts`)
@@ -169,7 +171,8 @@ wiring (which must be eager at boot anyway). Bridging the four would add
 **What this means for a leaf app on Daybreak:** to add a contributor, edit the
 `lib/app/<seam>-contributors.ts` file **directly** — Sunrise's documented path,
 no Daybreak-specific indirection. The `leaf-*` delegation is used only by the
-bridges listed above (boot, admin-nav, data-export, brand, db-drift, ci) — this
+bridges listed above (boot, admin-nav, data-export, brand, db-drift, ci,
+platform-agents) — this
 line used to say "only boot and admin-nav", which stopped being true as each
 later bridge landed. Both mechanisms feed the same in-memory registry; ordering is safe
 because `initFramework()` runs at boot, before any seam's first lazy pull.

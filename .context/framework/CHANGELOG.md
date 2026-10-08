@@ -34,12 +34,26 @@ process.
   switches off the twelve seeded `tpl-*` workflows. Run `db:migrate:deploy`, then
   `db:drift-check`: a vanilla Daybreak now reports 72 probes (Sunrise's new A9,
   the conversation-owner CHECK). What changes for a leaf:
-  - **Two new reserved leaf seams, `lib/app/platform-agents.ts` and
-    `lib/app/provider-credentials.ts`.** Daybreak keeps both empty. Which
-    agents every org gets, and where a provider's API key comes from, are the
-    leaf's calls.
-    The two-org smoke (`smoke:tenancy-isolation`) now tolerates agents a fork
-    adds; Daybreak carries that edit until Sunrise
+  - **Platform agents: register yours in the new reserved
+    `lib/app/leaf-platform-agents.ts`, not in `lib/app/platform-agents.ts`.**
+    Sunrise 0.14.0 ships `lib/app/platform-agents.ts` as a fork seam, and
+    Daybreak fills it as a bridge: it registers the framework's own platform
+    agent (the rubric judge, below), then calls `initLeafPlatformAgents()`. A
+    leaf registering a framework or core slug replaces that agent in every org,
+    logged at warn.
+  - **The framework-rubric judge is now a platform agent** (Hub t-142). Every
+    org gets its own `eval-judge-framework-rubric`, from `createOrg`,
+    `db:seed` and the maintenance tick, and the reconcile writes its prompt and
+    settings back on each release. Provider, model and spend stay the org's. The
+    seed `framework/001-framework-rubric-judge` is removed. An existing
+    install's seeded row is adopted in place, with no new row. An admin edit to
+    the judge's prompt is now refused, as for Sunrise's own judges. Clone it to
+    customise it.
+  - **`lib/app/provider-credentials.ts`** is a new reserved leaf seam. Daybreak
+    keeps it empty: where a provider's API key comes from is the leaf's call.
+  - The two-org smoke (`smoke:tenancy-isolation`) checks core's 12/4 split
+    against core's own definitions, so it passes with fork-registered agents;
+    Daybreak carries that edit until Sunrise
     [#973](https://github.com/human-centric-engineering/sunrise/issues/973) lands.
   - **Your own `getProvider(slug)` calls should pass a context.** Without one, a
     call is permitted only if your eligibility rule permits it as both
@@ -67,9 +81,6 @@ process.
   - **`/pre-pr`'s coverage floor is now per file**, as documented (Sunrise
     t-749). A PR whose changed files only cleared 80% on average now fails, and
     the failure names the file.
-  - The framework's rubric judge is still seeded into the install org only. At
-    `multi` other orgs have no copy (tracked on the Daybreak Hub, alongside the
-    boot-sync gap noted under 0.6.0).
 
 ## [0.6.0] — 2026-09-25
 
