@@ -12,6 +12,7 @@
  * conversation-rerouting (a workflow via `drainEngine`) + user-facing resources are a follow-up.
  */
 
+import { isEmbedUserId, userIdForUserRef } from '@/lib/embed/auth';
 import type { GuardEvent, GuardEventContext } from '@/lib/orchestration/chat/guard-events';
 import type { GuardMode } from '@/lib/orchestration/chat/guard-floor';
 import { FACILITATION_SURFACE_CONTEXT_TYPE } from '@/lib/framework/facilitation/agents/surface';
@@ -94,9 +95,13 @@ async function dispatchEscalation(
 
   // Notify a human reviewer — email/webhook per the global escalationConfig, which applies its own
   // priority threshold. Never throws.
+  // An embed widget visitor's `ctx.userId` is an `embed_<hash>` id, not a `User` (Sunrise #705,
+  // t-765). As core's `escalate_to_human` does, a reader of `userId` gets `null` and the visitor is
+  // named as `embedVisitorId` instead.
+  const visitor = isEmbedUserId(ctx.userId) ? { embedVisitorId: ctx.userId } : {};
   await notifyEscalation({
     agentId: ctx.agentId,
-    userId: ctx.userId,
+    userId: userIdForUserRef(ctx.userId),
     conversationId: ctx.conversationId,
     reason,
     priority,
@@ -105,6 +110,7 @@ async function dispatchEscalation(
       guard: event.guard,
       outcome: event.outcome,
       role: ctx.contextId ?? null,
+      ...visitor,
     },
   });
 
@@ -121,7 +127,8 @@ async function dispatchEscalation(
       outcome: event.outcome,
       role: ctx.contextId,
       priority,
-      affectedUserId: ctx.userId,
+      affectedUserId: userIdForUserRef(ctx.userId),
+      ...visitor,
     },
     clientIp: null,
   });

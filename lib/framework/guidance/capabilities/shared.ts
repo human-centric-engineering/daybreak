@@ -54,6 +54,15 @@ export function journeyRequest(
 export const NO_USER_CONTEXT_MESSAGE =
   'Guidance is unavailable for system-initiated runs (no user context).';
 
+/**
+ * The shared anonymous-visitor refusal message. An embed widget visitor's `context.userId` is an
+ * `embed_<hash>` id, not a `User` (Sunrise #705, t-765), so there is no journey to read or advance:
+ * refuse it by name rather than read an empty journey as if one existed, or fail on the
+ * `UserJourney.userId` foreign key on a write. Guard with `isEmbedUserId` from `@/lib/embed/auth`.
+ */
+export const ANONYMOUS_VISITOR_MESSAGE =
+  'Guidance is unavailable to anonymous embed widget visitors.';
+
 /** True when a capability has a real user subject to read for. */
 export function hasUserContext(context: CapabilityContext): context is CapabilityContext & {
   userId: string;

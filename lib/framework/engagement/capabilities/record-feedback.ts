@@ -18,6 +18,7 @@
 
 import { z } from 'zod';
 import { BaseCapability } from '@/lib/orchestration/capabilities/base-capability';
+import { isEmbedUserId } from '@/lib/embed/auth';
 import type {
   CapabilityContext,
   CapabilityFunctionDefinition,
@@ -97,6 +98,13 @@ export class RecordFeedbackCapability extends BaseCapability<
       return this.error(
         'Feedback capture is unavailable for system-initiated runs (no user context).',
         'no_user_context'
+      );
+    }
+    // An anonymous embed widget visitor is not a `User` (Sunrise #705, t-765): the write would fail on the `User` foreign key.
+    if (isEmbedUserId(context.userId)) {
+      return this.error(
+        'Feedback capture is unavailable to anonymous embed widget visitors.',
+        'anonymous_visitor'
       );
     }
 

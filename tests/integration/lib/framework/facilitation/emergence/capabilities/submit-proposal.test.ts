@@ -113,6 +113,13 @@ describe('execute', () => {
     );
   });
 
+  it('records an anonymous embed visitor as no one (the audit actor is a User FK)', async () => {
+    await cap.execute(args, ctx('embed_visitor1'));
+    expect(submitStructureChangeProposal).toHaveBeenCalledWith(
+      expect.objectContaining({ actorUserId: null, createdBy: 'agent:facilitator' })
+    );
+  });
+
   it('errors (no_agent) when the calling agent cannot be resolved — no proposal written', async () => {
     vi.mocked(prisma.aiAgent.findUnique).mockResolvedValue(null);
     const result = await cap.execute(args, ctx('user-9'));

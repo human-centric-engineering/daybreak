@@ -20,6 +20,7 @@
 
 import { z } from 'zod';
 import { BaseCapability } from '@/lib/orchestration/capabilities/base-capability';
+import { userIdForUserRef } from '@/lib/embed/auth';
 import type { ProvenanceRedaction } from '@/lib/orchestration/capabilities/base-capability';
 import type {
   CapabilityContext,
@@ -137,7 +138,9 @@ export class SubmitProposalCapability extends BaseCapability<
         subjectId: args.subjectId,
         proposedDefinition: args.proposedDefinition,
         createdBy: formatAgentAuthor(agent.slug),
-        actorUserId: context.userId,
+        // The audit actor is a `User` FK; an embed visitor is not one (Sunrise #705, t-765), so a
+        // visitor-driven proposal is recorded as no one's. It still waits on an admin's review.
+        actorUserId: userIdForUserRef(context.userId),
       });
       return this.success({
         proposalId: proposal.id,

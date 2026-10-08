@@ -18,6 +18,7 @@
 
 import { z } from 'zod';
 import { BaseCapability } from '@/lib/orchestration/capabilities/base-capability';
+import { isEmbedUserId } from '@/lib/embed/auth';
 import type {
   CapabilityContext,
   CapabilityFunctionDefinition,
@@ -104,6 +105,13 @@ export class GetStateCapability extends BaseCapability<GetStateArgs, GetStateDat
       return this.error(
         'Slot state is unavailable for system-initiated runs (no user context).',
         'no_user_context'
+      );
+    }
+    // An anonymous embed widget visitor is not a `User` (Sunrise #705, t-765): an empty read would pass for a real one.
+    if (isEmbedUserId(context.userId)) {
+      return this.error(
+        'Slot state is unavailable to anonymous embed widget visitors.',
+        'anonymous_visitor'
       );
     }
     const subject = context.userId;

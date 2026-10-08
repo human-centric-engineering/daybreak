@@ -24,6 +24,7 @@ import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { logger } from '@/lib/logging';
 import { BaseCapability } from '@/lib/orchestration/capabilities/base-capability';
+import { isEmbedUserId } from '@/lib/embed/auth';
 import type {
   CapabilityContext,
   CapabilityFunctionDefinition,
@@ -156,6 +157,13 @@ export class FillSlotCapability extends BaseCapability<FillSlotArgs, FillSlotDat
       return this.error(
         'Slot capture is unavailable for system-initiated runs (no user context).',
         'no_user_context'
+      );
+    }
+    // An anonymous embed widget visitor is not a `User` (Sunrise #705, t-765): the write would fail on the `User` foreign key.
+    if (isEmbedUserId(context.userId)) {
+      return this.error(
+        'Slot capture is unavailable to anonymous embed widget visitors.',
+        'anonymous_visitor'
       );
     }
 

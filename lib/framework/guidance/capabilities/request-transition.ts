@@ -17,6 +17,7 @@
 
 import { z } from 'zod';
 import { BaseCapability } from '@/lib/orchestration/capabilities/base-capability';
+import { isEmbedUserId } from '@/lib/embed/auth';
 import type {
   CapabilityContext,
   CapabilityFunctionDefinition,
@@ -30,6 +31,7 @@ import {
   journeyRequest,
   hasUserContext,
   NO_USER_CONTEXT_MESSAGE,
+  ANONYMOUS_VISITOR_MESSAGE,
 } from '@/lib/framework/guidance/capabilities/shared';
 
 const requestTransitionSchema = journeyArgsSchema.extend({
@@ -84,6 +86,9 @@ export class RequestTransitionCapability extends BaseCapability<
     context: CapabilityContext
   ): Promise<CapabilityResult<TransitionData>> {
     if (!hasUserContext(context)) return this.error(NO_USER_CONTEXT_MESSAGE, 'no_user_context');
+    if (isEmbedUserId(context.userId)) {
+      return this.error(ANONYMOUS_VISITOR_MESSAGE, 'anonymous_visitor');
+    }
 
     const { viewer, key } = journeyRequest(args, context.userId);
     const result = await applyJourneyTransition(viewer, key, {
