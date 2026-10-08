@@ -798,6 +798,13 @@ release process.
 
 ### Security
 
+- **The Prisma CLI's `mysql2` is forced to `^3.23.1`** (t-781), for
+  GHSA-3f6p-5ww8-9rcr (high) and GHSA-rgwj-5xj2-c3m3 (medium). `prisma` 7.10 pins
+  `mysql2` to exactly 3.15.3 and only uses it to connect to a MySQL server, which
+  a Postgres install never does. The fix is a scoped `overrides` entry
+  (`prisma` → `mysql2`) in `package.json`, with its removal condition in
+  `overrideReasons`; a fork's own `mysql2` dependency is not affected. A fork
+  that keeps its own `overrides` should merge the entry rather than drop it.
 - **Client error reports and Sentry events no longer carry the page URL's
   query string, fragment or credential-shaped path segments** (#952). The
   global client error handler (`lib/errors/handler.ts`) sent
@@ -966,9 +973,10 @@ release process.
   remote-code-execution range** (t-758). `@react-email/ui` (dev-only) pins
   `next` 16.3.3; a scoped `overrides` entry makes it use the app's own `next`,
   with its removal condition in `overrideReasons`. engine.io, undici,
-  brace-expansion and fast-uri move to fixed versions in range. `npm audit` now
-  reports 9 high and no critical, all pre-existing: Prisma 7.10's CLI pins
-  `mysql2` and `deepmerge-ts`, and `braces` has no fixed release.
+  brace-expansion and fast-uri move to fixed versions in range. The highs
+  `npm audit` still reports are pre-existing: Prisma 7.10's CLI pins
+  `deepmerge-ts`, and `braces` has no fixed release (its `mysql2` pin is
+  overridden by t-781, above).
 
 ## [0.13.0] — 2026-09-24
 
