@@ -31,7 +31,9 @@ process.
   policy §120, a security batch on logging, exports and outbound messages).
   Read Sunrise's `[0.14.0]` "What a fork has to do" before deploying: six
   migrations, two of which lock large tables, and `retire_builtin_template_rows`
-  switches off the twelve seeded `tpl-*` workflows. What changes for a leaf:
+  switches off the twelve seeded `tpl-*` workflows. Run `db:migrate:deploy`, then
+  `db:drift-check`: a vanilla Daybreak now reports 72 probes (Sunrise's new A9,
+  the conversation-owner CHECK). What changes for a leaf:
   - **Two new reserved leaf seams, `lib/app/platform-agents.ts` and
     `lib/app/provider-credentials.ts`.** Daybreak keeps both empty. Which
     agents every org gets, and where a provider's API key comes from, are the
