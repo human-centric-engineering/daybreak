@@ -18,7 +18,7 @@ vi.mock('@/lib/orchestration/supervisor', () => ({ runSupervisorAssessment: vi.f
 vi.mock('@/lib/orchestration/llm/provider-manager', () => ({ getProvider: vi.fn() }));
 vi.mock('@/lib/orchestration/llm/model-registry', () => ({ getModel: vi.fn() }));
 vi.mock('@/lib/orchestration/llm/settings-resolver', () => ({ getDefaultModelForTask: vi.fn() }));
-const judgeModel = vi.hoisted(() => ({ value: 'judge-x' as string | undefined }));
+const judgeModel = vi.hoisted((): { value: string | undefined } => ({ value: 'judge-x' }));
 vi.mock('@/lib/orchestration/evaluations/judge-model', () => ({
   get JUDGE_MODEL() {
     return judgeModel.value;
