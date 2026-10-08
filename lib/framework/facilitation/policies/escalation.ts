@@ -12,7 +12,7 @@
  * conversation-rerouting (a workflow via `drainEngine`) + user-facing resources are a follow-up.
  */
 
-import { userIdForUserRef } from '@/lib/embed/auth';
+import { isEmbedUserId, userIdForUserRef } from '@/lib/embed/auth';
 import type { GuardEvent, GuardEventContext } from '@/lib/orchestration/chat/guard-events';
 import type { GuardMode } from '@/lib/orchestration/chat/guard-floor';
 import { FACILITATION_SURFACE_CONTEXT_TYPE } from '@/lib/framework/facilitation/agents/surface';
@@ -93,14 +93,14 @@ async function dispatchEscalation(
 ): Promise<void> {
   const reason = `Facilitation guard '${event.guard}' ${event.outcome} on role '${ctx.contextId}'`;
 
-  // Notify a human reviewer — email/webhook per the global escalationConfig, which applies its own
-  // priority threshold. Never throws.
   // An embed widget visitor's `ctx.userId` is an `embed_<hash>` id, not a `User` (Sunrise #705,
-  // t-765); the guard-event seam names them as `ctx.embedVisitorId`. As in core's
-  // `escalate_to_human`, a reader of `userId` gets `null` and the visitor is named as
-  // `embedVisitorId` instead — here inside `metadata`, because the notifier's payload has no
-  // top-level field for it and would drop one.
-  const visitor = ctx.embedVisitorId ? { embedVisitorId: ctx.embedVisitorId } : {};
+  // t-765). Detected from the id itself — the one signal `userIdForUserRef` also reads — so the two
+  // can never disagree. A reader of `userId` gets `null`.
+  const isVisitor = isEmbedUserId(ctx.userId);
+
+  // Notify a human reviewer — email/webhook per the global escalationConfig, which applies its own
+  // priority threshold. Never throws. No caller identifier goes in `metadata`: it reaches an
+  // external webhook, and core's notifier sends none for a signed-in user or a visitor either.
   await notifyEscalation({
     agentId: ctx.agentId,
     userId: userIdForUserRef(ctx.userId),
@@ -112,12 +112,12 @@ async function dispatchEscalation(
       guard: event.guard,
       outcome: event.outcome,
       role: ctx.contextId ?? null,
-      ...visitor,
     },
   });
 
   // Always log. The actor is the system (a guard fired), not an admin, so `userId` is null; the
-  // affected user is recorded in metadata.
+  // affected user is recorded in metadata — a visitor as `embedVisitorId`, which is the same id this
+  // row held under `affectedUserId` before 0.14.0, under a key that does not claim it is a `User`.
   logAdminAction({
     userId: null,
     action: 'facilitation_escalation.triggered',
@@ -130,7 +130,7 @@ async function dispatchEscalation(
       role: ctx.contextId,
       priority,
       affectedUserId: userIdForUserRef(ctx.userId),
-      ...visitor,
+      ...(isVisitor ? { embedVisitorId: ctx.userId } : {}),
     },
     clientIp: null,
   });

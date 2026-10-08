@@ -4,8 +4,9 @@
  * Every guidance capability reads **one journey of the calling user**. The journey is keyed
  * on `graphSlug` (which map) + optional `contextKey` (parallel-instance discriminator, X3),
  * which the agent supplies from its injected surface context (t-4 puts the graph in the
- * prompt). The **subject is always `context.userId`** — a capability never reads another
- * user's journey (`canRead(viewer, subject)` in the queries resolves to own-access), so the
+ * prompt). The **subject is always the caller** — the `userId` `checkUserCaller()`
+ * (`@/lib/framework/shared/caller`) returns, which refuses a system run and an anonymous embed
+ * visitor — and a capability never reads another user's journey (`canRead(viewer, subject)` in the queries resolves to own-access), so the
  * `graphSlug` arg only selects *which of the caller's own* journeys to read.
  */
 

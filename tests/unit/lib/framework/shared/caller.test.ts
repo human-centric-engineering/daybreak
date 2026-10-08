@@ -21,6 +21,13 @@ describe('checkUserCaller', () => {
     });
   });
 
+  it('treats an empty user id as no user, as core does', () => {
+    expect(checkUserCaller({ userId: '' }, 'Guidance')).toMatchObject({
+      ok: false,
+      code: 'no_user_context',
+    });
+  });
+
   it('refuses an anonymous embed widget visitor with anonymous_visitor', () => {
     expect(checkUserCaller({ userId: 'embed_0123456789abcdef' }, 'Guidance')).toEqual({
       ok: false,

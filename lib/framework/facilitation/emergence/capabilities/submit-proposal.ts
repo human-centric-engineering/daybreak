@@ -123,9 +123,10 @@ export class SubmitProposalCapability extends BaseCapability<
     args: SubmitProposalArgs,
     context: CapabilityContext
   ): Promise<CapabilityResult<SubmitProposalData>> {
-    // Proposing a change to a map, module config or policy is an operator-level act, so an
-    // anonymous embed widget visitor (not a `User`, Sunrise #705, t-765) is refused outright, as
-    // core refuses one `add_provider_models`. A system run (no user) still proposes.
+    // An anonymous embed widget visitor (not a `User`, Sunrise #705, t-765) is refused outright.
+    // A signed-in user's proposal is attributed to them (`actorUserId`), and a system run's comes
+    // from an operator's own schedule or workflow; a visitor's would be attributed to no one, so
+    // anyone on the internet could fill the review queue with proposals nobody can trace.
     if (isEmbedUserId(context.userId)) {
       return this.error(
         'Structure proposals are unavailable to anonymous embed widget visitors.',

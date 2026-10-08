@@ -1,6 +1,6 @@
 /**
- * Who a framework tool is acting for — the one check every framework capability that reads or
- * writes "the caller's own" rows makes before touching the database.
+ * Who a framework tool is acting for — the check a framework capability that reads or writes "the
+ * caller's own" rows makes before touching the database (the slot, feedback and guidance tools).
  *
  * Two callers have no rows of their own and are refused by name:
  *
@@ -12,8 +12,9 @@
  *   core's own tools use (`read_user_memory`, `add_provider_models`, …).
  *
  * Returning the narrowed `userId` (rather than a boolean) is deliberate: a caller that uses the
- * result cannot reach `context.userId` unchecked, so a new tool cannot forget the visitor case the
- * way a second, separate `isEmbedUserId` check can be forgotten.
+ * result has no reason to reach `context.userId` again, so the visitor case cannot be skipped by a
+ * later read. Code with a different rule calls `isEmbedUserId` directly: `submit_proposal` accepts a
+ * system run, and a context contributor or guard-event contributor is not a capability.
  */
 
 import { isEmbedUserId } from '@/lib/embed/auth';
@@ -33,7 +34,8 @@ export function checkUserCaller(
   context: Pick<CapabilityContext, 'userId'>,
   feature: string
 ): UserCallerCheck {
-  if (context.userId === null) {
+  // `!` rather than `=== null`, as core's `memoryOwner`: an empty id is no user either.
+  if (!context.userId) {
     return {
       ok: false,
       code: 'no_user_context',
