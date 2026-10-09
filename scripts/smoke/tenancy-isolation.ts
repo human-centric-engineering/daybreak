@@ -1005,9 +1005,9 @@ async function main(): Promise<void> {
     const inB = await platformRows(b.orgId);
     const inA = await platformRows(a.orgId);
     const inInstall = await platformRows(INSTALL_ORG_ID);
-    // DAYBREAK (fork edit, ledgered in .context/framework/upstream-asks.md): the 12/4 split is
-    // core's, so count core's definitions. A fork registering its own through
-    // `lib/app/platform-agents.ts` widens the registry, and the checks below follow the registry.
+    // DAYBREAK (fork edit, ledgered in .context/framework/upstream-asks.md, Sunrise #973): the 12/4
+    // split is core's, so count core's definitions. Daybreak registers its rubric judge through
+    // `lib/app/platform-agents.ts`, which widens the registry; the checks below follow the registry.
     const coreEveryOrg = CORE_PLATFORM_AGENTS.filter((d) => d.audience === 'every-org').length;
     const coreInstallOnly = CORE_PLATFORM_AGENTS.length - coreEveryOrg;
     check(
@@ -1026,9 +1026,9 @@ async function main(): Promise<void> {
       installOnly.every((slug) => !inB.some((r) => r.slug === slug)),
       `B has none of the install-only agents (${installOnly.join(', ')})`
     );
-    // DAYBREAK (fork edit, ledgered): count only the registry's agents. A fork may seed an
-    // `isSystem` agent of its own into the install org (Daybreak's rubric judge), which is not a
-    // platform agent and is not this check's subject.
+    // DAYBREAK (fork edit, ledgered): count only the registry's agents. A leaf may seed an
+    // `isSystem` agent of its own into the install org, which the reconcile leaves alone and which
+    // is not this check's subject.
     const registered = new Set([...everyOrg, ...installOnly]);
     const inInstallRegistered = inInstall.filter((r) => registered.has(r.slug));
     check(

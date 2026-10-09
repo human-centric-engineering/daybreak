@@ -24,18 +24,20 @@
  * seam — so a fork's diff here is a line, not a rewrite. See CUSTOMIZATION.md §4.
  *
  * ---------------------------------------------------------------------------
- * DAYBREAK — the two bridges this fork fills, pinned rather than deleted
+ * DAYBREAK — the bridges this fork fills, pinned rather than deleted
  * ---------------------------------------------------------------------------
- * Daybreak fills four `lib/app/*` bridges, so their rows below assert the FILLED
- * value instead of emptiness:
+ * Daybreak fills these `lib/app/*` bridges, so their rows below assert the FILLED
+ * value instead of emptiness (the full roster is in CLAUDE.md's banner):
  *
- * - `lib/app/bootstrap.ts`   → `initFramework()` + framework sync
- * - `lib/app/admin-nav.ts`   → the framework's "Framework" sidebar section
- * - `lib/app/data-export.ts` → the framework tier's Art. 15 manifest
- * - `lib/app/brand.ts`       → Daybreak's product name and legal entity
+ * - `lib/app/bootstrap.ts`       → `initFramework()` + framework sync
+ * - `lib/app/admin-nav.ts`       → the framework's "Framework" sidebar section
+ * - `lib/app/data-export.ts`     → the framework tier's Art. 15 manifest
+ * - `lib/app/brand.ts`           → Daybreak's product name and legal entity
+ * - `lib/app/platform-agents.ts` → the framework's platform agents (the rubric judge)
  *
  * Each delegates to a reserved-empty leaf seam (`leaf-bootstrap.ts`,
- * `leaf-admin-nav.ts`, `leaf-data-export.ts`, `leaf-brand.ts`) which carries the
+ * `leaf-admin-nav.ts`, `leaf-data-export.ts`, `leaf-brand.ts`,
+ * `leaf-platform-agents.ts`) which carries the
  * no-op contract forward for leaf forks — those rows are here too. See the
  * Daybreak banner in CLAUDE.md.
  *
@@ -57,6 +59,7 @@ import {
 import { initAppContextContributors } from '@/lib/app/context-contributors';
 import { initAppNav } from '@/lib/app/admin-nav';
 import { initLeafAdminNav } from '@/lib/app/leaf-admin-nav';
+import { initLeafPlatformAgents } from '@/lib/app/leaf-platform-agents';
 import { initLeafApp } from '@/lib/app/leaf-bootstrap';
 import { publicNavItems, footerNavItems, footerLegalItems } from '@/lib/app/public-nav';
 import { protectedNavItems } from '@/lib/app/protected-nav';
@@ -114,6 +117,7 @@ import {
 } from '@/lib/orchestration/evaluations/graders/registry';
 import {
   CORE_PLATFORM_AGENTS,
+  getPlatformAgent,
   listPlatformAgents,
   __resetPlatformAgentsForTests,
 } from '@/lib/orchestration/agents/platform-agents';
@@ -445,15 +449,52 @@ const SEAM_DEFAULTS: SeamDefault[] = [
   },
   {
     seam: 'lib/app/platform-agents.ts',
+    // PINNED (Daybreak fills this bridge, Hub t-142): it registers the framework tier's platform
+    // agents, then delegates to the reserved `leaf-platform-agents.ts` (row below). What is pinned
+    // is that the registry is EXACTLY core's definitions — the same objects, in the same order —
+    // followed by the framework's, named by slug. (By slug, not by object: the ESLint boundary
+    // forbids this app-shell file importing `@/lib/framework`.)
     risk: 'a stray definition would be materialised as an agent in every org on every install \u2014 and, on a slug core already uses, would replace the prompt of an agent every org runs',
     assert: () => {
       __resetPlatformAgentsForTests();
-      // The read triggers the lazy init, so this exercises the REAL file:
-      // exactly core's definitions, the same objects, in the same order.
-      expect(listPlatformAgents()).toEqual(CORE_PLATFORM_AGENTS);
-      listPlatformAgents().forEach((definition, i) =>
-        expect(definition).toBe(CORE_PLATFORM_AGENTS[i])
-      );
+      // The read triggers the lazy init, so this exercises the REAL file.
+      const registered = listPlatformAgents();
+      CORE_PLATFORM_AGENTS.forEach((definition, i) => expect(registered[i]).toBe(definition));
+      expect(registered.slice(CORE_PLATFORM_AGENTS.length).map((d) => d.slug)).toEqual([
+        'eval-judge-framework-rubric',
+      ]);
+    },
+  },
+  {
+    seam: 'lib/app/leaf-platform-agents.ts',
+    risk: 'a stray definition would be materialised as an agent in every org of every Daybreak leaf \u2014 and, on a framework or core slug, would replace an agent every org runs',
+    assert: () => {
+      __resetPlatformAgentsForTests();
+      // The read runs the bridge, framework then leaf. A leaf seam that registered anything would
+      // add a slug past the framework's, or replace one: the framework judge's prompt is its own.
+      expect(listPlatformAgents().map((d) => d.slug)).toEqual([
+        ...CORE_PLATFORM_AGENTS.map((d) => d.slug),
+        'eval-judge-framework-rubric',
+      ]);
+      CORE_PLATFORM_AGENTS.forEach((d) => expect(getPlatformAgent(d.slug)).toBe(d));
+      // The framework's judge, as the framework defines it — not a leaf's modified copy.
+      expect(getPlatformAgent('eval-judge-framework-rubric')).toMatchObject({
+        audience: 'every-org',
+        agent: {
+          name: 'Framework-Rubric Judge',
+          kind: 'judge',
+          temperature: 0.2,
+          maxTokens: 1000,
+          knowledgeAccessMode: 'restricted',
+          systemInstructions: expect.stringMatching(/^You are the Framework-Rubric Judge/),
+        },
+        capabilities: [],
+        knowledgeTags: [],
+      });
+      // And calling the seam directly registers nothing new.
+      const before = listPlatformAgents().length;
+      initLeafPlatformAgents();
+      expect(listPlatformAgents()).toHaveLength(before);
     },
   },
   {

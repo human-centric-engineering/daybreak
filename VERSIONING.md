@@ -131,7 +131,7 @@ covered by the version contract.
 
   **Daybreak's reserved leaf seams** — the bridges above that Daybreak fills
   (`bootstrap.ts`, `admin-nav.ts`, `data-export.ts`, `brand.ts`, `db-drift.ts`,
-  `ci.ts`) each delegate to one of these, which Daybreak ships empty for the
+  `ci.ts`, `platform-agents.ts`) each delegate to one of these, which Daybreak ships empty for the
   leaf. Their contract is Daybreak's, documented in
   [`.context/framework/VERSIONING.md`](./.context/framework/VERSIONING.md); they
   are named here because this list is what the coverage guard reads:
@@ -142,6 +142,7 @@ covered by the version contract.
   - `lib/app/leaf-ci.ts` → `leafCoverageExclusions` / `leafAlwaysRunTests` / `leafOwnerlessSurfaceExceptions` — the leaf's CI declarations, via `ci.ts`
   - `lib/app/leaf-data-export.ts` → `initLeafSubjectSources()` / `collectLeafSubjectData()` — the leaf's Art. 15 sources, via `data-export.ts`
   - `lib/app/leaf-db-drift.ts` → `registerLeafDriftProbes()` — the leaf's drift probes, via `db-drift.ts`
+  - `lib/app/leaf-platform-agents.ts` → `initLeafPlatformAgents()` — the leaf's platform agents, via `platform-agents.ts`
 
   Outside `lib/app/` — **hand-maintained, so check it against the tree rather
   than trusting it.** The guard cannot derive this half, and a short list here
