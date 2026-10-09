@@ -26,7 +26,9 @@ import {
 import {
   FRAMEWORK_RUBRIC_JUDGE_AGENT,
   FRAMEWORK_RUBRIC_JUDGE_SLUG,
+  RUBRIC_STEPS,
 } from '@/lib/framework/facilitation/evaluation/rubric-judge';
+import { buildJudgePrompt } from '@/lib/orchestration/evaluations/judge-driver';
 import {
   CORE_PLATFORM_AGENTS,
   getPlatformAgent,
@@ -67,6 +69,52 @@ describe('the framework-rubric judge definition', () => {
     const prompt = FRAMEWORK_RUBRIC_JUDGE_AGENT.agent.systemInstructions;
     expect(prompt).toContain('"score": <number from 0.0 to 1.0 inclusive>');
     expect(prompt).toContain('"reasoning"');
+  });
+
+  it('asks for one labelled evaluation_steps entry per numbered EVALUATION STEP', () => {
+    // A judge told to walk N steps but given a schema with M != N entries either emits the wrong
+    // count or mislabels them, so the stored steps disagree with the rubric (Hub t-144).
+    const prompt = FRAMEWORK_RUBRIC_JUDGE_AGENT.agent.systemInstructions;
+    const stepsBlock = prompt.slice(
+      prompt.indexOf('EVALUATION STEPS'),
+      prompt.indexOf('SCORING SCALE')
+    );
+    const numbered = [...stepsBlock.matchAll(/^(\d+)\. /gm)].map((m) => Number(m[1]));
+    const schemaBlock = prompt.slice(
+      prompt.indexOf('"evaluation_steps"'),
+      prompt.indexOf('"score"')
+    );
+    const labelled = [...schemaBlock.matchAll(/"Step (\d+) \(/g)].map((m) => Number(m[1]));
+
+    expect(numbered).toEqual(RUBRIC_STEPS.map((_, i) => i + 1));
+    expect(labelled).toEqual(numbered);
+    // And each entry is labelled with its own step's topic, in order.
+    RUBRIC_STEPS.forEach((step, i) =>
+      expect(schemaBlock).toContain(`"Step ${i + 1} (${step.label}): <${step.report}>"`)
+    );
+  });
+
+  it('names only input sections the judge driver actually sends', () => {
+    // The judge is told what it will receive; a heading it is told about that never arrives makes it
+    // skip a step (the grounding step once looked for CITATIONS while the driver sent CITED SOURCES).
+    const prompt = FRAMEWORK_RUBRIC_JUDGE_AGENT.agent.systemInstructions;
+    const receiveBlock = prompt.slice(
+      prompt.indexOf('You will receive:'),
+      prompt.indexOf('EVALUATION STEPS')
+    );
+    const headings = [...receiveBlock.matchAll(/^- ([A-Z][A-Z ]+?)(?: \(optional\))?:/gm)].map(
+      (m) => m[1]
+    );
+    expect(headings).toEqual(['QUESTION', 'ANSWER', 'CITED SOURCES']);
+
+    const sent = buildJudgePrompt({
+      question: 'q',
+      answer: 'a',
+      citations: [{ marker: 1, documentName: 'doc', excerpt: 'x' }],
+      toolCalls: [],
+    });
+    for (const heading of headings) expect(sent).toMatch(new RegExp(`^${heading}: `, 'm'));
+    expect(prompt).not.toMatch(/\bCITATIONS\b/);
   });
 
   it('does not take a core slug', () => {

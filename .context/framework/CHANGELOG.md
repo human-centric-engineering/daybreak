@@ -50,7 +50,12 @@ process.
     seed `framework/001-framework-rubric-judge` is removed. An existing
     install's seeded row is adopted in place, with no new row. An admin edit to
     the judge's prompt is now refused, as for Sunrise's own judges. Clone it to
-    customise it. Two upgrade checks:
+    customise it. **Its prompt changed** (Hub t-144): the output schema now asks
+    for one `evaluation_steps` entry per evaluation step (five), where before it
+    asked for four and folded remit and grounding into one; and it now calls the
+    citations input `CITED SOURCES`, the heading the judge driver actually sends
+    (it said `CITATIONS`, so a judge could skip the grounding check). Rubric
+    scores taken before and after the release may differ. Two upgrade checks:
     - **A judge you switched off comes back on.** `isActive` is the
       platform's, so the reconcile re-enables it and the API refuses switching
       it off. To stop rubric scoring, set the eval-sweep step's `rubric: false`.
