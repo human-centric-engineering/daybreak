@@ -63,8 +63,9 @@ OUTPUT — respond ONLY with the JSON object below, no prose around it and no co
   "evaluation_steps": [
     "Step 1 (user need): <what the user needed>",
     "Step 2 (directness): <did it address that need / deflect>",
-    "Step 3 (remit + grounding): <on-remit? grounded in any citations?>",
-    "Step 4 (forward motion): <did it move the journey forward>"
+    "Step 3 (remit): <on-remit? any fabricated journey/module state or overstepped guardrail?>",
+    "Step 4 (grounding): <claims within the CITATIONS, or 'no citations'>",
+    "Step 5 (forward motion): <did it move the journey forward>"
   ],
   "score": <number from 0.0 to 1.0 inclusive>,
   "reasoning": "<one short sentence summarising the verdict>"

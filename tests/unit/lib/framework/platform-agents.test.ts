@@ -69,6 +69,26 @@ describe('the framework-rubric judge definition', () => {
     expect(prompt).toContain('"reasoning"');
   });
 
+  it('asks for one labelled evaluation_steps entry per numbered EVALUATION STEP', () => {
+    // A judge told to walk N steps but given a schema with M != N entries either emits the wrong
+    // count or mislabels them, so the stored steps disagree with the rubric (Hub t-144).
+    const prompt = FRAMEWORK_RUBRIC_JUDGE_AGENT.agent.systemInstructions;
+    const stepsBlock = prompt.slice(
+      prompt.indexOf('EVALUATION STEPS'),
+      prompt.indexOf('SCORING SCALE')
+    );
+    const numbered = [...stepsBlock.matchAll(/^(\d+)\. /gm)].map((m) => Number(m[1]));
+    const schemaBlock = prompt.slice(
+      prompt.indexOf('"evaluation_steps"'),
+      prompt.indexOf('"score"')
+    );
+    const labelled = [...schemaBlock.matchAll(/"Step (\d+) \(/g)].map((m) => Number(m[1]));
+
+    expect(numbered.length).toBeGreaterThan(0);
+    expect(numbered).toEqual(numbered.map((_, i) => i + 1));
+    expect(labelled).toEqual(numbered);
+  });
+
   it('does not take a core slug', () => {
     const coreSlugs = new Set(CORE_PLATFORM_AGENTS.map((d) => d.slug));
     for (const definition of FRAMEWORK_PLATFORM_AGENTS) {
