@@ -25,6 +25,33 @@ process.
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-10
+
+> **Seventh tagged Daybreak release: Sunrise 0.14.0.** It carries Sunrise
+> `v0.14.0` (platform agents per org §116, per-org provider policy §120, the
+> install-org rules for shared settings §107, and a security batch) and the
+> framework work it called for, in four PRs:
+> [#296](https://github.com/human-centric-engineering/daybreak/pull/296) (the
+> merge),
+> [#299](https://github.com/human-centric-engineering/daybreak/pull/299)
+> (embed visitors in framework tools),
+> [#300](https://github.com/human-centric-engineering/daybreak/pull/300) (the
+> rubric judge as a platform agent) and
+> [#301](https://github.com/human-centric-engineering/daybreak/pull/301) (its
+> prompt fixed).
+>
+> **One seam changes hands: `lib/app/platform-agents.ts` is Daybreak's.** Leaf
+> platform agents go in the new `lib/app/leaf-platform-agents.ts`. No leaf could
+> have filled the old seam on a Daybreak release, because it first shipped in
+> Sunrise 0.14.0.
+>
+> **At `TENANCY_MODE=single`, the default, little a user sees changes:** the
+> rubric judge's prompt, and an embed widget visitor now gets a clear refusal
+> from a framework tool instead of a failed call. **Still do not switch to `multi`:** the
+> framework's boot syncs (modules, slot definitions) are not yet run per org.
+> That is tracked on the Daybreak Hub and is needed before any Daybreak app
+> enables `multi`.
+
 ### Changed
 
 - **Sunrise 0.14.0 merged** (system agents per org §116, per-org provider
@@ -95,6 +122,24 @@ process.
   - **`/pre-pr`'s coverage floor is now per file**, as documented (Sunrise
     t-749). A PR whose changed files only cleared 80% on average now fails, and
     the failure names the file.
+
+### Security
+
+- **Sunrise 0.14.0's security fixes reach a leaf with this release.** A leaf
+  on Daybreak 0.6.0 or older is exposed to all of them until it takes it. Read
+  Sunrise's `[0.14.0]` Security section; in short:
+  - **Rate-limit bypass.** The `api-key` and `embed-token` rate-limit
+    strategies keyed on the header as presented, so a caller could open a fresh
+    bucket per request (#701). They now key on the verified credential.
+  - **Outbound messages.** `send_message_to_channel` could message any
+    conversation id it was handed. It now sends only within the conversation
+    being handled.
+  - **Logs and exports.** Credentials and emails in request URLs, outbound
+    webhook URLs, and camelCase keys such as `userEmail` were being logged in
+    the clear. A subject export could include another person's contact-form
+    messages.
+  - **Sentry 11** collects request bodies and gen-AI inputs by default. A leaf
+    with Sentry on should set `dataCollection` and add the scrub hooks.
 
 ## [0.6.0] — 2026-09-25
 
