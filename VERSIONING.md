@@ -136,18 +136,21 @@ covered by the version contract.
 
   **Daybreak's reserved leaf seams** — the bridges above that Daybreak fills
   (`bootstrap.ts`, `admin-nav.ts`, `data-export.ts`, `brand.ts`, `db-drift.ts`,
-  `ci.ts`, `platform-agents.ts`, `org-export.ts`) each delegate to one of these, which Daybreak ships empty for the
+  `ci.ts`, `platform-agents.ts`, `org-export.ts`, `owner-classification.ts`,
+  `capability-seed-pairs.ts`) each delegate to one of these, which Daybreak ships empty for the
   leaf. Their contract is Daybreak's, documented in
   [`.context/framework/VERSIONING.md`](./.context/framework/VERSIONING.md); they
   are named here because this list is what the coverage guard reads:
 
   - `lib/app/leaf-admin-nav.ts` → `initLeafAdminNav()` — the leaf's admin nav sections, via `admin-nav.ts`
   - `lib/app/leaf-bootstrap.ts` → `initLeafApp()` — the leaf's boot hook, via `bootstrap.ts`
+  - `lib/app/leaf-capability-seed-pairs.ts` → `LEAF_CAPABILITY_PAIRS` / `LEAF_UNCHECKED_SEEDS` — the leaf's capability seed-parity entries, via `capability-seed-pairs.ts`
   - `lib/app/leaf-brand.ts` → `leafBrandName` / `leafBrandLegalName` / `leafBrandDescription` — brand overrides (override, not append), via `brand.ts`
   - `lib/app/leaf-ci.ts` → `leafCoverageExclusions` / `leafAlwaysRunTests` / `leafOwnerlessSurfaceExceptions` — the leaf's CI declarations, via `ci.ts`
   - `lib/app/leaf-data-export.ts` → `initLeafSubjectSources()` / `collectLeafSubjectData()` — the leaf's Art. 15 sources, via `data-export.ts`
   - `lib/app/leaf-db-drift.ts` → `registerLeafDriftProbes()` — the leaf's drift probes, via `db-drift.ts`
   - `lib/app/leaf-org-export.ts` → `initLeafOrgSources()` — the leaf's `orgId` tables in the org export, via `org-export.ts`
+  - `lib/app/leaf-owner-classification.ts` → `initLeafOwnerClassification()` — the leaf's user-linked models for the owner layer, via `owner-classification.ts`
   - `lib/app/leaf-platform-agents.ts` → `initLeafPlatformAgents()` — the leaf's platform agents, via `platform-agents.ts`
 
   Outside `lib/app/` — **hand-maintained, so check it against the tree rather

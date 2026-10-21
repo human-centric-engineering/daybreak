@@ -55,6 +55,17 @@
  * Do not import the Prisma client (`@/lib/db`) from here: this runs while that
  * client is being built.
  */
+import { initFrameworkOwnerClassification } from '@/lib/framework/privacy/owner-classification';
+import { initLeafOwnerClassification } from '@/lib/app/leaf-owner-classification';
+
 export function initAppOwnerClassification(): void {
-  // No app owner classifications by default.
+  // DAYBREAK — one of the `lib/app/*` bridges Daybreak fills (the roster is in CLAUDE.md's banner).
+  // The framework classifies its user-linked models here, NOT from `initFramework()` at boot: core
+  // runs this lazily in whichever runtime builds the Prisma client. Framework first, then the leaf;
+  // a leaf classifying a framework model is dropped with a log (the first classification stands).
+  //
+  // A throw here degrades rather than refuses (core's rule): every fork model, the framework's
+  // included, is left unclassified until it is fixed, and the coverage guard names them.
+  initFrameworkOwnerClassification();
+  initLeafOwnerClassification();
 }

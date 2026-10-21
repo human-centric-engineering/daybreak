@@ -26,6 +26,9 @@
  * Full guide: CUSTOMIZATION.md §4 · .context/database/seeding.md
  */
 
+import { FRAMEWORK_UNCHECKED_SEEDS } from '@/lib/framework/capabilities/seed-parity';
+import { LEAF_CAPABILITY_PAIRS, LEAF_UNCHECKED_SEEDS } from '@/lib/app/leaf-capability-seed-pairs';
+
 /** One capability slug and the class whose definition its seed must write. */
 export interface AppCapabilityPair {
   /** The capability slug; also its `functionDefinition.name`. */
@@ -48,7 +51,7 @@ export interface AppCapabilityPair {
  * ];
  * ```
  */
-export const APP_CAPABILITY_PAIRS: readonly AppCapabilityPair[] = [];
+export const APP_CAPABILITY_PAIRS: readonly AppCapabilityPair[] = [...LEAF_CAPABILITY_PAIRS];
 
 /**
  * Seeds of this fork's that the parity test cannot run under its strict mock
@@ -68,4 +71,10 @@ export const APP_CAPABILITY_PAIRS: readonly AppCapabilityPair[] = [];
  * };
  * ```
  */
-export const APP_UNCHECKED_SEEDS: Readonly<Record<string, string>> = {};
+export const APP_UNCHECKED_SEEDS: Readonly<Record<string, string>> = {
+  // DAYBREAK — one of the `lib/app/*` bridges Daybreak fills (the roster is in CLAUDE.md's banner):
+  // the framework's own entries, then the leaf's. Spread framework LAST, so a leaf cannot re-word
+  // the framework's reason for its own seed.
+  ...LEAF_UNCHECKED_SEEDS,
+  ...FRAMEWORK_UNCHECKED_SEEDS,
+};

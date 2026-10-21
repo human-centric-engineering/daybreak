@@ -35,10 +35,13 @@
  * - `lib/app/brand.ts`           → Daybreak's product name and legal entity
  * - `lib/app/platform-agents.ts` → the framework's platform agents (the rubric judge)
  * - `lib/app/org-export.ts`      → the framework tier's org-export manifest
+ * - `lib/app/owner-classification.ts` → the framework's user-linked models (§115)
+ * - `lib/app/capability-seed-pairs.ts` → the framework boot seed's parity exemption
  *
  * Each delegates to a reserved-empty leaf seam (`leaf-bootstrap.ts`,
  * `leaf-admin-nav.ts`, `leaf-data-export.ts`, `leaf-brand.ts`,
- * `leaf-platform-agents.ts`, `leaf-org-export.ts`) which carries the
+ * `leaf-platform-agents.ts`, `leaf-org-export.ts`, `leaf-owner-classification.ts`,
+ * `leaf-capability-seed-pairs.ts`) which carries the
  * no-op contract forward for leaf forks — those rows are here too. See the
  * Daybreak banner in CLAUDE.md.
  *
@@ -90,6 +93,8 @@ import {
 } from '@/lib/app/leaf-ci';
 import { occupiedTiers } from '@/lib/app/reserved-tiers';
 import { APP_CAPABILITY_PAIRS, APP_UNCHECKED_SEEDS } from '@/lib/app/capability-seed-pairs';
+import { LEAF_CAPABILITY_PAIRS, LEAF_UNCHECKED_SEEDS } from '@/lib/app/leaf-capability-seed-pairs';
+import { initLeafOwnerClassification } from '@/lib/app/leaf-owner-classification';
 import { initAppUserCreatedHooks } from '@/lib/app/user-created';
 import { collectLeafSubjectData, initLeafSubjectSources } from '@/lib/app/leaf-data-export';
 import { initLeafOrgSources } from '@/lib/app/leaf-org-export';
@@ -428,10 +433,42 @@ const SEAM_DEFAULTS: SeamDefault[] = [
   {
     seam: 'lib/app/owner-classification.ts',
     risk: 'a stray classification would switch the data layer’s owner check on for a model nobody decided was private — refusing reads the product means to allow — or pre-classify a fork model nobody looked at, silencing the coverage guard for it',
+    // PINNED (Daybreak fills this bridge, Sunrise 0.15.0 §115): it classifies the framework's
+    // user-linked models, then delegates to the reserved `leaf-owner-classification.ts` (row
+    // below). What is pinned is the exact set, by model name (the ESLint boundary forbids this
+    // app-shell file importing `@/lib/framework`), and that none is enforced: switching the data
+    // layer's owner check on for a framework model is a reviewed change of its own.
     assert: () => {
       __resetAppOwnerClassificationForTests();
       // The read triggers the lazy init, so this exercises the REAL file.
-      expect(appOwnerClassifications()).toEqual({});
+      const classified = appOwnerClassifications();
+      expect(Object.keys(classified).sort()).toEqual([
+        'FacilitationGraph',
+        'FacilitationGraphVersion',
+        'FacilitationPolicy',
+        'FrameworkJourneyNudge',
+        'JourneyEvent',
+        'ModuleVersion',
+        'ModuleWorkflowBinding',
+        'SlotValue',
+        'StructureChangeProposal',
+        'UserJourney',
+        'UserNodeState',
+      ]);
+      expect(
+        Object.values(classified).filter((c) => c.kind === 'personal' && c.enforced === true)
+      ).toEqual([]);
+    },
+  },
+  {
+    seam: 'lib/app/leaf-owner-classification.ts',
+    risk: 'a stray classification would switch the data layer’s owner check on for a leaf model nobody decided was private, or pre-classify one nobody looked at, silencing the coverage guard for it',
+    assert: () => {
+      // "This seam changes nothing": the read runs the bridge, framework first (row above).
+      __resetAppOwnerClassificationForTests();
+      const before = appOwnerClassifications();
+      initLeafOwnerClassification();
+      expect(appOwnerClassifications()).toEqual(before);
     },
   },
   {
@@ -659,9 +696,20 @@ const SEAM_DEFAULTS: SeamDefault[] = [
   {
     seam: 'lib/app/capability-seed-pairs.ts',
     risk: 'a stray pair fails the capability parity test on every install (for a slug no seed writes it is a pair nothing wrote, for a slug core already pairs a duplicate), and a stray unchecked seed switches the parity checks off for that seed',
+    // PINNED (Daybreak fills this bridge, Sunrise #1013): its one entry is the framework boot
+    // seed, which reconciles through the app client (lib/framework/capabilities/seed-parity.ts
+    // says why). Anything else here would switch the parity checks off for another seed.
     assert: () => {
       expect(APP_CAPABILITY_PAIRS).toEqual([]);
-      expect(APP_UNCHECKED_SEEDS).toEqual({});
+      expect(Object.keys(APP_UNCHECKED_SEEDS)).toEqual(['_framework/000-framework-boot.ts']);
+    },
+  },
+  {
+    seam: 'lib/app/leaf-capability-seed-pairs.ts',
+    risk: 'a stray pair fails the capability parity test on every Daybreak leaf, and a stray unchecked seed switches the parity checks off for that seed',
+    assert: () => {
+      expect(LEAF_CAPABILITY_PAIRS).toEqual([]);
+      expect(LEAF_UNCHECKED_SEEDS).toEqual({});
     },
   },
   {
