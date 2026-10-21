@@ -25,6 +25,73 @@ process.
 
 ## [Unreleased]
 
+> **Sunrise 0.15.0** (external plane §109, per-org quotas §110, org-admin
+> console §111, within-org owner isolation §115, vendor support access §121,
+> an erasure programme, Next 16.4). Read Sunrise's `[0.15.0]` "What a fork has
+> to do" before deploying: **17 migrations, eight of which take locks that
+> scale with table size**, then `npm run db:seed`. **Three seams change hands**
+> (below), and one of them moves a function a leaf may have filled. **Still do
+> not switch to `multi`.**
+>
+> **Known gaps, not fixed in this release** (both tracked on the Daybreak Hub):
+>
+> - **At `multi`, an org admin running a workflow that contains
+>   `framework_eval_sweep` gets a refused step.** The sweep reads every
+>   member's conversations, which the owner layer refuses a narrowed caller.
+>   Scheduled runs and platform admins are unaffected.
+> - **Spend caps now hold framework LLM calls** (slot extraction, supervision,
+>   rubric and metric scoring). When a cap refuses one, slot extraction skips
+>   the turn, the supervise admin route answers a generic 500, and the eval
+>   sweep counts each refused conversation as failed and carries on.
+
+### Changed
+
+- **Sunrise 0.15.0 merged** (Hub t-145). After `db:migrate:deploy` and
+  `db:seed`, `db:drift-check` reports 75 probes on a vanilla Daybreak. What
+  changes for a leaf:
+  - **Org export: declare your `orgId` tables in the new reserved
+    `lib/app/leaf-org-export.ts`** (`initLeafOrgSources()`, registering with
+    core's `registerAppOrgSources({ tier: 'app', … })`). **Breaking:**
+    `leafOrgSources()` is gone from `lib/app/leaf-data-export.ts`, and with it
+    the fork-carried `getOrgDataSources()` / `getOrgExcludedSources()` in core.
+    Sunrise 0.15.0 ships the seam those stood in for (§109, Sunrise #858), and
+    Daybreak fills `lib/app/org-export.ts` as a bridge. The framework's rows now
+    sit under the org bundle's `app` key, with a summary in `meta.app`, instead
+    of beside core's sections. A throwing leaf init rolls the framework's
+    declarations back too, and the org export then refuses every org until it
+    is fixed.
+  - **Owner classification: classify your user-linked models in the new
+    reserved `lib/app/leaf-owner-classification.ts`.** Sunrise's owner layer
+    (§115) has a coverage guard that fails naming any user-linked model nobody
+    classified. Daybreak fills `lib/app/owner-classification.ts` with the
+    framework's eleven models: journeys, node states, journey events, nudges and
+    slot values are `personal`; maps, policies, module versions, workflow
+    bindings and proposals are authored config, so `not-personal`. **None is
+    `enforced`**, so framework reads behave as before. **Keep `@relation` out of
+    a field's comment:** the guard's parser skips such a line (Sunrise #1067),
+    so the model goes unflagged, and a correct classification of it is
+    rejected. Daybreak's own schema comments now say "no Prisma relation".
+  - **Capability seed parity: your pairs go in the new reserved
+    `lib/app/leaf-capability-seed-pairs.ts`.** Sunrise's parity test now runs
+    every seed under a strict mock (#1013). Daybreak fills
+    `lib/app/capability-seed-pairs.ts` to exempt `_framework/000-framework-boot.ts`,
+    which reconciles through the app client as server boot does. Its capability
+    rows are each class's own `functionDefinition`, so they cannot drift.
+  - **`CLAUDE.md`: replace Daybreak's Hub bootstrap block with your own** (or
+    move it to a gitignored `CLAUDE.local.md`). Sunrise no longer ships one.
+    Daybreak commits its own, so a leaf inherits it, and left alone it points
+    the leaf's agents at Daybreak's Hub project. `CLAUDE.md` now ends with
+    `@AGENTS.md`, and Next 16.4's `next dev` writes its rules there.
+
+### Fixed
+
+- **Module workflow bindings run again when a member triggers them** (Hub
+  t-145). Sunrise 0.15.0 narrows a member's request to their own rows, and the
+  run a binding starts inherited that. The execution belongs to the binding's
+  author, so the engine's own reads of it were refused, and the bound workflow
+  never ran. Platform admins were unaffected. The drain now runs across owners,
+  as core's approval resume does. The execution's owner is unchanged.
+
 ## [0.7.0] — 2026-10-10
 
 > **Seventh tagged Daybreak release: Sunrise 0.14.0.** It carries Sunrise
