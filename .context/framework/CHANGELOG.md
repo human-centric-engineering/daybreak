@@ -33,16 +33,16 @@ process.
 > (below), and one of them moves a function a leaf may have filled. **Still do
 > not switch to `multi`.**
 >
-> **Known gaps, not fixed in this release** (both tracked on the Daybreak Hub):
+> **Known gaps, not fixed in this release**, tracked on the Daybreak Hub:
 >
 > - **At `multi`, an org admin running a workflow that contains
 >   `framework_eval_sweep` gets a refused step.** The sweep reads every
 >   member's conversations, which the owner layer refuses a narrowed caller.
->   Scheduled runs and platform admins are unaffected.
+>   Scheduled runs and platform admins are unaffected. (t-146)
 > - **Spend caps now hold framework LLM calls** (slot extraction, supervision,
 >   rubric and metric scoring). When a cap refuses one, slot extraction skips
 >   the turn, the supervise admin route answers a generic 500, and the eval
->   sweep counts each refused conversation as failed and carries on.
+>   sweep counts each refused conversation as failed and carries on. (t-147)
 
 ### Changed
 
@@ -67,7 +67,8 @@ process.
     framework's eleven models: journeys, node states, journey events, nudges and
     slot values are `personal`; maps, policies, module versions, workflow
     bindings and proposals are authored config, so `not-personal`. **None is
-    `enforced`**, so framework reads behave as before. **Keep `@relation` out of
+    `enforced`**, so framework reads behave as before (whether to enforce
+    is t-148). **Keep `@relation` out of
     a field's comment:** the guard's parser skips such a line (Sunrise #1067),
     so the model goes unflagged, and a correct classification of it is
     rejected. Daybreak's own schema comments now say "no Prisma relation".
