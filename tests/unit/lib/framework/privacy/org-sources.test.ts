@@ -17,9 +17,13 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const prismaMock = vi.hoisted(() => ({
-  userJourney: { findMany: vi.fn().mockResolvedValue([]) },
-}));
+// A delegate per model on demand, so every framework source's `fetch` can run against it.
+const prismaMock = vi.hoisted(() => {
+  const delegates: Record<string, { findMany: ReturnType<typeof vi.fn> }> = {};
+  return new Proxy(delegates, {
+    get: (target, key: string) => (target[key] ??= { findMany: vi.fn().mockResolvedValue([]) }),
+  });
+});
 const multi = vi.hoisted(() => ({ on: false }));
 const leaf = vi.hoisted(() => ({ init: (): void => undefined }));
 
@@ -70,7 +74,7 @@ beforeEach(() => {
   __resetAppOrgSourceRegistryForTests();
   leaf.init = () => undefined;
   multi.on = false;
-  prismaMock.userJourney.findMany.mockClear();
+  vi.clearAllMocks();
 });
 
 describe('the framework’s declarations', () => {
@@ -88,6 +92,33 @@ describe('the framework’s declarations', () => {
     expect(FRAMEWORK_ORG_DATA_SOURCES.every((s) => s.disposition === 'export')).toBe(true);
     expect(FRAMEWORK_ORG_EXCLUDED_SOURCES.map((e) => e.model)).toEqual(['FrameworkNodeEmbedding']);
   });
+});
+
+describe('each source’s query', () => {
+  // Core's org-sources guard holds only core's sources to these rules (a fork's `fetch` has no
+  // core delegate behind it), so the framework's are held to them here.
+  const lowerFirst = (name: string) => name[0].toLowerCase() + name.slice(1);
+
+  it.each(FRAMEWORK_ORG_DATA_SOURCES.map((source) => [source.model, source] as const))(
+    '%s: reads its own table, scoped by the org, in a stable order, as full rows',
+    async (model, source) => {
+      await source.fetch({ orgId: 'cmorg000000000000000other' });
+      const delegate = prismaMock[lowerFirst(model)];
+      expect(delegate.findMany).toHaveBeenCalledTimes(1);
+      const args = delegate.findMany.mock.calls[0][0] as {
+        where?: unknown;
+        orderBy?: unknown;
+        select?: unknown;
+        omit?: unknown;
+      };
+      expect(args.where).toEqual({ orgId: 'cmorg000000000000000other' });
+      expect(args.orderBy).toBeDefined();
+      // `export` means full rows: a `select` would silently drop a column added tomorrow.
+      expect(args.select).toBeUndefined();
+      // No framework table holds a secret today; one that does must `omit` it, and this fails.
+      expect(args.omit).toBeUndefined();
+    }
+  );
 });
 
 describe('through the real bridge', () => {
