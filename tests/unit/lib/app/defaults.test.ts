@@ -34,10 +34,11 @@
  * - `lib/app/data-export.ts`     → the framework tier's Art. 15 manifest
  * - `lib/app/brand.ts`           → Daybreak's product name and legal entity
  * - `lib/app/platform-agents.ts` → the framework's platform agents (the rubric judge)
+ * - `lib/app/org-export.ts`      → the framework tier's org-export manifest
  *
  * Each delegates to a reserved-empty leaf seam (`leaf-bootstrap.ts`,
  * `leaf-admin-nav.ts`, `leaf-data-export.ts`, `leaf-brand.ts`,
- * `leaf-platform-agents.ts`) which carries the
+ * `leaf-platform-agents.ts`, `leaf-org-export.ts`) which carries the
  * no-op contract forward for leaf forks — those rows are here too. See the
  * Daybreak banner in CLAUDE.md.
  *
@@ -90,11 +91,8 @@ import {
 import { occupiedTiers } from '@/lib/app/reserved-tiers';
 import { APP_CAPABILITY_PAIRS, APP_UNCHECKED_SEEDS } from '@/lib/app/capability-seed-pairs';
 import { initAppUserCreatedHooks } from '@/lib/app/user-created';
-import {
-  collectLeafSubjectData,
-  initLeafSubjectSources,
-  leafOrgSources,
-} from '@/lib/app/leaf-data-export';
+import { collectLeafSubjectData, initLeafSubjectSources } from '@/lib/app/leaf-data-export';
+import { initLeafOrgSources } from '@/lib/app/leaf-org-export';
 import {
   getAppSubjectSources,
   getAppExcludedSubjectSources,
@@ -328,9 +326,6 @@ const SEAM_DEFAULTS: SeamDefault[] = [
       expect(await collectLeafSubjectData({ userId: 'user-1', email: 'user@example.com' })).toEqual(
         {}
       );
-      // The org-export half (Hub t-134): a leaf's org sources ship empty, so a
-      // vanilla Daybreak org export carries the framework's tables and nothing else.
-      expect(leafOrgSources()).toEqual({ sources: [], excluded: [] });
       // The declaration half (#533), asserted as "this seam changes nothing"
       // rather than "the registry is empty". Reading the registry TRIGGERS the
       // lazy init, which runs the framework tier as well — so an emptiness
@@ -390,13 +385,44 @@ const SEAM_DEFAULTS: SeamDefault[] = [
   },
   {
     seam: 'lib/app/org-export.ts',
+    // PINNED (Daybreak fills this bridge, Sunrise 0.15.0 §109 t-737): it registers the framework
+    // tier's org-export manifest, then delegates to the reserved `leaf-org-export.ts` (row below).
+    // What is pinned is that the registry accounts for EXACTLY the framework's `orgId` models,
+    // derived from the schema on disk for the same reason as the `data-export.ts` row above.
     risk: 'a stray source would read a table into every install\u2019s org export \u2014 and pre-account for an orgId model nobody decided about, silencing the org-manifest coverage rule for it',
     assert: () => {
+      const schemaDir = path.join(process.cwd(), 'prisma', 'schema');
+      const frameworkModels = readdirSync(schemaDir)
+        .filter((file) => file.startsWith('framework-') && file.endsWith('.prisma'))
+        .flatMap((file) => [
+          ...readFileSync(path.join(schemaDir, file), 'utf8').matchAll(/^model\s+(\w+)\s*\{/gm),
+        ])
+        .map((match) => match[1])
+        .sort();
+      expect(frameworkModels.length).toBeGreaterThan(5);
+
       __resetAppOrgSourceRegistryForTests();
       // The reads trigger the lazy init, so this exercises the REAL file.
-      expect(getAppOrgSources()).toEqual([]);
-      expect(getAppExcludedOrgSources()).toEqual([]);
+      const accounted = [
+        ...getAppOrgSources().map((entry) => entry.model),
+        ...getAppExcludedOrgSources().map((entry) => entry.model),
+      ].sort();
+      expect(accounted).toEqual(frameworkModels);
       expect(appOrgDeclarationsFailed()).toBe(false);
+    },
+  },
+  {
+    seam: 'lib/app/leaf-org-export.ts',
+    risk: 'a stray source would read a leaf table into every Daybreak leaf\u2019s org export, and a stray declaration would pre-account for an orgId model nobody decided about',
+    assert: () => {
+      // "This seam changes nothing", not "the registry is empty": the read runs the bridge, which
+      // registers the framework's manifest first (pinned in the row above).
+      __resetAppOrgSourceRegistryForTests();
+      const sourcesBefore = getAppOrgSources();
+      const excludedBefore = getAppExcludedOrgSources();
+      initLeafOrgSources();
+      expect(getAppOrgSources()).toEqual(sourcesBefore);
+      expect(getAppExcludedOrgSources()).toEqual(excludedBefore);
     },
   },
   {

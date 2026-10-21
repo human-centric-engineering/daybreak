@@ -55,11 +55,12 @@ reserves for its own forks.**
   **Sunrise** migration
 - Daybreak registers its framework pieces into Sunrise's seams **from within
   `lib/framework/`** (driven by `initFramework()`) — exactly as Sunrise
-  registers its own built-ins from core. The **seven exceptions** are the
+  registers its own built-ins from core. The **eight exceptions** are the
   `lib/app/*` **bridges** Daybreak fills: `bootstrap.ts` (server boot →
   `initFramework()`), `admin-nav.ts` (client sidebar → the framework nav
   section), `data-export.ts` (subject access → the framework's own GDPR Art. 15
-  manifest), `brand.ts` (product name + legal entity → `lib/brand.ts`),
+  manifest), `org-export.ts` (the org export → the framework's 19 `orgId`
+  models, Sunrise §109), `brand.ts` (product name + legal entity → `lib/brand.ts`),
   `db-drift.ts` (Prisma-unmodelled DB objects), `ci.ts` (coverage exclusions and
   always-run tests → `vitest.config.ts` and `ALWAYS_RUN_TESTS`) and
   `platform-agents.ts` (the framework's platform agents — the rubric judge — into
@@ -69,7 +70,8 @@ reserves for its own forks.**
   server-boot, the client sidebar, a lazy seam whose init core owns, or a static
   value core imports directly — has nowhere else to go; each delegates to a
   reserved leaf hook (`leaf-bootstrap.ts` / `leaf-admin-nav.ts` /
-  `leaf-data-export.ts` / `leaf-brand.ts` / `leaf-platform-agents.ts`). `brand.ts` is the one where the leaf
+  `leaf-data-export.ts` / `leaf-org-export.ts` / `leaf-brand.ts` /
+  `leaf-platform-agents.ts`). `brand.ts` is the one where the leaf
   **overrides** rather than appends — brand identity is single-valued, so a leaf
   replaces Daybreak's name rather than composing with it. Otherwise Daybreak does
   **not** fill `lib/app/*` (see next).
@@ -116,7 +118,8 @@ reserves for its own forks.**
   `knowledge-access-contributors.ts`, `guard-floor-contributors.ts`,
   `guard-event-contributors.ts`, `modules.ts`, `leaf-bootstrap.ts`,
   `leaf-admin-nav.ts`, `leaf-data-export.ts`, `tenant-resolver.ts`,
-  `leaf-platform-agents.ts`, `provider-credentials.ts`, …) — Sunrise
+  `leaf-platform-agents.ts`, `leaf-org-export.ts`, `provider-credentials.ts`,
+  `admin-tier.ts`, `owner-classification.ts`, `erasure.ts`, `footer.ts`, …) — Sunrise
   ships these empty;
   Daybreak keeps them empty
   (and may add new empty framework-concept scaffolds like `lib/app/modules.ts`)

@@ -82,6 +82,19 @@
  *
  * Full guide: .context/privacy/org-export.md (Fork tables)
  */
+import { initFrameworkOrgSources } from '@/lib/framework/privacy/org-sources';
+import { initLeafOrgSources } from '@/lib/app/leaf-org-export';
+
 export function initAppOrgSources(): void {
-  // No app org sources by default.
+  // DAYBREAK — one of the `lib/app/*` bridges Daybreak fills (the roster is in CLAUDE.md's banner).
+  // The framework declares its 19 `orgId` models here, NOT from `initFramework()` at boot: core's
+  // registry runs this lazily before its first read and re-runs it after a reset, so a boot-time
+  // registration would be lost. Framework first, then the leaf.
+  //
+  // One unit, as core's gate sees it: if the leaf's init throws, the gate rolls back the framework's
+  // declarations too, and `exportOrgData()` refuses every org until the leaf is fixed. That is the
+  // safe failure — a short export reads exactly like a complete one. A leaf declaring a model the
+  // framework already declared is rejected by the registry and logged; the framework's row stands.
+  initFrameworkOrgSources();
+  initLeafOrgSources();
 }

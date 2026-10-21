@@ -1,49 +1,48 @@
 /**
- * The org-export seam Daybreak carries in core (Hub t-134, §34 f-framework-tenancy).
+ * The framework tier's org-export declarations, and the bridge that registers them.
  *
- * Two properties, each the reason the seam is safe to carry:
+ * Three properties:
  *
- *   1. **Behaviour-neutral at rest** (B19). With an empty contribution from the
- *      `lib/app/data-export.ts` bridge, `getOrgDataSources()` /
- *      `getOrgExcludedSources()` return exactly core's `ORG_DATA_SOURCES` /
- *      `ORG_EXCLUDED_SOURCES` — same entries, same order — so vanilla Sunrise
- *      behaviour is unchanged by the seam existing.
- *   2. **The framework's contribution arrives, after core's.** The real bridge
- *      delivers the framework tier's 18 sources and one exclusion, appended to
- *      core's, and every framework model is declared exactly once.
+ *   1. **Every framework model is declared exactly once** — 18 sources the org
+ *      receives in full and one exclusion, the derived node embeddings.
+ *   2. **The `lib/app/org-export.ts` bridge lands them in core's registry**
+ *      under the real lazy init, so `exportOrgData()` and core's coverage
+ *      guard (`tests/unit/lib/privacy/org-sources.test.ts`) both see them.
+ *   3. **A throwing leaf init rolls the framework's declarations back too**, and
+ *      the export then refuses — the failure the bridge and leaf seam document.
  *
- * The per-source rules (scoped by org, stable order, full rows) are enforced for
- * the framework's entries by core's own coverage guard,
- * `tests/unit/lib/privacy/org-sources.test.ts`, which reads through these getters.
- *
- * @see lib/privacy/org-sources.ts — the seam
- * @see lib/framework/privacy/org-sources.ts — the framework's contribution
+ * @see lib/framework/privacy/org-sources.ts — the declarations
+ * @see lib/app/org-export.ts — the bridge
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-
-const contribution = vi.hoisted(() => ({
-  current: null as null | { sources: unknown[]; excluded: unknown[] },
-}));
 
 const prismaMock = vi.hoisted(() => ({
   userJourney: { findMany: vi.fn().mockResolvedValue([]) },
 }));
 const multi = vi.hoisted(() => ({ on: false }));
+const leaf = vi.hoisted(() => ({ init: (): void => undefined }));
 
 vi.mock('@/lib/db/client', () => ({ prisma: prismaMock }));
-vi.mock('@/lib/tenancy/context', () => ({ isMultiTenant: () => multi.on }));
-vi.mock('@/lib/app/data-export', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/lib/app/data-export')>();
-  return {
-    ...actual,
-    collectAppOrgSources: () => contribution.current ?? actual.collectAppOrgSources(),
-  };
-});
+vi.mock('@/lib/tenancy/context', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/tenancy/context')>()),
+  isMultiTenant: () => multi.on,
+}));
+vi.mock('@/lib/logging', () => ({
+  logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn(), debug: vi.fn() },
+}));
+vi.mock('@/lib/app/leaf-org-export', () => ({ initLeafOrgSources: () => leaf.init() }));
 
-const { ORG_DATA_SOURCES, ORG_EXCLUDED_SOURCES, getOrgDataSources, getOrgExcludedSources } =
-  await import('@/lib/privacy/org-sources');
-const { frameworkOrgSources } = await import('@/lib/framework/privacy/org-sources');
+const { FRAMEWORK_ORG_DATA_SOURCES, FRAMEWORK_ORG_EXCLUDED_SOURCES } =
+  await import('@/lib/framework/privacy/org-sources');
+const {
+  getAppOrgSources,
+  getAppExcludedOrgSources,
+  getAccountedAppOrgModels,
+  appOrgDeclarationsFailed,
+  registerAppOrgSources,
+  __resetAppOrgSourceRegistryForTests,
+} = await import('@/lib/privacy/org-source-registry');
 
 const FRAMEWORK_MODELS = [
   'SlotDefinition',
@@ -68,58 +67,79 @@ const FRAMEWORK_MODELS = [
 ];
 
 beforeEach(() => {
-  contribution.current = null;
+  __resetAppOrgSourceRegistryForTests();
+  leaf.init = () => undefined;
   multi.on = false;
   prismaMock.userJourney.findMany.mockClear();
 });
 
-describe('the org-export seam, at rest', () => {
-  it('returns exactly core’s sources, in order, when the bridge contributes nothing', () => {
-    contribution.current = { sources: [], excluded: [] };
-    expect(getOrgDataSources()).toEqual(ORG_DATA_SOURCES);
-    expect(getOrgDataSources().map((s) => s.model)).toEqual(ORG_DATA_SOURCES.map((s) => s.model));
-  });
-
-  it('returns exactly core’s exclusions when the bridge contributes nothing', () => {
-    contribution.current = { sources: [], excluded: [] };
-    expect(getOrgExcludedSources()).toEqual(ORG_EXCLUDED_SOURCES);
-  });
-
-  it('never mutates core’s lists when a contribution is appended', () => {
-    const coreSources = ORG_DATA_SOURCES.length;
-    const coreExcluded = ORG_EXCLUDED_SOURCES.length;
-    getOrgDataSources();
-    getOrgExcludedSources();
-    expect(ORG_DATA_SOURCES).toHaveLength(coreSources);
-    expect(ORG_EXCLUDED_SOURCES).toHaveLength(coreExcluded);
-  });
-});
-
-describe('the framework’s contribution, through the real bridge', () => {
-  it('appends the framework’s sources after core’s', () => {
-    const all = getOrgDataSources();
-    expect(all.slice(0, ORG_DATA_SOURCES.length)).toEqual(ORG_DATA_SOURCES);
-    expect(all.slice(ORG_DATA_SOURCES.length)).toEqual(frameworkOrgSources().sources);
-  });
-
+describe('the framework’s declarations', () => {
   it('declares every framework model exactly once, as a source or an exclusion', () => {
-    const { sources, excluded } = frameworkOrgSources();
-    const declared = [...sources.map((s) => s.model), ...excluded.map((e) => e.model)];
+    const declared = [
+      ...FRAMEWORK_ORG_DATA_SOURCES.map((s) => s.model),
+      ...FRAMEWORK_ORG_EXCLUDED_SOURCES.map((e) => e.model),
+    ];
     expect([...declared].sort()).toEqual([...FRAMEWORK_MODELS].sort());
     expect(new Set(declared).size).toBe(declared.length);
   });
 
   it('exports every framework table in full except the derived node embeddings', () => {
-    const { sources, excluded } = frameworkOrgSources();
-    expect(sources.every((s) => s.disposition === 'export')).toBe(true);
-    expect(excluded.map((e) => e.model)).toEqual(['FrameworkNodeEmbedding']);
-    expect(getOrgExcludedSources().map((e) => e.model)).toContain('FrameworkNodeEmbedding');
+    expect(FRAMEWORK_ORG_DATA_SOURCES).toHaveLength(18);
+    expect(FRAMEWORK_ORG_DATA_SOURCES.every((s) => s.disposition === 'export')).toBe(true);
+    expect(FRAMEWORK_ORG_EXCLUDED_SOURCES.map((e) => e.model)).toEqual(['FrameworkNodeEmbedding']);
   });
 });
 
-describe('which rows an org owns (core’s ownedBy rule, restated)', () => {
+describe('through the real bridge', () => {
+  it('registers the framework’s sources and exclusion with core’s registry, unchanged', () => {
+    expect(getAppOrgSources()).toEqual([...FRAMEWORK_ORG_DATA_SOURCES]);
+    expect(getAppExcludedOrgSources()).toEqual([...FRAMEWORK_ORG_EXCLUDED_SOURCES]);
+    expect([...getAccountedAppOrgModels()].sort()).toEqual([...FRAMEWORK_MODELS].sort());
+    expect(appOrgDeclarationsFailed()).toBe(false);
+  });
+
+  it('every registered fetch is the framework’s own, so a source cannot be swapped on the way in', () => {
+    const registered = new Map(getAppOrgSources().map((s) => [s.model, s.fetch]));
+    for (const source of FRAMEWORK_ORG_DATA_SOURCES) {
+      expect(registered.get(source.model)).toBe(source.fetch);
+    }
+  });
+
+  it('keeps the framework’s row when a leaf declares the same model', () => {
+    const journeys = FRAMEWORK_ORG_DATA_SOURCES.find((s) => s.model === 'UserJourney');
+    leaf.init = () =>
+      registerAppOrgSources({
+        tier: 'app',
+        sources: [
+          {
+            model: 'UserJourney',
+            section: 'leafJourneys',
+            disposition: 'export',
+            description: 'A leaf trying to re-declare a framework model.',
+            fetch: () => Promise.resolve([]),
+          },
+        ],
+      });
+    const registered = getAppOrgSources().find((s) => s.model === 'UserJourney');
+    expect(registered?.section).toBe('journeys');
+    expect(registered?.fetch).toBe(journeys?.fetch);
+    // The rejected re-declaration leaves the model covered, so the export does not refuse.
+    expect(appOrgDeclarationsFailed()).toBe(false);
+  });
+
+  it('rolls the framework’s declarations back when the leaf init throws, and the export refuses', () => {
+    leaf.init = () => {
+      throw new Error('leaf boom');
+    };
+    expect(getAppOrgSources()).toEqual([]);
+    expect(getAccountedAppOrgModels().size).toBe(0);
+    expect(appOrgDeclarationsFailed()).toBe(true);
+  });
+});
+
+describe('which rows an org owns (core’s ownedBy)', () => {
   const journeys = () => {
-    const source = frameworkOrgSources().sources.find((s) => s.model === 'UserJourney');
+    const source = FRAMEWORK_ORG_DATA_SOURCES.find((s) => s.model === 'UserJourney');
     if (!source) throw new Error('UserJourney source missing');
     return source;
   };

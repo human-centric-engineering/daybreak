@@ -56,15 +56,14 @@
 > - The `lib/app/*` **leaf** scaffolds (`env.ts`, `capabilities.ts`, `context-contributors.ts`,
 >   `leaf-bootstrap.ts`, `leaf-admin-nav.ts`, …) — Sunrise ships them empty; Daybreak keeps them
 >   empty for the app. Filling one collides with a leaf's registrations on a Daybreak upgrade.
->   **Exception — the seven `lib/app/*` _bridges_ Daybreak DOES fill. This list is the
+>   **Exception — the eight `lib/app/*` _bridges_ Daybreak DOES fill. This list is the
 >   roster; count bridges here, not from an ordinal in a docblock:** `bootstrap.ts` (server boot →
 >   `initFramework()`), `admin-nav.ts` (client sidebar → the framework nav section),
 >   `data-export.ts` (GDPR Art. 15 subject access → the framework's own manifest at
 >   `lib/framework/privacy/export-sources.ts`, declared through core's
->   `registerAppSubjectSources({ tier: 'framework' })`; and the ORG export →
->   `lib/framework/privacy/org-sources.ts`, pulled through `collectAppOrgSources()` by a
->   fork-first seam Daybreak carries in `lib/privacy/org-sources.ts` — see
->   `.context/framework/upstream-asks.md`), `brand.ts` (product name + legal
+>   `registerAppSubjectSources({ tier: 'framework' })`), `org-export.ts` (the ORG export →
+>   `lib/framework/privacy/org-sources.ts`, declared through core's
+>   `registerAppOrgSources({ tier: 'framework' })`; Sunrise §109), `brand.ts` (product name + legal
 >   entity → `lib/brand.ts`), `db-drift.ts` (Prisma-unmodelled DB objects → the framework's
 >   drift probes), `ci.ts` (coverage exclusions + always-run tests → `vitest.config.ts`
 >   and `ALWAYS_RUN_TESTS`; Sunrise #759/#762), and `platform-agents.ts` (agents every org gets
@@ -72,7 +71,7 @@
 >   `initFramework()` can't reach — server-boot, the client sidebar, a lazy seam core owns the
 >   init of, or a static function core imports directly — has nowhere else to go; each bridge
 >   delegates to a reserved leaf hook (`leaf-bootstrap.ts` / `leaf-admin-nav.ts` /
->   `leaf-data-export.ts` / `leaf-brand.ts` / `leaf-platform-agents.ts`) so the leaf's own registrations never collide.
+>   `leaf-data-export.ts` / `leaf-org-export.ts` / `leaf-brand.ts` / `leaf-platform-agents.ts`) so the leaf's own registrations never collide.
 >   `brand.ts` is the one bridge where the leaf hook **overrides** rather than appends — brand
 >   identity is single-valued, so a leaf replaces Daybreak's name, it does not compose with it.
 > - `prisma/schema/app.prisma` + `app_…` migrations, `app/brand-theme.css`, and **`.context/app/`**
