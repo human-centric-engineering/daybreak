@@ -17,11 +17,11 @@
  * every framework read path may return under a guarded session, so it is its own
  * reviewed change, not part of a sync.
  *
- * Every model is listed, not only the ones the guard names today: the guard's
- * schema parser skips any line whose comment contains `@relation`, and the
- * framework's plain user-id columns are commented "no @relation", so it sees only
- * two of the ten. The list is what the schema says, checked with comments
- * stripped.
+ * **Keep `@relation` out of a field's comment in `framework-*.prisma`.** The guard's schema
+ * parser skips any line containing it, so a user-id column commented "no @relation" is invisible:
+ * the model goes unflagged when unclassified, and a correct classification of it is rejected.
+ * Until Sunrise 0.15.0 every framework user-id column said exactly that, and the guard saw two of
+ * the ten models below; the comments now say "no Prisma relation".
  *
  * Imports nothing but core's registrar: this runs while the Prisma client is
  * being built, so it must not reach `@/lib/db`.
