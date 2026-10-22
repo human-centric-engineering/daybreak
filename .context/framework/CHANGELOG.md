@@ -32,17 +32,6 @@ process.
 > scale with table size**, then `npm run db:seed`. **Three seams change hands**
 > (below), and one of them moves a function a leaf may have filled. **Still do
 > not switch to `multi`.**
->
-> **Known gaps, not fixed in this release**, tracked on the Daybreak Hub:
->
-> - **At `multi`, an org admin running a workflow that contains
->   `framework_eval_sweep` gets a refused step.** The sweep reads every
->   member's conversations, which the owner layer refuses a narrowed caller.
->   Scheduled runs and platform admins are unaffected. (t-146)
-> - **Spend caps now hold framework LLM calls** (slot extraction, supervision,
->   rubric and metric scoring). When a cap refuses one, slot extraction skips
->   the turn, the supervise admin route answers a generic 500, and the eval
->   sweep counts each refused conversation as failed and carries on. (t-147)
 
 ### Changed
 
@@ -92,6 +81,31 @@ process.
   author, so the engine's own reads of it were refused, and the bound workflow
   never ran. Platform admins were unaffected. The drain now runs across owners,
   as core's approval resume does. The execution's owner is unchanged.
+- **An org admin can run the framework eval sweep** (Hub t-146). Run through
+  the org-tier execute route, the sweep and its passes read every member's
+  conversations, which Sunrise 0.15.0 refuses a narrowed caller, so the step
+  failed. It now reads across owners: it scores the org's conversations, not
+  the caller's. Scheduled runs and platform admins were unaffected. The org
+  wall is unchanged. **The sweep's judge calls are now always attributed to
+  the service account**, as a scheduled run's already were, never to the
+  person who ran it: each judge turn is saved as a conversation owned by its
+  actor and quotes the turn it judges, so a manual run used to put those
+  turns in the runner's own conversation history. The execution still records
+  who started it.
+- **A spend cap's refusal of a framework LLM call now says so** (Hub t-147).
+  Since Sunrise 0.15.0 the agent, org and global monthly caps hold framework
+  calls too. The supervise and score admin routes answer `402` with the cap's
+  code (`budget_exceeded`, `org_budget_exceeded` or `global_budget_exceeded`)
+  instead of a 500. The eval sweep stops at the first refusal and fails its
+  step under that code, keeping what it spent, instead of counting every
+  later conversation as failed and reporting success; the failure names the
+  conversation it left part-evaluated, which a rerun will not pick up again,
+  for the on-demand scorers. A refused rubric or metric pass audits the turns
+  it scored before it stops, and the metric pass warns when a cap refuses one
+  of its three judges while the others score. Slot extraction still
+  stores the prose without a typed value, but logs the refusal at `warn`
+  rather than `debug`. A leaf can recognise one with
+  `lib/framework/shared/spend-caps.ts` (`spendCapCodeOf`, `SpendCapRefusedError`).
 
 ## [0.7.0] — 2026-10-10
 
