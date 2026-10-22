@@ -25,13 +25,32 @@ process.
 
 ## [Unreleased]
 
-> **Sunrise 0.15.0** (external plane §109, per-org quotas §110, org-admin
-> console §111, within-org owner isolation §115, vendor support access §121,
-> an erasure programme, Next 16.4). Read Sunrise's `[0.15.0]` "What a fork has
-> to do" before deploying: **17 migrations, eight of which take locks that
-> scale with table size**, then `npm run db:seed`. **Three seams change hands**
-> (below), and one of them moves a function a leaf may have filled. **Still do
-> not switch to `multi`.**
+## [0.8.0] — 2026-10-22
+
+> **Eighth tagged Daybreak release: Sunrise 0.15.0.** It carries Sunrise
+> `v0.15.0` (external plane §109, per-org quotas and monthly spend caps §110,
+> the org-admin console §111, within-org owner isolation §115, vendor support
+> access §121, an erasure programme, Next 16.4) and the framework work it
+> called for, in two PRs:
+> [#309](https://github.com/human-centric-engineering/daybreak/pull/309) (the
+> merge, with three seams moved onto Sunrise's) and
+> [#312](https://github.com/human-centric-engineering/daybreak/pull/312) (the
+> eval sweep for org admins, and spend-cap refusals from framework calls).
+>
+> **Before deploying, read Sunrise's `[0.15.0]` "What a fork has to do":
+> 17 migrations, eight of which take locks that scale with table size**, then
+> `npm run db:seed`.
+>
+> **Three seams change hands** (below). One is **breaking for a leaf that
+> declared org-export tables**: `leafOrgSources()` is gone from
+> `lib/app/leaf-data-export.ts`; declare them in the new
+> `lib/app/leaf-org-export.ts`. **A leaf also inherits Daybreak's Hub
+> bootstrap block in `CLAUDE.md`** and must replace it with its own.
+>
+> **At `TENANCY_MODE=single`, the default, little a user sees changes**:
+> module workflow bindings a member triggers run again, and a reached spend cap
+> now says so. **Still do not switch to `multi`:** the framework's boot syncs
+> (modules, slot definitions) are not yet run per org.
 
 ### Changed
 
@@ -106,6 +125,33 @@ process.
   stores the prose without a typed value, but logs the refusal at `warn`
   rather than `debug`. A leaf can recognise one with
   `lib/framework/shared/spend-caps.ts` (`spendCapCodeOf`, `SpendCapRefusedError`).
+
+### Security
+
+- **Sunrise 0.15.0's security fixes reach a leaf with this release.** A leaf
+  on Daybreak 0.7.0 or older is exposed to all of them until it takes it. Read
+  Sunrise's `[0.15.0]` Security section; in short:
+  - **Platform roles.** `PATCH /api/v1/users/[id]` and
+    `POST /api/v1/users/invite` wrote the body's `role` for any caller who
+    passed `withAdminAuth`, so on a fork whose admin policy admits org admins
+    there, an org admin could make anyone a platform admin. Only a platform
+    admin can now.
+  - **Demoted admins' keys.** An `admin`-scoped API key now stops working when
+    its owner stops being a platform admin.
+  - **Org admins and the platform.** A URL an org chooses can no longer reach
+    the platform's own network, and an org's configs can no longer read the
+    platform's env vars through `${env:NAME}` templates.
+  - **Members inside one org.** A narrowed caller's reads of another member's
+    memory, conversations, messages, workflow runs, evaluations and datasets
+    are refused at the query (§115).
+  - **URLs in logs, traces, audit rows and analytics** are reduced to their
+    origin or a collapsed path.
+  - **Dependencies.** Prisma 7.10.1 clears the `deepmerge-ts` alert
+    (GHSA-ggr8-5vv4-36mx, high), and mermaid 12.2.0 the `katex` one.
+- **The framework eval sweep no longer puts members' turns in the runner's
+  conversation history** (Hub t-146, #312). Its judge calls are saved as
+  conversations owned by their actor, quoting the turn judged; they are now
+  always the service account's.
 
 ## [0.7.0] — 2026-10-10
 
