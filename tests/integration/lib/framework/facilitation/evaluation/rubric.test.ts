@@ -129,20 +129,37 @@ describe('rubricScoreConversation', () => {
 });
 
 describe('spend caps (Sunrise 0.15.0)', () => {
-  it('stops at a judge turn a cap refused rather than skipping it and judging the rest', async () => {
-    vi.mocked(driveJudgeAgent).mockResolvedValueOnce({
-      score: null,
-      reasoning: 'judge call error: org_budget_exceeded',
-      costUsd: 0,
-      tokenUsage: { input: 0, output: 0 },
-      errorCode: 'org_budget_exceeded',
-    });
+  it('stops at a judge turn a cap refused, after auditing the turns it scored, carrying their cost', async () => {
+    vi.mocked(driveJudgeAgent)
+      .mockResolvedValueOnce({
+        score: 0.6,
+        reasoning: 'ok',
+        costUsd: 0.002,
+        tokenUsage: { input: 3, output: 2 },
+      })
+      .mockResolvedValueOnce({
+        score: null,
+        reasoning: 'judge call error: org_budget_exceeded',
+        costUsd: 0,
+        tokenUsage: { input: 0, output: 0 },
+        errorCode: 'org_budget_exceeded',
+      });
     const err = await rubricScoreConversation({ conversationId: 'c1', actorUserId: 'sys' }).catch(
       (e: unknown) => e
     );
     expect(err).toBeInstanceOf(SpendCapRefusedError);
-    expect(err).toMatchObject({ code: 'org_budget_exceeded', status: 402 });
-    expect(driveJudgeAgent).toHaveBeenCalledTimes(1);
-    expect(prisma.frameworkConversationEval.upsert).not.toHaveBeenCalled();
+    expect(err).toMatchObject({
+      code: 'org_budget_exceeded',
+      status: 402,
+      costUsd: 0.002,
+      tokensUsed: 5,
+    });
+    expect(prisma.frameworkConversationEval.upsert).toHaveBeenCalledTimes(1);
+    expect(logAdminAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'framework_conversation_eval.rubric',
+        metadata: expect.objectContaining({ scoredTurns: 1, stoppedBy: 'org_budget_exceeded' }),
+      })
+    );
   });
 });

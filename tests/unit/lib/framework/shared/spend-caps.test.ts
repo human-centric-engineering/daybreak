@@ -19,7 +19,7 @@ import {
   asSpendCapRefusal,
   isSpendCapCode,
   rethrowSpendCapRefusal,
-  spendCapCodeInMessage,
+  spendCapCodeInJudgeText,
   spendCapCodeOf,
   SpendCapRefusedError,
 } from '@/lib/framework/shared/spend-caps';
@@ -51,10 +51,20 @@ describe('recognising a refusal', () => {
     expect(spendCapCodeOf(cyclic)).toBeNull();
   });
 
-  it('finds a cap in the words a drained chat turn ends with', () => {
+  it('finds a cap whose words open a judge’s failure text, in either of scoreResponse’s shapes', () => {
     const { message, action } = getUserFacingError('budget_exceeded');
-    expect(spendCapCodeInMessage(`faithfulness: ${message} ${action}`)).toBe('budget_exceeded');
-    expect(spendCapCodeInMessage('faithfulness: no active provider')).toBeNull();
+    const words = `${message} ${action}`;
+    expect(spendCapCodeInJudgeText(`… — faithfulness: ${words}; relevance: x`)).toBe(
+      'budget_exceeded'
+    );
+    expect(spendCapCodeInJudgeText(`judge unavailable: ${words}`)).toBe('budget_exceeded');
+  });
+
+  it('ignores the same words anywhere else in the text', () => {
+    const { message } = getUserFacingError('org_budget_exceeded');
+    expect(spendCapCodeInJudgeText(`faithfulness: 400 bad request: "${message}"`)).toBeNull();
+    expect(spendCapCodeInJudgeText(message)).toBeNull();
+    expect(spendCapCodeInJudgeText('faithfulness: no active provider')).toBeNull();
   });
 });
 
@@ -65,6 +75,16 @@ describe('SpendCapRefusedError', () => {
     expect(converted).toBeInstanceOf(SpendCapRefusedError);
     expect(converted?.message).toBe(refusal.message);
     expect(converted?.code).toBe('global_budget_exceeded');
+  });
+
+  it('carries what the refused run spent, defaulting to nothing', () => {
+    expect(new SpendCapRefusedError('budget_exceeded')).toMatchObject({
+      costUsd: 0,
+      tokensUsed: 0,
+    });
+    expect(
+      new SpendCapRefusedError('budget_exceeded', undefined, { costUsd: 0.5, tokensUsed: 9 })
+    ).toMatchObject({ costUsd: 0.5, tokensUsed: 9 });
   });
 
   it('falls back to the registry’s words when it has only the code', () => {

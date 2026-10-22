@@ -8,7 +8,8 @@
  *
  * The step selects recent framework conversations never scored yet (`recent-conversations.ts`) and
  * runs the enabled passes over each — supervisor + rubric by default, metric scoring (3 judge
- * calls/turn) opt-in. It threads the execution's user (or the service account) as the eval actor, and
+ * calls/turn) opt-in. It attributes the eval calls to the service account (never the person who ran
+ * it — see `resolveActorUserId`), and
  * self-enforces the execution's `budgetLimitUsd` inside the loop as a hard cost fence (the engine
  * only checks the budget BETWEEN steps, and this is one long step). The fence is checked at
  * CONVERSATION granularity — a single conversation runs all its passes to completion before the fence
@@ -58,15 +59,20 @@ const configSchema = z
   })
   .optional();
 
-/** Resolve who the eval calls attribute to: the execution's user, else the service account. */
-async function resolveActorUserId(step: WorkflowStep, ctxUserId: string | null): Promise<string> {
-  if (ctxUserId) return ctxUserId;
+/**
+ * Who the eval calls attribute to: always the service account, as for a scheduled run, never the
+ * person who started the execution. Each judge turn is saved as a conversation owned by this actor,
+ * and it quotes the member's turn it judges: attributed to an org admin, every member's framework
+ * turns would sit in that admin's own conversation history. The sweep acts for the org; the
+ * execution row still records who started it.
+ */
+async function resolveActorUserId(step: WorkflowStep): Promise<string> {
   const account = await prisma.user.findFirst({ where: serviceAccountWhere, select: { id: true } });
   if (!account) {
     throw new ExecutorError(
       step.id,
       'NO_ACTOR',
-      'framework_eval_sweep has no user to attribute to (the execution has no user and no service account exists)'
+      'framework_eval_sweep has no service account to attribute its judge calls to'
     );
   }
   return account.id;
@@ -98,12 +104,15 @@ export async function executeEvalSweep(
   }
   const maxConversations = cfg.maxConversations ?? DEFAULT_MAX_CONVERSATIONS;
 
-  const actorUserId = await resolveActorUserId(step, ctx.userId);
+  const actorUserId = await resolveActorUserId(step);
   // The sweep evaluates the org's framework conversations, every member's, not the caller's own.
   // Run by an org admin through the org-tier execute route, the engine runs under that admin's
   // narrowed subject, and the owner layer (Sunrise §115) refuses the unconfined conversation and
   // message reads the sweep and its passes make. A scheduled run has no subject; a platform admin
-  // is not narrowed — for both this changes nothing. The org wall stays where it is.
+  // is not narrowed — for both this changes nothing. The org wall stays where it is. The whole
+  // sweep crosses, not just those reads: its judge turns run as the service account, whose own
+  // conversations are another owner's to a narrowed caller. The judges are platform agents with no
+  // capabilities and no knowledge, so nothing else inside reads on the crossing.
   return runAcrossOwners(
     "an eval sweep scores the org's framework conversations, not the caller's own",
     () => sweep(step, ctx, { doScore, doSupervise, doRubric, maxConversations, actorUserId })
@@ -154,14 +163,19 @@ async function sweep(
       // what the sweep spent before the refusal.
       const capRefusal = asSpendCapRefusal(err);
       if (capRefusal) {
+        // The refused conversation may already carry a row from an earlier pass, and the sweep
+        // only selects never-scored conversations, so a rerun will not pick it up: name it, for
+        // the on-demand scorers.
         throw new ExecutorError(
           step.id,
-          'framework_eval_sweep_spend_cap',
-          `framework_eval_sweep stopped after ${sweptConversations} of ${conversations.length} conversations: ${capRefusal.message}`,
+          capRefusal.code,
+          `framework_eval_sweep stopped after ${sweptConversations} of ${conversations.length} conversations; ` +
+            `conversation ${conversation.id} may be part-evaluated (re-run its passes on demand once the cap is raised): ` +
+            capRefusal.message,
           capRefusal,
           false,
-          totalTokensUsed,
-          totalCostUsd
+          totalTokensUsed + capRefusal.tokensUsed,
+          totalCostUsd + capRefusal.costUsd
         );
       }
       // A single conversation failing a pass (e.g. no scorable turns) must not abort the whole sweep.

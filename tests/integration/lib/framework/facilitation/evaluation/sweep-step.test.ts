@@ -31,6 +31,7 @@ import { rubricScoreConversation } from '@/lib/framework/facilitation/evaluation
 import { ExecutorError } from '@/lib/orchestration/engine/errors';
 import { getSubjectReadScope, runAsSubject } from '@/lib/auth/subject-context';
 import { SpendCapExceededError } from '@/lib/orchestration/llm/spend-caps';
+import { SpendCapRefusedError } from '@/lib/framework/shared/spend-caps';
 
 const step = (config: unknown = {}) => ({ id: 'step-1', config }) as never;
 const ctx = (over: Record<string, unknown> = {}) =>
@@ -45,6 +46,7 @@ const convo = (id: string) => ({ id, contextType: 'facilitation', contextId: 'on
 
 beforeEach(() => {
   vi.clearAllMocks();
+  vi.mocked(prisma.user.findFirst).mockResolvedValue({ id: 'svc-1' } as never);
   vi.mocked(listRecentUnscoredFrameworkConversations).mockResolvedValue([
     convo('c1'),
     convo('c2'),
@@ -81,11 +83,17 @@ describe('executeEvalSweep', () => {
     expect(rubricScoreConversation).not.toHaveBeenCalled();
   });
 
-  it('threads the eval actor and passes the conversation id to each pass', async () => {
+  it('attributes every pass to the service account, never the user who ran it', async () => {
+    // Each judge turn is saved as a conversation owned by the actor and quotes the member's turn;
+    // attributed to the admin who ran the sweep, every member's turns would land in their history.
     await executeEvalSweep(step(), ctx({ userId: 'admin-9' }));
     expect(superviseConversation).toHaveBeenCalledWith({
       conversationId: 'c1',
-      actorUserId: 'admin-9',
+      actorUserId: 'svc-1',
+    });
+    expect(rubricScoreConversation).toHaveBeenCalledWith({
+      conversationId: 'c1',
+      actorUserId: 'svc-1',
     });
   });
 
@@ -104,18 +112,16 @@ describe('executeEvalSweep', () => {
     expect(superviseConversation).toHaveBeenCalledTimes(1);
   });
 
-  it('falls back to the service account when the execution has no user', async () => {
-    vi.mocked(prisma.user.findFirst).mockResolvedValue({ id: 'svc-1' } as never);
+  it('attributes a scheduled run (no user) to the service account too', async () => {
     await executeEvalSweep(step(), ctx({ userId: null }));
-    expect(prisma.user.findFirst).toHaveBeenCalled();
     expect(superviseConversation).toHaveBeenCalledWith(
       expect.objectContaining({ actorUserId: 'svc-1' })
     );
   });
 
-  it('throws ExecutorError when no service account exists and there is no user', async () => {
+  it('throws ExecutorError when no service account exists, whoever ran it', async () => {
     vi.mocked(prisma.user.findFirst).mockResolvedValue(null);
-    await expect(executeEvalSweep(step(), ctx({ userId: null }))).rejects.toBeInstanceOf(
+    await expect(executeEvalSweep(step(), ctx({ userId: 'admin-9' }))).rejects.toBeInstanceOf(
       ExecutorError
     );
   });
@@ -193,6 +199,7 @@ describe('spend caps (Sunrise 0.15.0)', () => {
     expect(failure.code).toBe('org_budget_exceeded');
     expect(failure.retriable).toBe(false);
     expect(failure.message).toContain('stopped after 1 of 3 conversations');
+    expect(failure.message).toContain('conversation c2 may be part-evaluated');
     expect(failure.message).toContain('reached its monthly AI budget');
     // c1's supervise + rubric spend survives the stop.
     expect(failure.costUsd).toBeCloseTo(0.03, 6);
@@ -206,5 +213,22 @@ describe('spend caps (Sunrise 0.15.0)', () => {
     vi.mocked(superviseConversation).mockRejectedValueOnce(new Error('no scorable turns'));
     const result = await executeEvalSweep(step(), ctx());
     expect(result.output).toMatchObject({ sweptConversations: 1, failedConversations: 1 });
+  });
+
+  it('counts what a refused pass spent before the refusal', async () => {
+    // The rubric pass on c1 judged some turns, then met the cap: it carries their cost.
+    vi.mocked(rubricScoreConversation).mockRejectedValueOnce(
+      new SpendCapRefusedError('global_budget_exceeded', undefined, {
+        costUsd: 0.04,
+        tokensUsed: 80,
+      })
+    );
+    const failure = (await executeEvalSweep(step(), ctx()).catch(
+      (e: unknown) => e
+    )) as ExecutorError;
+    expect(failure.code).toBe('global_budget_exceeded');
+    // c1's supervise (0.02 / 100) plus the refused rubric pass's own spend (0.04 / 80).
+    expect(failure.costUsd).toBeCloseTo(0.06, 6);
+    expect(failure.tokensUsed).toBe(180);
   });
 });
