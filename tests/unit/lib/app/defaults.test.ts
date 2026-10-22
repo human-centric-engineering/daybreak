@@ -34,10 +34,14 @@
  * - `lib/app/data-export.ts`     → the framework tier's Art. 15 manifest
  * - `lib/app/brand.ts`           → Daybreak's product name and legal entity
  * - `lib/app/platform-agents.ts` → the framework's platform agents (the rubric judge)
+ * - `lib/app/org-export.ts`      → the framework tier's org-export manifest
+ * - `lib/app/owner-classification.ts` → the framework's user-linked models (§115)
+ * - `lib/app/capability-seed-pairs.ts` → the framework boot seed's parity exemption
  *
  * Each delegates to a reserved-empty leaf seam (`leaf-bootstrap.ts`,
  * `leaf-admin-nav.ts`, `leaf-data-export.ts`, `leaf-brand.ts`,
- * `leaf-platform-agents.ts`) which carries the
+ * `leaf-platform-agents.ts`, `leaf-org-export.ts`, `leaf-owner-classification.ts`,
+ * `leaf-capability-seed-pairs.ts`) which carries the
  * no-op contract forward for leaf forks — those rows are here too. See the
  * Daybreak banner in CLAUDE.md.
  *
@@ -47,6 +51,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, it, expect, afterEach, vi } from 'vitest';
+import { scaffoldsOnDisk } from '@/tests/helpers/app-scaffolds';
 import { registerAppRateLimits } from '@/lib/app/rate-limit';
 import { registerAppTenantResolver } from '@/lib/app/tenant-resolver';
 import { hasTenantResolver } from '@/lib/tenancy/resolver';
@@ -64,7 +69,6 @@ import { initLeafApp } from '@/lib/app/leaf-bootstrap';
 import { publicNavItems, footerNavItems, footerLegalItems } from '@/lib/app/public-nav';
 import { protectedNavItems } from '@/lib/app/protected-nav';
 import { appAuthLandingRoute, appAuthLandingLabel } from '@/lib/app/auth-landing';
-import { emailOverrides } from '@/lib/app/emails';
 import { initApp } from '@/lib/app/bootstrap';
 import { initAppKnowledgeAccessContributors } from '@/lib/app/knowledge-access-contributors';
 import { initAppGuardFloorContributors } from '@/lib/app/guard-floor-contributors';
@@ -88,18 +92,28 @@ import {
   leafOwnerlessSurfaceExceptions,
 } from '@/lib/app/leaf-ci';
 import { occupiedTiers } from '@/lib/app/reserved-tiers';
+import { APP_CAPABILITY_PAIRS, APP_UNCHECKED_SEEDS } from '@/lib/app/capability-seed-pairs';
+import { LEAF_CAPABILITY_PAIRS, LEAF_UNCHECKED_SEEDS } from '@/lib/app/leaf-capability-seed-pairs';
+import { initLeafOwnerClassification } from '@/lib/app/leaf-owner-classification';
 import { initAppUserCreatedHooks } from '@/lib/app/user-created';
-import {
-  collectLeafSubjectData,
-  initLeafSubjectSources,
-  leafOrgSources,
-} from '@/lib/app/leaf-data-export';
+import { collectLeafSubjectData, initLeafSubjectSources } from '@/lib/app/leaf-data-export';
+import { initLeafOrgSources } from '@/lib/app/leaf-org-export';
 import {
   getAppSubjectSources,
   getAppExcludedSubjectSources,
   __resetAppSubjectSourceRegistryForTests,
 } from '@/lib/privacy/subject-source-registry';
+import {
+  getAppOrgSources,
+  getAppExcludedOrgSources,
+  appOrgDeclarationsFailed,
+  __resetAppOrgSourceRegistryForTests,
+} from '@/lib/privacy/org-source-registry';
 import { getAppJobs, __resetAppJobsForTests } from '@/lib/orchestration/maintenance/app-jobs';
+import {
+  getErasureCleanupHooks,
+  __resetErasureCleanupHooksForTests,
+} from '@/lib/privacy/erasure-hooks';
 import { getEffectiveRateLimitPolicy, RATE_LIMIT_POLICY } from '@/lib/security/rate-limit-policy';
 import {
   hasProviderEligibilityResolver,
@@ -127,6 +141,16 @@ import {
   __resetAccountSectionRegistryForTests,
 } from '@/lib/account-sections/registry';
 import { initAppAuthorizationPolicy } from '@/lib/app/authorization';
+import { ORG_TIER_ADMIN_PAGES, adminPageTier } from '@/lib/auth/admin-tier';
+import {
+  getAppOrgTierAdminPages,
+  orgTierAdminPages,
+  __resetAppOrgTierAdminPagesForTests,
+} from '@/lib/auth/org-tier-admin-pages';
+import {
+  appOwnerClassifications,
+  __resetAppOwnerClassificationForTests,
+} from '@/lib/db/owner-classification';
 import {
   DEFAULT_AUTHORIZATION_POLICY,
   getAuthorizationPolicy,
@@ -293,7 +317,12 @@ const SEAM_DEFAULTS: SeamDefault[] = [
   {
     seam: 'lib/app/emails.ts',
     risk: 'a stray override would swap an auth email for every install',
-    assert: () => expect(emailOverrides).toEqual({}),
+    assert: async () => {
+      // `importActual`, NOT a plain import: tests/setup.ts pins this seam to
+      // `{}` for every other file (#895), so a plain import would assert the pin.
+      const seam = await vi.importActual<typeof import('@/lib/app/emails')>('@/lib/app/emails');
+      expect(seam.emailOverrides).toEqual({});
+    },
   },
   {
     seam: 'lib/app/leaf-data-export.ts',
@@ -302,9 +331,6 @@ const SEAM_DEFAULTS: SeamDefault[] = [
       expect(await collectLeafSubjectData({ userId: 'user-1', email: 'user@example.com' })).toEqual(
         {}
       );
-      // The org-export half (Hub t-134): a leaf's org sources ship empty, so a
-      // vanilla Daybreak org export carries the framework's tables and nothing else.
-      expect(leafOrgSources()).toEqual({ sources: [], excluded: [] });
       // The declaration half (#533), asserted as "this seam changes nothing"
       // rather than "the registry is empty". Reading the registry TRIGGERS the
       // lazy init, which runs the framework tier as well — so an emptiness
@@ -360,6 +386,89 @@ const SEAM_DEFAULTS: SeamDefault[] = [
       ].sort();
 
       expect(accounted).toEqual(frameworkModels);
+    },
+  },
+  {
+    seam: 'lib/app/org-export.ts',
+    // PINNED (Daybreak fills this bridge, Sunrise 0.15.0 §109 t-737): it registers the framework
+    // tier's org-export manifest, then delegates to the reserved `leaf-org-export.ts` (row below).
+    // What is pinned is that the registry accounts for EXACTLY the framework's `orgId` models,
+    // derived from the schema on disk for the same reason as the `data-export.ts` row above.
+    risk: 'a stray source would read a table into every install\u2019s org export \u2014 and pre-account for an orgId model nobody decided about, silencing the org-manifest coverage rule for it',
+    assert: () => {
+      const schemaDir = path.join(process.cwd(), 'prisma', 'schema');
+      const frameworkModels = readdirSync(schemaDir)
+        .filter((file) => file.startsWith('framework-') && file.endsWith('.prisma'))
+        .flatMap((file) => [
+          ...readFileSync(path.join(schemaDir, file), 'utf8').matchAll(/^model\s+(\w+)\s*\{/gm),
+        ])
+        .map((match) => match[1])
+        .sort();
+      expect(frameworkModels.length).toBeGreaterThan(5);
+
+      __resetAppOrgSourceRegistryForTests();
+      // The reads trigger the lazy init, so this exercises the REAL file.
+      const accounted = [
+        ...getAppOrgSources().map((entry) => entry.model),
+        ...getAppExcludedOrgSources().map((entry) => entry.model),
+      ].sort();
+      expect(accounted).toEqual(frameworkModels);
+      expect(appOrgDeclarationsFailed()).toBe(false);
+    },
+  },
+  {
+    seam: 'lib/app/leaf-org-export.ts',
+    risk: 'a stray source would read a leaf table into every Daybreak leaf\u2019s org export, and a stray declaration would pre-account for an orgId model nobody decided about',
+    assert: () => {
+      // "This seam changes nothing", not "the registry is empty": the read runs the bridge, which
+      // registers the framework's manifest first (pinned in the row above).
+      __resetAppOrgSourceRegistryForTests();
+      const sourcesBefore = getAppOrgSources();
+      const excludedBefore = getAppExcludedOrgSources();
+      initLeafOrgSources();
+      expect(getAppOrgSources()).toEqual(sourcesBefore);
+      expect(getAppExcludedOrgSources()).toEqual(excludedBefore);
+    },
+  },
+  {
+    seam: 'lib/app/owner-classification.ts',
+    risk: 'a stray classification would switch the data layer’s owner check on for a model nobody decided was private — refusing reads the product means to allow — or pre-classify a fork model nobody looked at, silencing the coverage guard for it',
+    // PINNED (Daybreak fills this bridge, Sunrise 0.15.0 §115): it classifies the framework's
+    // user-linked models, then delegates to the reserved `leaf-owner-classification.ts` (row
+    // below). What is pinned is the exact set, by model name (the ESLint boundary forbids this
+    // app-shell file importing `@/lib/framework`), and that none is enforced: switching the data
+    // layer's owner check on for a framework model is a reviewed change of its own.
+    assert: () => {
+      __resetAppOwnerClassificationForTests();
+      // The read triggers the lazy init, so this exercises the REAL file.
+      const classified = appOwnerClassifications();
+      expect(Object.keys(classified).sort()).toEqual([
+        'FacilitationGraph',
+        'FacilitationGraphVersion',
+        'FacilitationPolicy',
+        'FrameworkJourneyNudge',
+        'JourneyEvent',
+        'ModuleVersion',
+        'ModuleWorkflowBinding',
+        'SlotValue',
+        'StructureChangeProposal',
+        'UserJourney',
+        'UserNodeState',
+      ]);
+      expect(
+        Object.values(classified).filter((c) => c.kind === 'personal' && c.enforced === true)
+      ).toEqual([]);
+    },
+  },
+  {
+    seam: 'lib/app/leaf-owner-classification.ts',
+    risk: 'a stray classification would switch the data layer’s owner check on for a leaf model nobody decided was private, or pre-classify one nobody looked at, silencing the coverage guard for it',
+    assert: () => {
+      // "This seam changes nothing": the read runs the bridge, framework first (row above).
+      __resetAppOwnerClassificationForTests();
+      const before = appOwnerClassifications();
+      initLeafOwnerClassification();
+      expect(appOwnerClassifications()).toEqual(before);
     },
   },
   {
@@ -429,6 +538,15 @@ const SEAM_DEFAULTS: SeamDefault[] = [
       __resetAppJobsForTests();
       // getAppJobs() triggers the lazy init, so this exercises the REAL seam.
       expect(getAppJobs()).toEqual([]);
+    },
+  },
+  {
+    seam: 'lib/app/erasure.ts',
+    risk: 'a stray hook would run inside every account erasure on every install \u2014 deleting external data, or scrubbing rows, that the install never asked it to touch',
+    assert: () => {
+      __resetErasureCleanupHooksForTests();
+      // getErasureCleanupHooks() triggers the lazy init, so this exercises the REAL seam.
+      expect(getErasureCleanupHooks()).toEqual([]);
     },
   },
   {
@@ -543,6 +661,18 @@ const SEAM_DEFAULTS: SeamDefault[] = [
     },
   },
   {
+    seam: 'lib/app/admin-tier.ts',
+    risk: 'a stray pattern would open that admin page to every org OWNER/ADMIN on every install — the page only, since its API routes declare their own tier, but a page core meant for platform admins alone',
+    assert: () => {
+      __resetAppOrgTierAdminPagesForTests();
+      // The read triggers the lazy init, so this exercises the REAL seam.
+      expect(getAppOrgTierAdminPages()).toEqual([]);
+      // …and the roster the layout reads and hands the gate is exactly core's.
+      expect(orgTierAdminPages()).toEqual(ORG_TIER_ADMIN_PAGES);
+      expect(adminPageTier('/admin/users', orgTierAdminPages())).toBeNull();
+    },
+  },
+  {
     seam: 'lib/app/api-key-scopes.ts',
     risk: 'a stray scope would be mintable on every install \u2014 and a name colliding with a core scope would change what an existing key satisfies',
     assert: () => {
@@ -562,6 +692,25 @@ const SEAM_DEFAULTS: SeamDefault[] = [
     // or `.context/app/` in THIS repo is a real defect that guard is what catches.
     risk: 'a stray entry would switch OFF the guard that keeps a reserved tier empty — for Daybreak that means silently permitting core, or this repo itself, to occupy the leaf surface it holds in trust for its own forks',
     assert: () => expect(occupiedTiers).toEqual(['lib/framework', '.context/framework']),
+  },
+  {
+    seam: 'lib/app/capability-seed-pairs.ts',
+    risk: 'a stray pair fails the capability parity test on every install (for a slug no seed writes it is a pair nothing wrote, for a slug core already pairs a duplicate), and a stray unchecked seed switches the parity checks off for that seed',
+    // PINNED (Daybreak fills this bridge, Sunrise #1013): its one entry is the framework boot
+    // seed, which reconciles through the app client (lib/framework/capabilities/seed-parity.ts
+    // says why). Anything else here would switch the parity checks off for another seed.
+    assert: () => {
+      expect(APP_CAPABILITY_PAIRS).toEqual([]);
+      expect(Object.keys(APP_UNCHECKED_SEEDS)).toEqual(['_framework/000-framework-boot.ts']);
+    },
+  },
+  {
+    seam: 'lib/app/leaf-capability-seed-pairs.ts',
+    risk: 'a stray pair fails the capability parity test on every Daybreak leaf, and a stray unchecked seed switches the parity checks off for that seed',
+    assert: () => {
+      expect(LEAF_CAPABILITY_PAIRS).toEqual([]);
+      expect(LEAF_UNCHECKED_SEEDS).toEqual({});
+    },
   },
   {
     seam: 'lib/app/brand.ts',
@@ -662,6 +811,7 @@ const SEAM_DEFAULTS: SeamDefault[] = [
 afterEach(() => {
   __resetNavRegistryForTests();
   __resetAccountSectionRegistryForTests();
+  __resetAppOrgTierAdminPagesForTests();
   __resetAuthorizationPolicyForTests();
 });
 
@@ -670,7 +820,10 @@ describe('lib/app/ seams ship empty', () => {
     await assert();
   });
 
-  it('nothing but this file escapes the suite-wide brand-seam pin', () => {
+  it.each([
+    ['brand', 'brand'],
+    ['emails', 'email-override'],
+  ])('nothing but this file escapes the suite-wide %s-seam pin', (seam, label) => {
     // tests/setup.ts mocks `@/lib/app/brand` to null for EVERY test file, so
     // that no core test can read a fork's brand and fail for a reason the fork
     // cannot fix (#660/#661). That guarantee holds across all ~1095 test files
@@ -695,7 +848,9 @@ describe('lib/app/ seams ship empty', () => {
     // instance per round. vitest exposes exactly `unmock` and `doUnmock` for
     // removing a mock, so anchoring on `(?:do)?unmock` is exhaustive over the API
     // rather than over the spellings someone happened to think of.
-    const seamPath = String.raw`['"\`]@/lib/app/brand['"\`]`;
+    // The emails pin (#895) is the same shape and the same hazard, so both
+    // seams share the guard.
+    const seamPath = String.raw`['"\`]@/lib/app/` + seam + String.raw`['"\`]`;
     const unmockRe = new RegExp(String.raw`\bvi\s*\.\s*(?:do)?[Uu]nmock\s*\(\s*` + seamPath);
     const actualRe = new RegExp(String.raw`importActual[\s\S]{0,80}?` + seamPath);
 
@@ -722,9 +877,9 @@ describe('lib/app/ seams ship empty', () => {
 
     expect(
       offenders,
-      'These test files escape the brand-seam pin in tests/setup.ts. A fork that ' +
-        'fills lib/app/brand.ts would see its own brand here and fail a core test ' +
-        'it cannot fix — the exact class #660 is about. Re-doMock the null values ' +
+      `These test files escape the ${label}-seam pin in tests/setup.ts. A fork that ` +
+        `fills lib/app/${seam}.ts would see its own values here and fail a core test ` +
+        'it cannot fix — the exact class #660 is about. Re-doMock the pinned values ' +
         'instead of unmocking, and leave importActual to this file.'
     ).toEqual([]);
   });
@@ -732,11 +887,10 @@ describe('lib/app/ seams ship empty', () => {
   it('has a row for every seam file in lib/app/', () => {
     // Drift guard: adding a `lib/app/*` seam without adding a row above would
     // leave it silently unprotected. Reads the directory rather than trusting
-    // the table to be complete.
-    const dir = path.join(process.cwd(), 'lib/app');
-    const onDisk = readdirSync(dir)
-      .filter((f) => /\.(ts|mjs)$/.test(f) && !f.endsWith('.d.ts'))
-      .map((f) => `lib/app/${f}`);
+    // the table to be complete, through the classifier the VERSIONING.md guard
+    // uses (#734): a nested `lib/app/<name>/` seam is owed a row keyed
+    // `lib/app/<name>/`, and a file of any extension is owed one too.
+    const onDisk = scaffoldsOnDisk();
 
     const covered = new Set(SEAM_DEFAULTS.map((s) => s.seam));
     const missing = onDisk.filter((f) => !covered.has(f) && !UNASSERTED_SEAMS.has(f));

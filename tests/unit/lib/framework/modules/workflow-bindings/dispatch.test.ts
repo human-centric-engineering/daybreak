@@ -74,6 +74,7 @@ vi.mock('@/lib/logging', () => ({
 }));
 
 import { runModuleWorkflowBindings } from '@/lib/framework/modules/workflow-bindings/dispatch';
+import { getSubjectReadScope, runAsSubject } from '@/lib/auth/subject-context';
 import { WorkflowStatus } from '@/types/orchestration';
 
 const VALID_DEFINITION = {
@@ -249,5 +250,42 @@ describe('skip paths (never abort the others)', () => {
       expect.objectContaining({ workflowId: 'wf-1', reason: 'execution_create_failed' }),
     ]);
     expect(drainEngineMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('owner layer (Sunrise §115)', () => {
+  it('drains the binding’s workflow across owners when a narrowed member’s request triggers it', async () => {
+    seedWorkflow('wf-1');
+    seedBinding('wf-1');
+    const scopes: string[] = [];
+    drainEngineMock.mockImplementationOnce(async () => {
+      scopes.push((await getSubjectReadScope()).kind);
+    });
+
+    await runAsSubject(
+      {
+        principal: { userId: 'member-1', credential: 'session' },
+        filter: { userId: 'member-1' },
+        resolveFilter: () => Promise.resolve({ userId: 'member-1' }),
+        unattributedReads: {
+          conversation: false,
+          dataset: false,
+          execution: false,
+          experiment: false,
+          webhookDelivery: false,
+          webhookSubscription: false,
+        },
+      },
+      async () => {
+        // Prove the population: outside the crossing, this request IS narrowed.
+        expect((await getSubjectReadScope()).kind).toBe('subject');
+        await runModuleWorkflowBindings('reading', 'module.completed', { userId: 'member-1' });
+      }
+    );
+    await vi.waitFor(() => expect(scopes).toHaveLength(1));
+
+    // Narrowed ('subject'), the engine's resume read of an execution owned by the binding's
+    // author would be refused; 'admitted' is the declared crossing.
+    expect(scopes).toEqual(['admitted']);
   });
 });

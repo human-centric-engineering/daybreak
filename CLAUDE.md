@@ -56,23 +56,26 @@
 > - The `lib/app/*` **leaf** scaffolds (`env.ts`, `capabilities.ts`, `context-contributors.ts`,
 >   `leaf-bootstrap.ts`, `leaf-admin-nav.ts`, …) — Sunrise ships them empty; Daybreak keeps them
 >   empty for the app. Filling one collides with a leaf's registrations on a Daybreak upgrade.
->   **Exception — the seven `lib/app/*` _bridges_ Daybreak DOES fill. This list is the
+>   **Exception — the ten `lib/app/*` _bridges_ Daybreak DOES fill. This list is the
 >   roster; count bridges here, not from an ordinal in a docblock:** `bootstrap.ts` (server boot →
 >   `initFramework()`), `admin-nav.ts` (client sidebar → the framework nav section),
 >   `data-export.ts` (GDPR Art. 15 subject access → the framework's own manifest at
 >   `lib/framework/privacy/export-sources.ts`, declared through core's
->   `registerAppSubjectSources({ tier: 'framework' })`; and the ORG export →
->   `lib/framework/privacy/org-sources.ts`, pulled through `collectAppOrgSources()` by a
->   fork-first seam Daybreak carries in `lib/privacy/org-sources.ts` — see
->   `.context/framework/upstream-asks.md`), `brand.ts` (product name + legal
+>   `registerAppSubjectSources({ tier: 'framework' })`), `org-export.ts` (the ORG export →
+>   `lib/framework/privacy/org-sources.ts`, declared through core's
+>   `registerAppOrgSources({ tier: 'framework' })`; Sunrise §109), `brand.ts` (product name + legal
 >   entity → `lib/brand.ts`), `db-drift.ts` (Prisma-unmodelled DB objects → the framework's
 >   drift probes), `ci.ts` (coverage exclusions + always-run tests → `vitest.config.ts`
->   and `ALWAYS_RUN_TESTS`; Sunrise #759/#762), and `platform-agents.ts` (agents every org gets
->   its own instance of → `lib/framework/platform-agents.ts`, the rubric judge; Sunrise §116). A framework registration that must run in a realm
+>   and `ALWAYS_RUN_TESTS`; Sunrise #759/#762), `platform-agents.ts` (agents every org gets
+>   its own instance of → `lib/framework/platform-agents.ts`, the rubric judge; Sunrise §116),
+>   `owner-classification.ts` (the framework's user-linked models → the owner layer,
+>   `lib/framework/privacy/owner-classification.ts`; Sunrise §115) and `capability-seed-pairs.ts`
+>   (the framework boot seed's seed-parity exemption, test-only; Sunrise #1013). A framework registration that must run in a realm
 >   `initFramework()` can't reach — server-boot, the client sidebar, a lazy seam core owns the
 >   init of, or a static function core imports directly — has nowhere else to go; each bridge
 >   delegates to a reserved leaf hook (`leaf-bootstrap.ts` / `leaf-admin-nav.ts` /
->   `leaf-data-export.ts` / `leaf-brand.ts` / `leaf-platform-agents.ts`) so the leaf's own registrations never collide.
+>   `leaf-data-export.ts` / `leaf-org-export.ts` / `leaf-brand.ts` / `leaf-platform-agents.ts` /
+>   `leaf-owner-classification.ts` / `leaf-capability-seed-pairs.ts`) so the leaf's own registrations never collide.
 >   `brand.ts` is the one bridge where the leaf hook **overrides** rather than appends — brand
 >   identity is single-valued, so a leaf replaces Daybreak's name, it does not compose with it.
 > - `prisma/schema/app.prisma` + `app_…` migrations, `app/brand-theme.css`, and **`.context/app/`**
@@ -107,17 +110,19 @@
 >
 > ### The `hce-hub:bootstrap` block below is Daybreak's
 >
-> Sunrise 0.12.0 ships a `hce-hub:bootstrap` block under "MCP Integration" that, upstream,
-> names **Sunrise** (slug `sunrise`) as "this project". In this repo that block has been
-> **regenerated for Daybreak** (slug `daybreak`, project id `cmu701e28000404jjuljax1k4`)
-> with the Hub's `get_project_bootstrap` tool — its own marker comment says to do exactly
-> that, so it is a designed regenerate-in-place seam, not a platform edit. The Hub is
-> Daybreak's planning system of record; do not claim, plan or ship Daybreak work through
-> Sunrise's Hub project. The Sunrise-owned intro paragraph just above the markers (skip the
-> section when no `hce-hub` server is configured) is still Sunrise's text and still true —
-> Daybreak configures the server in `.mcp.json`. On an upstream sync, resolve any conflict
-> inside the markers by keeping Daybreak's block, then re-run `get_project_bootstrap` if
-> the Hub's wording has moved on.
+> Since Sunrise 0.15.0 this file upstream carries **no** Hub project identity: its "HCE Hub
+> coordination (optional)" section points a Hub checkout at a gitignored `CLAUDE.local.md`,
+> or lets a fork commit its own bootstrap instead. Daybreak takes the second road — the
+> block between the `hce-hub:bootstrap` markers is **Daybreak's** (slug `daybreak`, project
+> id `cmu701e28000404jjuljax1k4`), generated with the Hub's `get_project_bootstrap` tool, so
+> every checkout and every teammate's agent sees the same project. The Hub is Daybreak's
+> planning system of record; do not claim, plan or ship Daybreak work through Sunrise's Hub
+> project. Its duplicated "Gates" list sits beside Sunrise's own "Gates before a PR" section
+> on purpose: the block is regenerated verbatim, never hand-trimmed. On an upstream sync,
+> keep Daybreak's block on any conflict, then re-run `get_project_bootstrap` if the Hub's
+> wording has moved on. **A leaf forking Daybreak inherits this block and must replace it
+> with its own** (or move to `CLAUDE.local.md`) — left as is, it points the leaf's agents at
+> Daybreak's project.
 
 Instructions for Claude Code when working in this repository.
 
@@ -160,7 +165,7 @@ Instructions for Claude Code when working in this repository.
 - **Server components by default** — add `'use client'` only when needed
 - **No N+1 client-side fetches** — list/table pages get all data from a single enriched list endpoint; never fire per-row API calls in `useEffect`
 - **Contextual help on form fields** — every non-trivial form field gets a `<FieldHelp>` ⓘ popover; see `.context/ui/contextual-help.md`
-- **New `User` relations need an `onDelete` policy _and_ an export disposition** — any new model with a `userId`/`createdBy` FK must (1) declare `onDelete: Cascade` (personal data) or `onDelete: SetNull` (retained config/audit, FK nullable) — omitting it defaults to `Restrict` and silently breaks GDPR erasure; and (2) be added to `SUBJECT_DATA_SOURCES` in `lib/privacy/export-sources.ts`, which decides what a data subject receives from it. The second is enforced — `tests/unit/lib/privacy/export-sources.test.ts` parses the schema and fails until the model is listed. **Never delete a row from that manifest to make the test pass**; that ships a silently short answer to a data subject. Never call `prisma.user.delete()` directly — route account deletion through `eraseUser()`, and subject access through `exportUserData()`. See `.context/privacy/data-erasure.md` and `.context/privacy/data-export.md`.
+- **New `User` relations need an `onDelete` policy _and_ an export disposition** — any new model with a `userId`/`createdBy` FK must (1) declare `onDelete: Cascade` (personal data) or `onDelete: SetNull` (retained config/audit, FK nullable) — omitting it defaults to `Restrict` and silently breaks GDPR erasure; and (2) be added to `SUBJECT_DATA_SOURCES` in `lib/privacy/export-sources.ts`, which decides what a data subject receives from it. The second is enforced — `tests/unit/lib/privacy/export-sources.test.ts` parses the schema and fails until the model is listed. **Never delete a row from that manifest to make the test pass**; that ships a silently short answer to a data subject. Never call `prisma.user.delete()` directly — route account deletion through `requestUserErasure()` (which records it, then runs `eraseUser()`), and subject access through `exportUserData()`. See `.context/privacy/data-erasure.md` and `.context/privacy/data-export.md`.
 - **`CHANGELOG.md` follows the public surface** — when a PR adds, removes, or changes a named seam, a documented public API, or a published Prisma model interface (see [`VERSIONING.md`](./VERSIONING.md#public-surface-contract-tight-definition)), append a bullet to `CHANGELOG.md`'s `## [Unreleased]` section as part of the same PR using [Keep-a-Changelog](https://keepachangelog.com/en/1.1.0/) categories (Added / Changed / Deprecated / Removed / Fixed / Security). PRs that don't touch the public surface (internal refactors, tests, docs, chores) deliberately do **not** belong in the CHANGELOG — adding noise dilutes the signal forks rely on. `/pre-pr` step 5d flags public-surface diffs that omit a CHANGELOG entry.
 
 ## MCP Integration
@@ -175,12 +180,27 @@ Use for: diagnostics, route inspection, runtime errors, browser automation, Next
 
 Use for external library docs: `resolve-library-id` → `query-docs`. Essential for current Next.js/Prisma/Tailwind patterns.
 
-> **The next section applies only when the `hce-hub` MCP server is configured
-> for this checkout.** Sunrise is open source: if you have forked it, or are
-> contributing without access to the HCE Hub, skip the whole section that
-> follows — including its "fix your MCP config" instruction. Nothing else in
-> this file depends on it; the development workflow without the Hub is
-> [`.context/workflow.md`](./.context/workflow.md).
+## HCE Hub coordination (optional)
+
+Some checkouts are coordinated through the HCE Hub over the `hce-hub` MCP
+server. **This file deliberately carries no Hub project identity**: every fork
+inherits it, and a block naming Sunrise's own project would point a fork's
+agents at the wrong project and the platform maintainers' process.
+
+- **No `hce-hub` tools in your tool list** — skip this section. Nothing else
+  here depends on it; the workflow without the Hub is
+  [`.context/workflow.md`](./.context/workflow.md).
+- **`hce-hub` tools present** — the checkout's bootstrap (project identity,
+  process tiers, gates) lives in `CLAUDE.local.md`, which is gitignored and
+  loaded alongside this file. If it is missing, generate it with the Hub's
+  `get_project_bootstrap` tool and save the block there before planning
+  anything.
+
+A Hub-coordinated fork may instead commit its own bootstrap to its copy of this
+file. Sunrise no longer ships the `hce-hub:bootstrap` markers, so once a fork
+has resolved the one sync that removed Sunrise's block (keep your own block
+when it conflicts), later syncs leave it alone. See
+[`CUSTOMIZATION.md`](./CUSTOMIZATION.md#1-first-steps).
 
 <!-- hce-hub:bootstrap — regenerate with the Hub's `get_project_bootstrap` tool and replace everything between these markers -->
 
@@ -212,10 +232,21 @@ copy is the thing that goes stale.
 
 - `hub://process/core` · HCE process — core. **Read its `read.judgement` section first.**
 - `hub://process/sunrise-fork` · HCE process — building on Sunrise.
+- `hub://process/release` · HCE process — releases.
+- `hub://process/triage` · HCE process — issue triage.
 
 Every rule is addressable by the id printed beside its heading (`fp1`,
 `flow.gates`, `read.judgement`). Cite them by id rather than re-explaining
 them.
+
+### Where work that belongs to no feature goes
+
+This project's standing features. What each one holds, and the test for
+choosing between them, is `model.standing` in the core process.
+
+- **Upstream** · §31 `f-upstream`
+- **Releases** · §35 `f-release-cuts`
+- **Housekeeping** · §36 `f-housekeeping`
 
 ### The shape, if the Hub is unreachable
 
@@ -243,6 +274,19 @@ with a finding, when to stop reviewing, and what must never be amended are in
 `flow.gates` and `flow.review-rounds`.
 
 <!-- /hce-hub:bootstrap -->
+
+## Gates before a PR
+
+In this order. Read **exit codes**, not piped output — a pipeline that swallows
+a failure reports success.
+
+1. `/pre-pr` — this repo's own checklist (`npm run validate` plus a scoped
+   test run and the anti-pattern scans).
+2. `/security-review`
+3. `/code-review`
+4. `npm run format`
+
+Fix review findings as new commits; never amend a reviewed commit.
 
 ## Essential Commands
 
@@ -325,7 +369,7 @@ import { FormError } from './form-error'; // ❌ no exception for siblings
 | Rate-limit primitives | `authLimiter`, `apiLimiter`, `chatLimiter`, etc. (per-flow sub-caps) | `lib/security/rate-limit.ts`            |
 | Client IP             | `getClientIP()`                                                      | `lib/security/ip.ts`                    |
 | Sanitization          | `escapeHtml()`, `sanitizeUrl()`                                      | `lib/security/sanitize.ts`              |
-| User erasure (GDPR)   | `eraseUser()`                                                        | `lib/privacy/erase-user.ts`             |
+| User erasure (GDPR)   | `requestUserErasure()` → `eraseUser()`                               | `lib/privacy/erasure-requests.ts`       |
 | Subject access (GDPR) | `exportUserData()`                                                   | `lib/privacy/export-user.ts`            |
 | Server fetch          | `serverFetch()`                                                      | `lib/api/server-fetch.ts`               |
 | Logging               | `logger.info()`, `logger.error()`                                    | `lib/logging/index.ts`                  |
@@ -486,6 +530,7 @@ All commands default to branch diff mode but accept file/folder paths. The test-
 | Security                 | `.context/security/`                                      | Rate limiting, headers, CORS                                                                                                                     |
 | Privacy                  | `.context/privacy/`                                       | Consent, erasure (Art. 17), subject access (Art. 15) and its source manifest; org export / erasure and the org manifest (§106)                   |
 | Tenancy: Org Identity    | `.context/tenancy/identity.md`                            | `Org` / `OrgMembership`, the install-org invariant and its role rule, the lifecycle API and its rules, credential `orgId`, what a fork may add   |
+| Tenancy: Support Access  | `.context/tenancy/support-access.md`                      | An org's consent for vendor support to enter it: `OrgSupportGrant`, who may grant and revoke, levels, bounds, privacy                            |
 | Tenancy: Context         | `.context/tenancy/context.md`                             | `getTenantContext` / `runAsOrg` / `runAsSystem` / `forEachOrg`, the guards' read rule, the `x-sunrise-org` resolver seam, the data layer         |
 | Tenancy: Row Isolation   | `.context/tenancy/isolation.md`                           | The `org_isolation` policy, `db:tenancy:enable\|disable`, the required role split + `MIGRATE_DATABASE_URL`, the derived T-series drift probes    |
 | Logging                  | `.context/logging/`                                       | Structured logging, request ctx                                                                                                                  |
@@ -511,7 +556,7 @@ All commands default to branch diff mode but accept file/folder paths. The test-
 | Cost Estimation          | `.context/orchestration/cost-estimation.md`               | Generic pre-run USD estimate service; empirical/heuristic modes; trigger-UI recipe                                                               |
 | Step Provenance          | `.context/orchestration/provenance.md`                    | `output.sources` contract, engine capture, approval/trace UI pills, opt-in guard rule                                                            |
 | Agent Field Registry     | `.context/orchestration/agent-fields.md`                  | Single source of truth for `AiAgent` config fields; how to add a field, derived vs parity-tested surfaces, fork seam                             |
-| Platform Agents          | `.context/orchestration/platform-agents.md`               | Sunrise's own agents as code definitions, one instance per org; who owns which field; the reconcile, its three callers and its fork seam         |
+| Platform Agents          | `.context/orchestration/platform-agents.md`               | Sunrise's own agents as code definitions, one instance per org; who owns which field; the reconcile, its five callers and its fork seam          |
 | Patterns & Steps         | `.context/orchestration/patterns-and-steps.md`            | The 21 canonical patterns, step→pattern relationships, author guidance                                                                           |
 | Orchestration Engine     | `.context/orchestration/engine.md`                        | Runtime executor, registry, events, strategies                                                                                                   |
 | Tracing (OTEL plug-in)   | `.context/orchestration/tracing.md`                       | Tracer interface, no-op default, OTEL adapter, span tree, attributes                                                                             |
@@ -594,12 +639,10 @@ All commands default to branch diff mode but accept file/folder paths. The test-
 - Expected — `.npmrc` has `legacy-peer-deps=true`
 - No action required
 
-<!-- BEGIN:nextjs-agent-rules -->
+## Next.js agent rules
 
-# This is NOT the Next.js you know
+`next dev` (16.4+) keeps a version-matched agent-rules block in `AGENTS.md` and
+no longer writes one here. Commit that file when it changes; this import is how
+Claude Code reads it.
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
-
-This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
-
-<!-- END:nextjs-agent-rules -->
+@AGENTS.md

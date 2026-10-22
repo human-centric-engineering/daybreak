@@ -26,6 +26,7 @@ import { isRecord } from '@/lib/utils';
 import { WorkflowStatus } from '@/types/orchestration';
 import { workflowDefinitionSchema } from '@/lib/validations/orchestration';
 import { drainEngine } from '@/lib/orchestration/scheduling/scheduler';
+import { runAcrossOwners } from '@/lib/auth/subject-context';
 import { resolveMaxCostPerExecution } from '@/lib/orchestration/llm/cost-caps';
 
 /** Attribution source pinned on executions triggered by a module lifecycle event. */
@@ -163,13 +164,24 @@ export async function runModuleWorkflowBindings(
 
       // Fire-and-forget — the workflow runs asynchronously; identical crash handling
       // to the scheduler / inbound paths (drainEngine repairs the row on failure).
-      void drainEngine(
-        execution.id,
-        { id: workflow.id, slug: workflow.slug },
-        defParsed.data,
-        inputData,
-        binding.createdBy,
-        workflow.publishedVersion.id
+      //
+      // Across owners (Sunrise §115): a member's chat or feedback request starts this, and a
+      // fire-and-forget run inherits that member's narrowed subject. The execution is the
+      // binding's — owned by `binding.createdBy`, or by nobody — so the engine's own reads and
+      // repair writes of it would be refused as another person's row, and the workflow would
+      // never run. Core declares the same crossing for `resumeApprovedExecution()`.
+      const { publishedVersion } = workflow;
+      void runAcrossOwners(
+        "a module event runs its binding's workflow, not the triggering member's",
+        () =>
+          drainEngine(
+            execution.id,
+            { id: workflow.id, slug: workflow.slug },
+            defParsed.data,
+            inputData,
+            binding.createdBy,
+            publishedVersion.id
+          )
       );
 
       result.dispatched++;
