@@ -17,6 +17,7 @@ import { prisma } from '@/lib/db/client';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { logger } from '@/lib/logging';
 import { driveJudgeAgent } from '@/lib/orchestration/evaluations/judge-driver';
+import { isSpendCapCode, SpendCapRefusedError } from '@/lib/framework/shared/spend-caps';
 import { loadFrameworkConversation } from '@/lib/framework/facilitation/evaluation/conversation';
 import { listScorableTurns } from '@/lib/framework/facilitation/evaluation/turns';
 import { FRAMEWORK_RUBRIC_JUDGE_SLUG } from '@/lib/framework/facilitation/evaluation/rubric-judge';
@@ -82,6 +83,10 @@ export async function rubricScoreConversation(
     totalCostUsd += judged.costUsd;
     totalTokensUsed += judged.tokenUsage.input + judged.tokenUsage.output;
 
+    // A monthly spend cap is reached for every turn after this one too, so stop rather than skip.
+    if (judged.score === null && isSpendCapCode(judged.errorCode)) {
+      throw new SpendCapRefusedError(judged.errorCode);
+    }
     if (judged.score === null) {
       // The judge failed (provider down / malformed response) — skip this turn, don't abort.
       logger.warn('Skipping a turn whose rubric scoring failed', {

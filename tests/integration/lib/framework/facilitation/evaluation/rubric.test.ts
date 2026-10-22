@@ -21,6 +21,7 @@ import { rubricScoreConversation } from '@/lib/framework/facilitation/evaluation
 import { prisma } from '@/lib/db/client';
 import { listScorableTurns } from '@/lib/framework/facilitation/evaluation/turns';
 import { driveJudgeAgent } from '@/lib/orchestration/evaluations/judge-driver';
+import { SpendCapRefusedError } from '@/lib/framework/shared/spend-caps';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 
 const turn = (id: string) => ({ messageId: id, userQuestion: 'Q', aiResponse: 'A', citations: [] });
@@ -124,5 +125,24 @@ describe('rubricScoreConversation', () => {
     expect(result).toMatchObject({ scoredTurns: 1, skippedTurns: 1 });
     expect(prisma.frameworkConversationEval.upsert).toHaveBeenCalledTimes(1);
     expect(result.totalCostUsd).toBeCloseTo(0.002, 6);
+  });
+});
+
+describe('spend caps (Sunrise 0.15.0)', () => {
+  it('stops at a judge turn a cap refused rather than skipping it and judging the rest', async () => {
+    vi.mocked(driveJudgeAgent).mockResolvedValueOnce({
+      score: null,
+      reasoning: 'judge call error: org_budget_exceeded',
+      costUsd: 0,
+      tokenUsage: { input: 0, output: 0 },
+      errorCode: 'org_budget_exceeded',
+    });
+    const err = await rubricScoreConversation({ conversationId: 'c1', actorUserId: 'sys' }).catch(
+      (e: unknown) => e
+    );
+    expect(err).toBeInstanceOf(SpendCapRefusedError);
+    expect(err).toMatchObject({ code: 'org_budget_exceeded', status: 402 });
+    expect(driveJudgeAgent).toHaveBeenCalledTimes(1);
+    expect(prisma.frameworkConversationEval.upsert).not.toHaveBeenCalled();
   });
 });

@@ -14,7 +14,9 @@
  * CONVERSATION granularity — a single conversation runs all its passes to completion before the fence
  * can trip, so a very long conversation can overshoot the cap by one conversation's worth of judge
  * calls; keep `maxConversations` and per-conversation turn counts in mind when setting the budget. A
- * conversation that fails a pass (e.g. no scorable turns) is skipped, not fatal. Daybreak ships the
+ * conversation that fails a pass (e.g. no scorable turns) is skipped, not fatal — except a monthly
+ * spend cap's refusal (Sunrise 0.15.0), which every later conversation would meet too: the step
+ * stops there and fails under the cap's code. Daybreak ships the
  * step type but seeds NO workflow/schedule row — a fresh fork boots clean; the operator wires it when
  * they want it. (`tokensUsed` reports the supervisor + rubric judge tokens; the opt-in metric scorer
  * surfaces cost only, so its tokens are logged via the underlying judge calls, not re-summed here.)
@@ -29,6 +31,8 @@ import type { ExecutionContext } from '@/lib/orchestration/engine/context';
 import { registerStepType } from '@/lib/orchestration/engine/executor-registry';
 import { ExecutorError } from '@/lib/orchestration/engine/errors';
 import { prisma } from '@/lib/db/client';
+import { runAcrossOwners } from '@/lib/auth/subject-context';
+import { asSpendCapRefusal } from '@/lib/framework/shared/spend-caps';
 import { serviceAccountWhere } from '@/lib/auth/account';
 import { scoreConversation } from '@/lib/framework/facilitation/evaluation/score-conversation';
 import { superviseConversation } from '@/lib/framework/facilitation/evaluation/supervise';
@@ -95,6 +99,30 @@ export async function executeEvalSweep(
   const maxConversations = cfg.maxConversations ?? DEFAULT_MAX_CONVERSATIONS;
 
   const actorUserId = await resolveActorUserId(step, ctx.userId);
+  // The sweep evaluates the org's framework conversations, every member's, not the caller's own.
+  // Run by an org admin through the org-tier execute route, the engine runs under that admin's
+  // narrowed subject, and the owner layer (Sunrise §115) refuses the unconfined conversation and
+  // message reads the sweep and its passes make. A scheduled run has no subject; a platform admin
+  // is not narrowed — for both this changes nothing. The org wall stays where it is.
+  return runAcrossOwners(
+    "an eval sweep scores the org's framework conversations, not the caller's own",
+    () => sweep(step, ctx, { doScore, doSupervise, doRubric, maxConversations, actorUserId })
+  );
+}
+
+interface SweepPlan {
+  doScore: boolean;
+  doSupervise: boolean;
+  doRubric: boolean;
+  maxConversations: number;
+  actorUserId: string;
+}
+
+async function sweep(
+  step: WorkflowStep,
+  ctx: Readonly<ExecutionContext>,
+  { doScore, doSupervise, doRubric, maxConversations, actorUserId }: SweepPlan
+): Promise<StepResult> {
   const conversations = await listRecentUnscoredFrameworkConversations(maxConversations);
 
   let sweptConversations = 0;
@@ -121,6 +149,21 @@ export async function executeEvalSweep(
       }
       sweptConversations += 1;
     } catch (err) {
+      // A monthly spend cap refuses every conversation after this one too: stop, and fail the step
+      // with the cap's code (core's `ExecutorError` reads it off the cause), not retried, keeping
+      // what the sweep spent before the refusal.
+      const capRefusal = asSpendCapRefusal(err);
+      if (capRefusal) {
+        throw new ExecutorError(
+          step.id,
+          'framework_eval_sweep_spend_cap',
+          `framework_eval_sweep stopped after ${sweptConversations} of ${conversations.length} conversations: ${capRefusal.message}`,
+          capRefusal,
+          false,
+          totalTokensUsed,
+          totalCostUsd
+        );
+      }
       // A single conversation failing a pass (e.g. no scorable turns) must not abort the whole sweep.
       failedConversations += 1;
       ctx.logger.warn('framework_eval_sweep: skipped a conversation whose pass failed', {

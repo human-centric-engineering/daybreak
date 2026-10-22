@@ -18,6 +18,7 @@ import { logger } from '@/lib/logging';
 import { scoreResponse, type MetricScores } from '@/lib/orchestration/evaluations/score-response';
 import { loadFrameworkConversation } from '@/lib/framework/facilitation/evaluation/conversation';
 import { listScorableTurns } from '@/lib/framework/facilitation/evaluation/turns';
+import { spendCapCodeInMessage, SpendCapRefusedError } from '@/lib/framework/shared/spend-caps';
 
 const ENTITY_TYPE = 'framework_conversation_eval';
 
@@ -80,6 +81,10 @@ export async function scoreConversation(
         userId: actorUserId,
       });
     } catch (err) {
+      // A monthly spend cap is reached for every turn after this one too, so stop rather than skip.
+      // `scoreResponse` keeps only its judges' messages, so the cap is recognised by its words.
+      const capCode = err instanceof Error ? spendCapCodeInMessage(err.message) : null;
+      if (capCode !== null) throw new SpendCapRefusedError(capCode, undefined, { cause: err });
       // All three judges failed for this turn (e.g. no active provider) — skip it, don't abort.
       logger.warn('Skipping a turn whose scoring failed', {
         conversationId,
