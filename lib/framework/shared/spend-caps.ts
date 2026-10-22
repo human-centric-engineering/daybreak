@@ -87,7 +87,7 @@ export function rethrowSpendCapRefusal(err: unknown): never {
  * kept a judge's message and dropped its code: core's `scoreResponse` throws a plain `Error`
  * joining its three judges' `errorMessage`s, and a drained chat turn a cap refused ends with the
  * registry's words for the cap (`getUserFacingError`). Matching on those words is a stopgap until
- * `scoreResponse` keeps the codes — `.context/framework/upstream-asks.md`.
+ * `scoreResponse` keeps the codes (Sunrise #1071; `.context/framework/upstream-asks.md`).
  */
 export function spendCapCodeInMessage(message: string): SpendCapCode | null {
   for (const code of Object.values(SPEND_CAP_CODES)) {
