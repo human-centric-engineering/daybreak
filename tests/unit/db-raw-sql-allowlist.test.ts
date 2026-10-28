@@ -110,7 +110,7 @@ const ALLOWLIST: ReadonlyArray<{ file: string; calls: number; why: string }> = [
     calls: 2,
     why: 'SELECT 1 health checks — no tenant data (the playbook’s exempt row)',
   },
-  // DAYBREAK — the framework tier's four sites, every one on a `framework_*`
+  // DAYBREAK — the framework tier's five sites, every one on a `framework_*`
   // table (the boundary check `npm run framework:boundary` holds that line).
   // These rows are a fork edit to a Sunrise-owned test, and have to be: the
   // allowlist is a literal with no seam a fork can register through — the same
@@ -130,6 +130,11 @@ const ALLOWLIST: ReadonlyArray<{ file: string; calls: number; why: string }> = [
     file: 'lib/framework/facilitation/overlays/queries.ts',
     calls: 1,
     why: 'pgvector `<=>` nearest-neighbour self-join on framework_node_embedding — map-scoped content, not subject data',
+  },
+  {
+    file: 'lib/framework/modules/workflow-bindings/service.ts',
+    calls: 1,
+    why: 'a versioned template save’s locking read of one framework_module_workflow row (`FOR NO KEY UPDATE`, the lock erasure’s scrub takes), keyed by id — config, not subject data',
   },
   {
     file: 'lib/framework/privacy/erasure.ts',

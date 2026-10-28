@@ -20,11 +20,11 @@
  *     makes and fails on a writer of a scrubbed column that has not said how it knows its copy is
  *     stale. The mechanism is in `lib/framework/modules/workflow-bindings/dispatch.ts`.
  *
- * **Not covered: an operator's edit of a binding template.** It writes the whole template from the
- * request (`updateModuleWorkflowBinding`), so a form opened before an erasure and saved after it
- * puts the address back, the hole core closed for its own configuration with versioned saves
- * (t-899). Daybreak's binding is not one of core's scrubbed columns, so no guard asks; the
- * follow-up is Hub t-151.
+ * **And an operator's save of a binding template is versioned** (Hub t-151). It writes the whole
+ * template from the request (`updateWorkflowBinding`), so a copy read before an erasure would put
+ * the address back; it sends the version it read and is refused once the template moved on, under
+ * the row lock this scrub takes — core's protocol for its own configuration (t-899). Daybreak's
+ * binding is not one of core's scrubbed columns, so no core guard asks for that; its tests do.
  *
  * Registered from `initAppErasureHooks()`, not from `initFramework()` at boot: core's registry
  * runs that lazily before its first read and re-runs it after a reset, so a boot-time
