@@ -127,6 +127,11 @@ const {
   };
 });
 
+// DAYBREAK — keep mine (Sunrise 0.16.0 sync): this test assumes `lib/app/erasure.ts` registers
+// nothing, and Daybreak fills it (the framework's binding-template hook and stale writer). Held at
+// the empty seam here; see the upstream-asks ledger.
+vi.mock('@/lib/app/erasure', () => ({ initAppErasureHooks: () => undefined }));
+
 vi.mock('@/lib/logging', () => ({
   logger: mockLogger,
 }));

@@ -55,7 +55,7 @@ reserves for its own forks.**
   **Sunrise** migration
 - Daybreak registers its framework pieces into Sunrise's seams **from within
   `lib/framework/`** (driven by `initFramework()`) — exactly as Sunrise
-  registers its own built-ins from core. The **ten exceptions** are the
+  registers its own built-ins from core. The **eleven exceptions** are the
   `lib/app/*` **bridges** Daybreak fills: `bootstrap.ts` (server boot →
   `initFramework()`), `admin-nav.ts` (client sidebar → the framework nav
   section), `data-export.ts` (subject access → the framework's own GDPR Art. 15
@@ -67,7 +67,9 @@ reserves for its own forks.**
   core's per-org registry, Sunrise §116), `owner-classification.ts` (the
   framework's user-linked models for the owner layer, Sunrise §115) and
   `capability-seed-pairs.ts` (the framework boot seed's seed-parity exemption,
-  test-only, Sunrise #1013). CLAUDE.md's banner carries the same
+  test-only, Sunrise #1013) and `erasure.ts` (account erasure → the framework's
+  hook that blanks erased addresses in module binding templates, and the module
+  dispatcher's stale-writer declaration, Sunrise §122). CLAUDE.md's banner carries the same
   roster; count them there rather than from an ordinal in a docblock. A framework
   registration that must run in a realm `initFramework()` can't reach —
   server-boot, the client sidebar, a lazy seam whose init core owns, or a static
@@ -75,7 +77,7 @@ reserves for its own forks.**
   reserved leaf hook (`leaf-bootstrap.ts` / `leaf-admin-nav.ts` /
   `leaf-data-export.ts` / `leaf-org-export.ts` / `leaf-brand.ts` /
   `leaf-platform-agents.ts` / `leaf-owner-classification.ts` /
-  `leaf-capability-seed-pairs.ts`). `brand.ts` is the one where the leaf
+  `leaf-capability-seed-pairs.ts` / `leaf-erasure.ts`). `brand.ts` is the one where the leaf
   **overrides** rather than appends — brand identity is single-valued, so a leaf
   replaces Daybreak's name rather than composing with it. Otherwise Daybreak does
   **not** fill `lib/app/*` (see next).
@@ -123,8 +125,8 @@ reserves for its own forks.**
   `guard-event-contributors.ts`, `modules.ts`, `leaf-bootstrap.ts`,
   `leaf-admin-nav.ts`, `leaf-data-export.ts`, `tenant-resolver.ts`,
   `leaf-platform-agents.ts`, `leaf-org-export.ts`, `provider-credentials.ts`,
-  `leaf-owner-classification.ts`, `leaf-capability-seed-pairs.ts`, `admin-tier.ts`,
-  `erasure.ts`, `footer.ts`, …) — Sunrise
+  `leaf-owner-classification.ts`, `leaf-capability-seed-pairs.ts`, `leaf-erasure.ts`,
+  `admin-tier.ts`, `footer.ts`, …) — Sunrise
   ships these empty;
   Daybreak keeps them empty
   (and may add new empty framework-concept scaffolds like `lib/app/modules.ts`)

@@ -141,7 +141,7 @@ covered by the version contract.
   **Daybreak's reserved leaf seams** — the bridges above that Daybreak fills
   (`bootstrap.ts`, `admin-nav.ts`, `data-export.ts`, `brand.ts`, `db-drift.ts`,
   `ci.ts`, `platform-agents.ts`, `org-export.ts`, `owner-classification.ts`,
-  `capability-seed-pairs.ts`) each delegate to one of these, which Daybreak ships empty for the
+  `capability-seed-pairs.ts`, `erasure.ts`) each delegate to one of these, which Daybreak ships empty for the
   leaf. Their contract is Daybreak's, documented in
   [`.context/framework/VERSIONING.md`](./.context/framework/VERSIONING.md); they
   are named here because this list is what the coverage guard reads:
@@ -152,6 +152,7 @@ covered by the version contract.
   - `lib/app/leaf-brand.ts` → `leafBrandName` / `leafBrandLegalName` / `leafBrandDescription` — brand overrides (override, not append), via `brand.ts`
   - `lib/app/leaf-ci.ts` → `leafCoverageExclusions` / `leafAlwaysRunTests` / `leafOwnerlessSurfaceExceptions` — the leaf's CI declarations, via `ci.ts`
   - `lib/app/leaf-data-export.ts` → `initLeafSubjectSources()` / `collectLeafSubjectData()` — the leaf's Art. 15 sources, via `data-export.ts`
+  - `lib/app/leaf-erasure.ts` → `initLeafErasureHooks()` — the leaf's erasure cleanup hooks and stale writers, via `erasure.ts`
   - `lib/app/leaf-db-drift.ts` → `registerLeafDriftProbes()` — the leaf's drift probes, via `db-drift.ts`
   - `lib/app/leaf-org-export.ts` → `initLeafOrgSources()` — the leaf's `orgId` tables in the org export, via `org-export.ts`
   - `lib/app/leaf-owner-classification.ts` → `initLeafOwnerClassification()` — the leaf's user-linked models for the owner layer, via `owner-classification.ts`

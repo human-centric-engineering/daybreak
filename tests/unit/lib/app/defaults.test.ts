@@ -37,11 +37,12 @@
  * - `lib/app/org-export.ts`      → the framework tier's org-export manifest
  * - `lib/app/owner-classification.ts` → the framework's user-linked models (§115)
  * - `lib/app/capability-seed-pairs.ts` → the framework boot seed's parity exemption
+ * - `lib/app/erasure.ts`         → the framework's erasure hook and stale writer (§122)
  *
  * Each delegates to a reserved-empty leaf seam (`leaf-bootstrap.ts`,
  * `leaf-admin-nav.ts`, `leaf-data-export.ts`, `leaf-brand.ts`,
  * `leaf-platform-agents.ts`, `leaf-org-export.ts`, `leaf-owner-classification.ts`,
- * `leaf-capability-seed-pairs.ts`) which carries the
+ * `leaf-capability-seed-pairs.ts`, `leaf-erasure.ts`) which carries the
  * no-op contract forward for leaf forks — those rows are here too. See the
  * Daybreak banner in CLAUDE.md.
  *
@@ -100,6 +101,7 @@ import { initLeafOwnerClassification } from '@/lib/app/leaf-owner-classification
 import { initAppUserCreatedHooks } from '@/lib/app/user-created';
 import { collectLeafSubjectData, initLeafSubjectSources } from '@/lib/app/leaf-data-export';
 import { initLeafOrgSources } from '@/lib/app/leaf-org-export';
+import { initLeafErasureHooks } from '@/lib/app/leaf-erasure';
 import {
   getAppSubjectSources,
   getAppExcludedSubjectSources,
@@ -113,6 +115,7 @@ import {
 } from '@/lib/privacy/org-source-registry';
 import { getAppJobs, __resetAppJobsForTests } from '@/lib/orchestration/maintenance/app-jobs';
 import {
+  getAppStaleWriters,
   getErasureCleanupHooks,
   __resetErasureCleanupHooksForTests,
 } from '@/lib/privacy/erasure-hooks';
@@ -553,11 +556,34 @@ const SEAM_DEFAULTS: SeamDefault[] = [
   },
   {
     seam: 'lib/app/erasure.ts',
+    // PINNED (Daybreak fills this bridge, Sunrise 0.16.0 §122): it registers the framework's one
+    // erasure hook (binding templates) and its one stale writer (the module dispatcher), then
+    // delegates to the reserved `leaf-erasure.ts` (row below). Pinned to exactly those, so a stray
+    // second registration still fails.
     risk: 'a stray hook would run inside every account erasure on every install \u2014 deleting external data, or scrubbing rows, that the install never asked it to touch',
     assert: () => {
       __resetErasureCleanupHooksForTests();
       // getErasureCleanupHooks() triggers the lazy init, so this exercises the REAL seam.
-      expect(getErasureCleanupHooks()).toEqual([]);
+      expect(getErasureCleanupHooks().map((hook) => hook.name)).toEqual([
+        'framework:module-workflow-binding-templates',
+      ]);
+      expect(getAppStaleWriters().map((w) => `${w.file}#${w.model}`)).toEqual([
+        'lib/framework/modules/workflow-bindings/dispatch.ts#AiWorkflowExecution',
+      ]);
+    },
+  },
+  {
+    seam: 'lib/app/leaf-erasure.ts',
+    risk: 'a stray hook would run inside every account erasure on every Daybreak leaf, and a stray stale writer would excuse a file the guard should have flagged',
+    assert: () => {
+      // "This seam changes nothing", not "the registry is empty": the read runs the bridge, which
+      // registers the framework's hook and writer first (pinned in the row above).
+      __resetErasureCleanupHooksForTests();
+      const hooksBefore = getErasureCleanupHooks().map((hook) => hook.name);
+      const writersBefore = getAppStaleWriters();
+      initLeafErasureHooks();
+      expect(getErasureCleanupHooks().map((hook) => hook.name)).toEqual(hooksBefore);
+      expect(getAppStaleWriters()).toEqual(writersBefore);
     },
   },
   {

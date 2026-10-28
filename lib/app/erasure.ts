@@ -16,6 +16,16 @@
  *
  * Full guide + example: .context/privacy/data-erasure.md · CUSTOMIZATION.md §4
  */
+import { initFrameworkErasureHooks } from '@/lib/framework/privacy/erasure';
+import { initLeafErasureHooks } from '@/lib/app/leaf-erasure';
+
 export function initAppErasureHooks(): void {
-  // No app erasure hooks by default.
+  // DAYBREAK — one of the `lib/app/*` bridges Daybreak fills (the roster is in CLAUDE.md's banner).
+  // The framework registers its erasure hook (binding templates) and its stale writer (the module
+  // dispatcher) here, NOT from `initFramework()` at boot: core's registry runs this lazily before
+  // its first read and re-runs it after a reset, and Sunrise's stale-writer test reads only what
+  // this registers. Framework first, then the leaf. A leaf init that throws rolls the framework's
+  // registrations back with its own: core's gate treats the two as one unit.
+  initFrameworkErasureHooks();
+  initLeafErasureHooks();
 }

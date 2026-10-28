@@ -17,9 +17,19 @@
  * be safe to call directly: an unknown module or an event with no bindings is a clean
  * no-op, and a binding whose workflow is inactive / unpublished / malformed is skipped
  * (logged), never allowed to abort the others.
+ *
+ * **A writer of a column erasure scrubs** (Sunrise 0.16.0 §122): the run's `inputData` is a copy
+ * of the binding's template, and the definition it runs a copy of the published version, both
+ * read before the run is written. An erasure committing in between has blanked the person in
+ * both (`lib/framework/privacy/erasure.ts` for the template, core for the version), so the run is
+ * written the way core's scheduler writes one: under the locks erasure takes for everyone the two
+ * name, leaving out anyone erased since they were read. An erasure that has not committed waits
+ * for the run's transaction, then redacts the new run with the other unfinished ones. Declared as
+ * a stale writer (`taken-at`) by `initFrameworkErasureHooks()`. The event payload is the request's
+ * own and is not checked (core's `intent`, as the inbound triggers).
  */
 
-import type { Prisma } from '@prisma/client';
+import type { AiWorkflowExecution, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { isRecord } from '@/lib/utils';
@@ -28,9 +38,38 @@ import { workflowDefinitionSchema } from '@/lib/validations/orchestration';
 import { drainEngine } from '@/lib/orchestration/scheduling/scheduler';
 import { runAcrossOwners } from '@/lib/auth/subject-context';
 import { resolveMaxCostPerExecution } from '@/lib/orchestration/llm/cost-caps';
+import { withoutErasedRecipients } from '@/lib/orchestration/workflows/version-service';
+import { definitionRecipients } from '@/lib/privacy/config-recipients';
+import { blankAddressInTemplate } from '@/lib/privacy/run-recipients';
+import {
+  boundLockWaits,
+  findErasedSubjects,
+  stringsIn,
+  WRITER_TRANSACTION_OPTIONS,
+  type ErasedSubjects,
+} from '@/lib/privacy/erased-subjects';
 
 /** Attribution source pinned on executions triggered by a module lifecycle event. */
 const TRIGGER_SOURCE = 'module-event';
+
+/**
+ * How long a run's transaction waits for erasure's locks: inside `WRITER_TRANSACTION_OPTIONS`,
+ * past an erasure's 60 s. Only a person the binding names being erased right now makes it wait.
+ * A wait that runs out skips the binding (`execution_create_failed`), as any failed insert does.
+ */
+const SUBJECT_LOCK_WAIT_MS = WRITER_TRANSACTION_OPTIONS.timeout - 5_000;
+
+/** `template` with every erased address blanked, by the rule erasure applies to it. */
+function withoutErasedAddresses(
+  template: Prisma.JsonValue,
+  erased: ErasedSubjects
+): Prisma.JsonValue {
+  let value = template;
+  for (const address of erased.addresses) {
+    value = blankAddressInTemplate(value, address)?.value ?? value;
+  }
+  return value;
+}
 
 export interface ModuleWorkflowDispatchResult {
   moduleSlug: string;
@@ -62,6 +101,9 @@ export async function runModuleWorkflowBindings(
     dispatched: 0,
     skipped: [],
   };
+
+  // Before the reads below: the moment the copies of the templates and definitions were taken.
+  const readAt = new Date();
 
   const moduleRow = await prisma.module.findFirst({
     where: { slug: moduleSlug },
@@ -137,30 +179,63 @@ export async function runModuleWorkflowBindings(
       continue;
     }
 
-    const inputData: Record<string, unknown> = {
-      ...(isRecord(binding.inputTemplate) ? binding.inputTemplate : {}),
-      event: { moduleSlug, eventType, payload },
-    };
-
     const budgetLimitUsd = resolveMaxCostPerExecution({
       callerOverride: null,
       workflowDefault: workflow.maxCostPerExecutionUsd,
       settingsDefault,
     });
 
+    const { publishedVersion } = workflow;
+    const named = definitionRecipients(publishedVersion.snapshot);
+    const subjects = {
+      addresses: [...stringsIn(binding.inputTemplate), ...named.addresses],
+      userIds: named.userIds,
+    };
+
     try {
-      const execution = await prisma.aiWorkflowExecution.create({
-        data: {
-          workflowId: workflow.id,
-          versionId: workflow.publishedVersion.id,
-          status: WorkflowStatus.PENDING,
-          inputData: inputData as Prisma.InputJsonValue,
-          executionTrace: [],
-          userId: binding.createdBy,
-          triggerSource: TRIGGER_SOURCE,
-          ...(budgetLimitUsd !== undefined ? { budgetLimitUsd } : {}),
-        },
-      });
+      const created: {
+        execution: AiWorkflowExecution;
+        inputData: Record<string, unknown>;
+        erased: ErasedSubjects;
+      } = await prisma.$transaction(async (tx) => {
+        await boundLockWaits(tx, SUBJECT_LOCK_WAIT_MS);
+        // Erased since the read, not ever (core's §122 rule): an address an operator re-entered
+        // in the template after an older erasure is theirs, on purpose, and reaches the run.
+        const erased = await findErasedSubjects(tx, subjects, { since: readAt });
+        const template =
+          binding.inputTemplate === null
+            ? null
+            : withoutErasedAddresses(binding.inputTemplate, erased);
+        const inputData: Record<string, unknown> = {
+          ...(isRecord(template) ? template : {}),
+          event: { moduleSlug, eventType, payload },
+        };
+        const execution = await tx.aiWorkflowExecution.create({
+          data: {
+            workflowId: workflow.id,
+            versionId: publishedVersion.id,
+            status: WorkflowStatus.PENDING,
+            inputData: inputData as Prisma.InputJsonValue,
+            executionTrace: [],
+            userId: binding.createdBy,
+            triggerSource: TRIGGER_SOURCE,
+            ...(budgetLimitUsd !== undefined ? { budgetLimitUsd } : {}),
+          },
+        });
+        return { execution, inputData, erased };
+      }, WRITER_TRANSACTION_OPTIONS);
+      const { execution, inputData, erased } = created;
+      if (erased.addresses.length > 0 || erased.userIds.length > 0) {
+        // Never the address: it is what was erased.
+        logger.warn('Module workflow dispatch: left out people whose data was erased from a run', {
+          moduleSlug,
+          eventType,
+          bindingId: binding.id,
+          executionId: execution.id,
+          addresses: erased.addresses.length,
+          userIds: erased.userIds.length,
+        });
+      }
 
       // Fire-and-forget — the workflow runs asynchronously; identical crash handling
       // to the scheduler / inbound paths (drainEngine repairs the row on failure).
@@ -170,14 +245,13 @@ export async function runModuleWorkflowBindings(
       // binding's — owned by `binding.createdBy`, or by nobody — so the engine's own reads and
       // repair writes of it would be refused as another person's row, and the workflow would
       // never run. Core declares the same crossing for `resumeApprovedExecution()`.
-      const { publishedVersion } = workflow;
       void runAcrossOwners(
         "a module event runs its binding's workflow, not the triggering member's",
         () =>
           drainEngine(
             execution.id,
             { id: workflow.id, slug: workflow.slug },
-            defParsed.data,
+            withoutErasedRecipients(defParsed.data, erased),
             inputData,
             binding.createdBy,
             publishedVersion.id

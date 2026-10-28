@@ -56,7 +56,7 @@
 > - The `lib/app/*` **leaf** scaffolds (`env.ts`, `capabilities.ts`, `context-contributors.ts`,
 >   `leaf-bootstrap.ts`, `leaf-admin-nav.ts`, …) — Sunrise ships them empty; Daybreak keeps them
 >   empty for the app. Filling one collides with a leaf's registrations on a Daybreak upgrade.
->   **Exception — the ten `lib/app/*` _bridges_ Daybreak DOES fill. This list is the
+>   **Exception — the eleven `lib/app/*` _bridges_ Daybreak DOES fill. This list is the
 >   roster; count bridges here, not from an ordinal in a docblock:** `bootstrap.ts` (server boot →
 >   `initFramework()`), `admin-nav.ts` (client sidebar → the framework nav section),
 >   `data-export.ts` (GDPR Art. 15 subject access → the framework's own manifest at
@@ -69,13 +69,16 @@
 >   and `ALWAYS_RUN_TESTS`; Sunrise #759/#762), `platform-agents.ts` (agents every org gets
 >   its own instance of → `lib/framework/platform-agents.ts`, the rubric judge; Sunrise §116),
 >   `owner-classification.ts` (the framework's user-linked models → the owner layer,
->   `lib/framework/privacy/owner-classification.ts`; Sunrise §115) and `capability-seed-pairs.ts`
->   (the framework boot seed's seed-parity exemption, test-only; Sunrise #1013). A framework registration that must run in a realm
+>   `lib/framework/privacy/owner-classification.ts`; Sunrise §115), `capability-seed-pairs.ts`
+>   (the framework boot seed's seed-parity exemption, test-only; Sunrise #1013) and `erasure.ts`
+>   (account erasure → the framework's hook that blanks erased addresses in module binding templates,
+>   and its stale-writer declaration for the module dispatcher, `lib/framework/privacy/erasure.ts`;
+>   Sunrise §122). A framework registration that must run in a realm
 >   `initFramework()` can't reach — server-boot, the client sidebar, a lazy seam core owns the
 >   init of, or a static function core imports directly — has nowhere else to go; each bridge
 >   delegates to a reserved leaf hook (`leaf-bootstrap.ts` / `leaf-admin-nav.ts` /
 >   `leaf-data-export.ts` / `leaf-org-export.ts` / `leaf-brand.ts` / `leaf-platform-agents.ts` /
->   `leaf-owner-classification.ts` / `leaf-capability-seed-pairs.ts`) so the leaf's own registrations never collide.
+>   `leaf-owner-classification.ts` / `leaf-capability-seed-pairs.ts` / `leaf-erasure.ts`) so the leaf's own registrations never collide.
 >   `brand.ts` is the one bridge where the leaf hook **overrides** rather than appends — brand
 >   identity is single-valued, so a leaf replaces Daybreak's name, it does not compose with it.
 > - `prisma/schema/app.prisma` + `app_…` migrations, `app/brand-theme.css`, and **`.context/app/`**

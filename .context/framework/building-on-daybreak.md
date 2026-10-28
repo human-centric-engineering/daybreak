@@ -56,6 +56,7 @@ bridges they delegate to.**
 | `lib/app/leaf-platform-agents.ts`       | `platform-agents.ts`       | agents every org gets its own instance of (Daybreak 0.7.0+)                                |
 | `lib/app/leaf-owner-classification.ts`  | `owner-classification.ts`  | whether each of your user-linked models is personal, for the owner layer (Daybreak 0.8.0+) |
 | `lib/app/leaf-capability-seed-pairs.ts` | `capability-seed-pairs.ts` | your capability seeds' parity pairs and exemptions, test-only (Daybreak 0.8.0+)            |
+| `lib/app/leaf-erasure.ts`               | `erasure.ts`               | erasure cleanup for your data, and your stale-writer declarations (Daybreak 0.9.0+)        |
 
 Each bridge runs Daybreak's registration and then calls your `leaf-*` hook. Filling a
 bridge directly collides with Daybreak on your next merge — and in the
