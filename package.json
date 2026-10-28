@@ -1,6 +1,6 @@
 {
   "name": "daybreak",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Daybreak — an AI-application framework built on the Sunrise starter template.",
   "private": true,
   "engines": {

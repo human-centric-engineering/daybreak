@@ -103,9 +103,16 @@ Sunrise's owner layer narrows an org member to their own rows, and its coverage 
 fails naming any model with a user column (`userId`, `createdBy`, …) or a link to a
 personal model that nobody classified as `personal` (with its owner) or `not-personal`
 (with a reason). Classifying a model changes nothing at runtime until you mark it
-`enforced`. **Keep `@relation` out of a user column's comment**: the guard's parser
-skips such a line (Sunrise #1067), so the model goes unflagged and a correct
-classification of it is then rejected.
+`enforced`. Since Sunrise 0.16.0 the guard also sees a `String` column named `…UserId`;
+mark a user id named any other way with a `/// owner-classification: user-id` doc line.
+
+**`leaf-erasure.ts` is where your erasure hooks and stale writers go** (Daybreak 0.9.0+).
+Sunrise 0.16.0's stale-writer guard (§122) fails naming any file of yours that writes a
+column erasure scrubs in place (a run's input or trace, a webhook delivery, a workflow
+definition, …) until you declare how it knows its copy is stale, with
+`registerStaleWriter()` from `initLeafErasureHooks()`. It reads only what
+`lib/app/erasure.ts` registers, which is why that file is Daybreak's bridge now. Prefix
+your hook names (`leaf:`): a name the framework uses replaces its hook.
 
 **Every other `lib/app/*` file is yours to fill as normal** (`capabilities.ts`,
 `context-contributors.ts`, `env.ts`, `rate-limit.ts`, `public-nav.ts`,
