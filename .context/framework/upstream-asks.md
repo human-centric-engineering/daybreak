@@ -159,10 +159,16 @@ whoever happened to read the upstream issue. **Where a defect is gated behind a
 config flag, this table is also the warning attached to setting that flag**, which
 was the case the #628 row (closed below) existed for.
 
-| Upstream defect                                                                                                                                                                      | Filed      | Daybreak's exposure                                                                                                                                                                                                                                                                                                           | Re-check trigger                                                                                                                    |
-| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| Sunrise [#1067](https://github.com/human-centric-engineering/sunrise/issues/1067) — the owner-classification guard's schema parser skips any line whose comment contains `@relation` | 2026-10-21 | **None now.** Daybreak's framework user-id columns said "no @relation", so the guard saw 2 of 10 models; the comments now say "no Prisma relation" and all are classified (`lib/framework/privacy/owner-classification.ts`). A leaf writing the same comment gets the gap back; `lib/app/leaf-owner-classification.ts` warns. | On each sync: `grep -n "line.includes('@relation')" tests/helpers/owner-classification-audit.ts` — gone means fixed; close the row. |
+| Upstream defect | Filed | Daybreak's exposure | Re-check trigger |
+| --------------- | ----- | ------------------- | ---------------- |
+| _(none open)_   |       |                     |                  |
 
+> Closed during the **Sunrise 0.16.0** sync: **#1067** landed (Sunrise §115,
+> #1069): `tests/helpers/owner-classification-audit.ts` strips a line's trailing
+> comment before reading it, so a comment mentioning `@relation` no longer hides a
+> column. The warnings in `lib/framework/privacy/owner-classification.ts` and
+> `lib/app/leaf-owner-classification.ts` went with it.
+>
 > Closed during the **Sunrise 0.14.0** sync — both rows, leaving the table
 > empty until #1067 (0.15.0). **#851** landed as Sunrise t-749: `scripts/ci/scoped-tests.ts` now
 > passes the bare `--coverage.thresholds.perFile`, and its self-test checks the

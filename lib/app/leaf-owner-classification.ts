@@ -26,9 +26,9 @@
  * }
  * ```
  *
- * **Keep `@relation` out of a user column's comment.** The coverage guard's schema parser skips a
- * line whose text contains it, so `userId String // no @relation` is invisible to it and the model
- * goes unflagged. Classify every user-linked model whether or not the guard names it.
+ * Classify every user-linked model whether or not the guard names it: it sees a `userId` /
+ * `createdBy` column and a `String` named `…UserId`; mark a user id named any other way with a
+ * `/// owner-classification: user-id` doc line above the field.
  *
  * Synchronous, and no Prisma import: this runs while the Prisma client is being built.
  *
