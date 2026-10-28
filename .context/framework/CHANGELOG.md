@@ -60,9 +60,21 @@ process.
   `String` named `…UserId`. An unclassified model it newly sees fails it until
   you classify it in `lib/app/leaf-owner-classification.ts`.
 
+- **A save of a module workflow binding's `inputTemplate` needs `If-Match`**
+  (Hub t-151). **Breaking for an API client:** `PATCH
+  /api/v1/admin/framework/modules/:slug/workflows/:bindingId` with
+  `inputTemplate` must send the binding's `version` (now on the GET list and on
+  the POST and PATCH responses) as `If-Match`. Without it the answer is `428
+  PRECONDITION_REQUIRED`, and once the template has moved on (another save, or
+  an erasure blanking an address) `412 STALE_RECORD`, with nothing written. A
+  PATCH of `enabled` alone, and a bind, are unchanged. This is core's §122
+  protocol (`lib/api/record-version.ts`), so a client already sending
+  `If-Match` to core's versioned saves does the same here. Daybreak's admin UI
+  has no template editor, so nothing in it changes.
+
 ### Fixed
 
-- **Erasure now reaches module workflow binding templates** (Hub t-150). A binding's `inputTemplate` is the operator's static input to a bound workflow, as a schedule's is, but erasure blanked only schedules, so an erased person's address stayed in a binding and went into every run it started. Erasure now blanks a verified address there, audited per binding, and the dispatcher leaves out anyone erased since it read the binding and the workflow, and the member who triggered the event if they were, from the run's input and from the definition it runs, under erasure's locks, as core's scheduler does. Erasure locks the bindings it rewrites as it reads them, as core does schedules, so an operator's save made meanwhile waits for it rather than being lost. An address an operator re-enters after the erasure is kept. **Not yet covered:** a binding edit saved from a form opened before an erasure writes the address back (Hub t-151).
+- **Erasure now reaches module workflow binding templates** (Hub t-150). A binding's `inputTemplate` is the operator's static input to a bound workflow, as a schedule's is, but erasure blanked only schedules, so an erased person's address stayed in a binding and went into every run it started. Erasure now blanks a verified address there, audited per binding, and the dispatcher leaves out anyone erased since it read the binding and the workflow, and the member who triggered the event if they were, from the run's input and from the definition it runs, under erasure's locks, as core's scheduler does. Erasure locks the bindings it rewrites as it reads them, as core does schedules, so an operator's save made meanwhile waits for it rather than being lost. An address an operator re-enters after the erasure is kept. A binding edit saved from a copy read before the erasure is refused (below).
 
 ## [0.8.0] — 2026-10-22
 

@@ -15,7 +15,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import { NotFoundError, ValidationError } from '@/lib/api/errors';
+import { NotFoundError, StaleRecordError, ValidationError } from '@/lib/api/errors';
 import {
   mockAdminUser,
   mockAuthenticatedUser,
@@ -33,6 +33,8 @@ vi.mock('@/lib/framework/modules/workflow-bindings/service', () => ({
   bindWorkflow: svc.bindWorkflow,
   updateWorkflowBinding: svc.updateWorkflowBinding,
   unbindWorkflow: svc.unbindWorkflow,
+  // The real one hashes the template; the routes only pass the row through it.
+  withTemplateVersion: (b: Record<string, unknown>) => ({ ...b, version: '"v-test"' }),
 }));
 vi.mock('@/lib/framework/modules/workflow-bindings/queries', () => ({
   listModuleWorkflowBindings: svc.listModuleWorkflowBindings,
@@ -48,11 +50,16 @@ const BASE = 'http://localhost/api/v1/admin/framework/modules';
 const WORKFLOW_ID = 'cjld2cjxh0000qzrmn831i7rn';
 const BINDING_ID = 'cjld2cyuq0000qzrmabcdef12';
 
-function req(method: string, body?: unknown, url = BASE): NextRequest {
+function req(
+  method: string,
+  body?: unknown,
+  url = BASE,
+  headers: Record<string, string> = {}
+): NextRequest {
   return new NextRequest(url, {
     method,
     ...(body !== undefined
-      ? { body: JSON.stringify(body), headers: { 'content-type': 'application/json' } }
+      ? { body: JSON.stringify(body), headers: { 'content-type': 'application/json', ...headers } }
       : {}),
   });
 }
@@ -147,6 +154,8 @@ describe('POST /modules/:slug/workflows', () => {
       ctx('reading')
     );
     expect(res.status).toBe(201);
+    // A create is new intent, not a copy: no `If-Match`, and it returns the version to save against.
+    expect((await parse<{ data: { version: string } }>(res)).data.version).toBe('"v-test"');
     expect(svc.bindWorkflow).toHaveBeenCalledWith(
       expect.objectContaining({
         moduleSlug: 'reading',
@@ -195,12 +204,53 @@ describe('PATCH /modules/:slug/workflows/:bindingId', () => {
     asAdmin();
     svc.updateWorkflowBinding.mockResolvedValue({ ...bindingRow, enabled: false });
     const res = await bindingRoute.PATCH(
-      req('PATCH', { enabled: false, inputTemplate: { x: 1 } }),
+      req('PATCH', { enabled: false, inputTemplate: { x: 1 } }, BASE, { 'If-Match': '"v1"' }),
       ctx2('reading', BINDING_ID)
     );
     expect(res.status).toBe(200);
     expect(svc.updateWorkflowBinding).toHaveBeenCalledWith(
-      expect.objectContaining({ moduleSlug: 'reading', bindingId: BINDING_ID, enabled: false })
+      expect.objectContaining({
+        moduleSlug: 'reading',
+        bindingId: BINDING_ID,
+        enabled: false,
+        inputTemplate: { x: 1 },
+        loadedAt: ['"v1"'],
+      })
+    );
+    expect((await parse<{ data: { version: string } }>(res)).data.version).toBe('"v-test"');
+  });
+
+  it('refuses a template save without If-Match (428), service untouched', async () => {
+    asAdmin();
+    const res = await bindingRoute.PATCH(
+      req('PATCH', { inputTemplate: { x: 1 } }),
+      ctx2('reading', BINDING_ID)
+    );
+    expect(res.status).toBe(428);
+    expect(svc.updateWorkflowBinding).not.toHaveBeenCalled();
+  });
+
+  it('answers a stale template save with 412 STALE_RECORD', async () => {
+    asAdmin();
+    svc.updateWorkflowBinding.mockRejectedValue(new StaleRecordError());
+    const res = await bindingRoute.PATCH(
+      req('PATCH', { inputTemplate: { x: 1 } }, BASE, { 'If-Match': '"old"' }),
+      ctx2('reading', BINDING_ID)
+    );
+    expect(res.status).toBe(412);
+    expect((await parse<{ error: { code: string } }>(res)).error.code).toBe('STALE_RECORD');
+  });
+
+  it('toggles enabled with no If-Match: nothing erasure scrubs is written', async () => {
+    asAdmin();
+    svc.updateWorkflowBinding.mockResolvedValue({ ...bindingRow, enabled: false });
+    const res = await bindingRoute.PATCH(
+      req('PATCH', { enabled: false }),
+      ctx2('reading', BINDING_ID)
+    );
+    expect(res.status).toBe(200);
+    expect(svc.updateWorkflowBinding).toHaveBeenCalledWith(
+      expect.objectContaining({ enabled: false, inputTemplate: undefined, loadedAt: undefined })
     );
   });
 
