@@ -110,7 +110,7 @@ const ALLOWLIST: ReadonlyArray<{ file: string; calls: number; why: string }> = [
     calls: 2,
     why: 'SELECT 1 health checks — no tenant data (the playbook’s exempt row)',
   },
-  // DAYBREAK — the framework tier's three sites, every one on a `framework_*`
+  // DAYBREAK — the framework tier's four sites, every one on a `framework_*`
   // table (the boundary check `npm run framework:boundary` holds that line).
   // These rows are a fork edit to a Sunrise-owned test, and have to be: the
   // allowlist is a literal with no seam a fork can register through — the same
@@ -130,6 +130,11 @@ const ALLOWLIST: ReadonlyArray<{ file: string; calls: number; why: string }> = [
     file: 'lib/framework/facilitation/overlays/queries.ts',
     calls: 1,
     why: 'pgvector `<=>` nearest-neighbour self-join on framework_node_embedding — map-scoped content, not subject data',
+  },
+  {
+    file: 'lib/framework/privacy/erasure.ts',
+    calls: 1,
+    why: 'erasure’s locking read of framework_module_workflow binding templates (`FOR NO KEY UPDATE`, narrowed by `strpos` on the folded text), core’s `eraseFromSchedules` shape — runs in erasure’s system scope across every org, on purpose',
   },
   {
     file: 'lib/orchestration/chat/conversation-semantic-search.ts',

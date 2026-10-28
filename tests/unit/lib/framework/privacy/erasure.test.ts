@@ -2,8 +2,8 @@
  * The framework tier's erasure hook and stale writer (Sunrise 0.16.0 §122).
  *
  * `eraseFromBindingTemplates` runs inside the erasure transaction: it is handed the transaction
- * client, so the tests hand it a small stateful fake of the two tables it touches and assert the
- * rows it leaves. The blanking itself is core's real `blankAddressInTemplate`.
+ * client, so the tests hand it a small stateful fake of what it touches and assert the rows it
+ * leaves; the SQL itself is checked against a real database by a smoke run, not here. The blanking itself is core's real `blankAddressInTemplate`.
  *
  * @see lib/framework/privacy/erasure.ts
  */
@@ -13,7 +13,6 @@ import type { ErasureTxContext } from '@/lib/privacy/erasure-hooks';
 import {
   BINDING_PAGE_SIZE,
   BINDING_TEMPLATES_HOOK,
-  BINDING_WRITE_ATTEMPTS,
   DISPATCH_FILE,
   eraseFromBindingTemplates,
   initFrameworkErasureHooks,
@@ -34,46 +33,49 @@ interface BindingRow {
 }
 
 /**
- * `beforeWrite` runs before each conditional write: a concurrent operator save, landing between
- * the hook's read and its write.
+ * The two tables the hook touches. Its read is one raw `SELECT … FOR NO KEY UPDATE`, answered here
+ * the way Postgres would: rows past the cursor, with a template, whose folded text holds the
+ * search term (or every one, when the address cannot be searched for), a page at a time.
  */
-function fakeTx(rows: BindingRow[], beforeWrite?: (row: BindingRow) => void) {
+function fakeTx(rows: BindingRow[]) {
   const audits: Array<Record<string, unknown>> = [];
   const pages: number[] = [];
-  const writes: number[] = [];
+  const sql: string[] = [];
   const tx = {
+    $queryRaw: async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      sql.push(strings.join('?'));
+      const [after, scanAll, term, , limit] = values as [
+        string,
+        boolean,
+        string | null,
+        unknown,
+        number,
+      ];
+      const page = [...rows]
+        .sort((a, b) => a.id.localeCompare(b.id))
+        .filter((r) => r.id > after && r.inputTemplate !== null)
+        .filter(
+          (r) =>
+            scanAll ||
+            (term !== null && JSON.stringify(r.inputTemplate).toLowerCase().includes(term))
+        )
+        .slice(0, limit)
+        .map((r) => ({ ...r }));
+      pages.push(page.length);
+      return page;
+    },
     moduleWorkflowBinding: {
-      findMany: async (args: { where?: { id: { gt: string } }; take: number }) => {
-        const after = args.where?.id.gt;
-        const page = [...rows]
-          .sort((a, b) => a.id.localeCompare(b.id))
-          .filter((r) => after === undefined || r.id > after)
-          .slice(0, args.take)
-          .map((r) => ({ ...r }));
-        pages.push(page.length);
-        return page;
-      },
-      // Prisma's Json `equals`: a deep match on the stored value.
-      updateMany: async ({
+      update: async ({
         where,
         data,
       }: {
-        where: { id: string; inputTemplate: { equals: unknown } };
+        where: { id: string };
         data: { inputTemplate: unknown };
       }) => {
         const row = rows.find((r) => r.id === where.id);
-        if (!row) return { count: 0 };
-        beforeWrite?.(row);
-        writes.push(1);
-        if (JSON.stringify(row.inputTemplate) !== JSON.stringify(where.inputTemplate.equals)) {
-          return { count: 0 };
-        }
+        if (!row) throw new Error(`no binding ${where.id}`);
         row.inputTemplate = data.inputTemplate;
-        return { count: 1 };
-      },
-      findUnique: async ({ where }: { where: { id: string } }) => {
-        const row = rows.find((r) => r.id === where.id);
-        return row ? { inputTemplate: row.inputTemplate } : null;
+        return row;
       },
     },
     aiAdminAuditLog: {
@@ -83,7 +85,7 @@ function fakeTx(rows: BindingRow[], beforeWrite?: (row: BindingRow) => void) {
       },
     },
   };
-  return { tx, audits, pages, writes };
+  return { tx, audits, pages, sql };
 }
 
 function binding(id: string, inputTemplate: unknown): BindingRow {
@@ -148,59 +150,62 @@ describe('eraseFromBindingTemplates', () => {
 
   it('reads every page, so a binding past the first is not missed', async () => {
     const rows = Array.from({ length: BINDING_PAGE_SIZE + 1 }, (_, i) =>
-      binding(`b${String(i).padStart(4, '0')}`, { note: 'nobody' })
+      binding(`b${String(i).padStart(4, '0')}`, { to: 'erased@example.com' })
     );
-    rows[BINDING_PAGE_SIZE].inputTemplate = { to: 'erased@example.com' };
     const { tx, pages } = fakeTx(rows);
 
     const changed = await eraseFromBindingTemplates(ctx(tx));
 
     expect(pages).toEqual([BINDING_PAGE_SIZE, 1]);
-    expect(changed).toBe(1);
+    expect(changed).toBe(BINDING_PAGE_SIZE + 1);
     expect(rows[BINDING_PAGE_SIZE].inputTemplate).toEqual({ to: '' });
   });
 });
 
-describe('eraseFromBindingTemplates — an operator save between the read and the write', () => {
-  it('keeps the operator’s edit and blanks the address in it', async () => {
-    const rows = [binding('b1', { to: 'erased@example.com', cc: 'a@example.com' })];
-    let saved = false;
-    const { tx, audits } = fakeTx(rows, (row) => {
-      if (saved) return;
-      saved = true;
-      row.inputTemplate = { to: 'erased@example.com', cc: 'b@example.com', subject: 'new' };
-    });
+describe('eraseFromBindingTemplates — ordered against an operator save', () => {
+  it('reads the bindings it may rewrite under a row lock, so a save waits for the erasure', async () => {
+    const { tx, sql } = fakeTx([binding('b1', { to: 'erased@example.com' })]);
 
-    const changed = await eraseFromBindingTemplates(ctx(tx));
+    await eraseFromBindingTemplates(ctx(tx));
 
-    expect(changed).toBe(1);
-    // Not the stale read with the address taken out ({ to: '', cc: 'a@…' }): the edit survives.
-    expect(rows[0].inputTemplate).toEqual({ to: '', cc: 'b@example.com', subject: 'new' });
-    expect(audits).toHaveLength(1);
+    // Core's schedule pass takes the same lock; without it a save between the read and the
+    // write is overwritten, or commits an address the read did not see.
+    expect(sql).toHaveLength(1);
+    expect(sql[0]).toMatch(/FROM framework_module_workflow b/);
+    expect(sql[0]).toMatch(/FOR NO KEY UPDATE OF b/);
   });
 
-  it('leaves a binding alone when the save removed the address itself', async () => {
-    const rows = [binding('b1', { to: 'erased@example.com' })];
-    const { tx, audits } = fakeTx(rows, (row) => {
-      row.inputTemplate = { to: 'someone-else@example.com' };
-    });
+  it('narrows to templates holding the address, and reads every one when it cannot be searched', async () => {
+    const rows = [
+      binding('b1', { to: 'erased@example.com' }),
+      binding('b2', { to: 'other@example.com' }),
+    ];
+    const searched = fakeTx(rows);
+    await eraseFromBindingTemplates(ctx(searched.tx));
+    expect(searched.pages).toEqual([1]);
 
-    expect(await eraseFromBindingTemplates(ctx(tx))).toBe(0);
-    expect(rows[0].inputTemplate).toEqual({ to: 'someone-else@example.com' });
-    expect(audits).toEqual([]);
+    // A quote in the address is escaped in the JSON text, so it is searched by domain instead.
+    const byDomain = fakeTx([binding('b1', { to: 'o"neil@example.com' })]);
+    expect(await eraseFromBindingTemplates(ctx(byDomain.tx, { email: 'o"neil@example.com' }))).toBe(
+      1
+    );
+
+    // Neither the address nor its domain is printable ASCII: every template is read.
+    const scanned = fakeTx([
+      binding('b1', { to: 'jürgen@bücher.de' }),
+      binding('b2', { to: 'other@example.com' }),
+    ]);
+    expect(await eraseFromBindingTemplates(ctx(scanned.tx, { email: 'jürgen@bücher.de' }))).toBe(1);
+    expect(scanned.pages).toEqual([2]);
+    expect(scanned.audits.map((a) => a.entityId)).toEqual(['b1']);
   });
 
-  it('fails the erasure, rather than writing a stale copy, when the binding never settles', async () => {
-    const rows = [binding('b1', { to: 'erased@example.com', n: 0 })];
-    let n = 0;
-    const { tx, writes } = fakeTx(rows, (row) => {
-      n += 1;
-      row.inputTemplate = { to: 'erased@example.com', n };
-    });
+  it('blanks a template that is the bare address to the empty value', async () => {
+    const rows = [binding('b1', 'erased@example.com')];
+    const { tx } = fakeTx(rows);
 
-    await expect(eraseFromBindingTemplates(ctx(tx))).rejects.toThrow(/kept changing/);
-    expect(writes).toHaveLength(BINDING_WRITE_ATTEMPTS);
-    expect(rows[0].inputTemplate).toMatchObject({ to: 'erased@example.com' });
+    expect(await eraseFromBindingTemplates(ctx(tx))).toBe(1);
+    expect(rows[0].inputTemplate).toBe('');
   });
 });
 

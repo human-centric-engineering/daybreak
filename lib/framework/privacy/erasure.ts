@@ -36,6 +36,7 @@
 
 import type { Prisma } from '@prisma/client';
 import { blankAddressInTemplate } from '@/lib/privacy/run-recipients';
+import { asciiSearchTerm } from '@/lib/privacy/config-recipients';
 import {
   registerErasureCleanupHook,
   registerStaleWriter,
@@ -51,18 +52,24 @@ const ERASURE_REASON = 'A person this binding named was erased.';
 /** Bindings read per page. A binding is configuration, so there are few; paged all the same. */
 export const BINDING_PAGE_SIZE = 200;
 
-/**
- * How many times one binding's blanking is retried when its template changed between the read and
- * the write. An operator saving the same binding again and again during one erasure is the only
- * way past it, and the erasure attempt then fails whole, as any throw inside its transaction does.
- */
-export const BINDING_WRITE_ATTEMPTS = 5;
-
 /** The hook's `name`: the registry is keyed by it, so a re-run replaces rather than duplicates. */
 export const BINDING_TEMPLATES_HOOK = 'framework:module-workflow-binding-templates';
 
 /** The dispatcher, as the stale-writer test names a file. */
 export const DISPATCH_FILE = 'lib/framework/modules/workflow-bindings/dispatch.ts';
+
+/**
+ * The substring the SQL narrows by: the address, else its domain, else nothing (read every
+ * template). Core's private `searchTermFor` (`lib/privacy/run-recipients.ts`), on the same rule.
+ */
+function searchTermFor(address: string): { term: string | null; scanAll: boolean } {
+  const whole = asciiSearchTerm(address);
+  if (whole) return { term: whole, scanAll: false };
+  const at = address.lastIndexOf('@');
+  const domain = at >= 0 && at < address.length - 1 ? address.slice(at + 1) : null;
+  const byDomain = domain ? asciiSearchTerm(domain) : null;
+  return byDomain ? { term: byDomain, scanAll: false } : { term: null, scanAll: true };
+}
 
 /**
  * Blank the erased person's address in every module workflow binding's input template, inside
@@ -80,25 +87,38 @@ export async function eraseFromBindingTemplates({
 }: ErasureTxContext): Promise<number> {
   if (!emailVerified) return 0;
   const address = normaliseAddress(email);
+  const { term, scanAll } = searchTermFor(address);
   let changed = 0;
-  let after: string | undefined;
+  let after = '';
   for (;;) {
-    const rows = await tx.moduleWorkflowBinding.findMany({
-      ...(after !== undefined ? { where: { id: { gt: after } } } : {}),
-      orderBy: { id: 'asc' },
-      take: BINDING_PAGE_SIZE,
-      select: {
-        id: true,
-        moduleId: true,
-        eventType: true,
-        workflowId: true,
-        orgId: true,
-        inputTemplate: true,
-      },
-    });
+    // Core's schedule pass, on the framework's table (`eraseFromSchedules`): narrowed in SQL to
+    // templates whose text holds the address (folded as `normaliseAddress` folds it, so a superset
+    // of the matches), and locked as read, so an operator's save waits for the erasure rather than
+    // being overwritten by it, or committing an address the read missed.
+    const rows = await tx.$queryRaw<
+      Array<{
+        id: string;
+        moduleId: string;
+        eventType: string;
+        workflowId: string;
+        orgId: string | null;
+        inputTemplate: Prisma.JsonValue;
+      }>
+    >`SELECT b.id, b."moduleId", b."eventType", b."workflowId", b."orgId", b."inputTemplate"
+       FROM framework_module_workflow b
+       CROSS JOIN LATERAL (SELECT translate(b."inputTemplate"::text,
+         'ABCDEFGHIJKLMNOPQRSTUVWXYZK', 'abcdefghijklmnopqrstuvwxyzk') AS folded) f
+       WHERE b.id > ${after}
+         AND b."inputTemplate" IS NOT NULL
+         AND (${scanAll} OR (${term}::text IS NOT NULL AND strpos(f.folded, ${term}::text) > 0))
+       ORDER BY b.id LIMIT ${BINDING_PAGE_SIZE} FOR NO KEY UPDATE OF b`;
     for (const row of rows) {
-      const removed = await blankInBinding(tx, row.id, row.inputTemplate, address);
-      if (removed === 0) continue;
+      const change = blankAddressInTemplate(row.inputTemplate, address);
+      if (!change) continue;
+      await tx.moduleWorkflowBinding.update({
+        where: { id: row.id },
+        data: { inputTemplate: change.value ?? {} },
+      });
       // Unattributed: a cleanup hook is not told who asked for the erasure. The erasure's own
       // receipt and audit row name them.
       await tx.aiAdminAuditLog.create({
@@ -108,7 +128,7 @@ export async function eraseFromBindingTemplates({
           entityType: ENTITY_TYPE,
           entityId: row.id,
           entityName: `${row.eventType} → ${row.workflowId}`,
-          changes: { inputTemplateValuesCleared: { from: removed, to: 0 } },
+          changes: { inputTemplateValuesCleared: { from: change.removed, to: 0 } },
           metadata: {
             reason: ERASURE_REASON,
             moduleId: row.moduleId,
@@ -123,38 +143,6 @@ export async function eraseFromBindingTemplates({
     after = rows[rows.length - 1].id;
   }
   return changed;
-}
-
-/**
- * Blank `address` in one binding's template, written only if the template is still the one it was
- * read as: an operator's edit committed in between is not overwritten, but read again and blanked
- * in turn. Core's schedule pass gets the same guarantee from a row lock (`FOR NO KEY UPDATE`); this
- * compares instead, which needs no raw SQL. Returns how many values it removed.
- */
-async function blankInBinding(
-  tx: ErasureTxContext['tx'],
-  id: string,
-  read: Prisma.JsonValue,
-  address: string
-): Promise<number> {
-  let current = read;
-  for (let attempt = 0; attempt < BINDING_WRITE_ATTEMPTS; attempt++) {
-    if (current === null) return 0;
-    const change = blankAddressInTemplate(current, address);
-    if (!change) return 0;
-    const { count } = await tx.moduleWorkflowBinding.updateMany({
-      where: { id, inputTemplate: { equals: current } },
-      data: { inputTemplate: change.value ?? {} },
-    });
-    if (count === 1) return change.removed;
-    const again = await tx.moduleWorkflowBinding.findUnique({
-      where: { id },
-      select: { inputTemplate: true },
-    });
-    if (!again) return 0; // deleted in between: nothing left to blank
-    current = again.inputTemplate;
-  }
-  throw new Error(`Module workflow binding ${id} kept changing while erasure blanked it`);
 }
 
 /**

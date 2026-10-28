@@ -41,7 +41,7 @@ import { runAcrossOwners } from '@/lib/auth/subject-context';
 import { resolveMaxCostPerExecution } from '@/lib/orchestration/llm/cost-caps';
 import { withoutErasedRecipients } from '@/lib/orchestration/workflows/version-service';
 import { definitionRecipients } from '@/lib/privacy/config-recipients';
-import { blankAddressInTemplate, redactErased } from '@/lib/privacy/run-recipients';
+import { blankAddressInTemplate, redactErased, toStoredJson } from '@/lib/privacy/run-recipients';
 import {
   boundLockWaits,
   findErasedSubjects,
@@ -55,14 +55,18 @@ import {
 const TRIGGER_SOURCE = 'module-event';
 
 /**
- * How long a run's transaction waits for the subject locks of the people it names. They are held
- * exclusively by an erasure of one of them (up to 60 s) and by a backup import naming one (up to
- * 130 s); other dispatches share them. The dispatch runs inside a member's request
- * (`recordModuleEngagement`), so it does not wait that out: past this bound the binding is skipped
- * (`execution_create_failed`) and its run is not made. A run naming someone being erased right
- * now would have them taken out of it anyway.
+ * How long a run's transaction waits for the subject locks of the people it names: inside
+ * `WRITER_TRANSACTION_OPTIONS`, past an erasure's 60 s, as the scheduler's claim waits. They are
+ * held exclusively by an erasure of one of them and by a backup import naming one (up to 130 s,
+ * which this does not outlast); other dispatches share them. Past it the binding is skipped
+ * (`execution_create_failed`) and its run is not made — the dispatcher has no next tick to leave
+ * it for. Most callers fire the dispatch without awaiting it; `recordModuleEngagement`'s awaiting
+ * callers wait with it.
  */
-const DISPATCH_LOCK_TIMEOUT_MS = 10_000;
+const DISPATCH_LOCK_TIMEOUT_MS = WRITER_TRANSACTION_OPTIONS.timeout - 5_000;
+
+/** The answer for a run that names nobody. */
+const NOBODY: ErasedSubjects = { addresses: [], userIds: [] };
 
 /**
  * `template` with every erased address blanked, by the rule erasure applies to it. A copy of the
@@ -211,6 +215,7 @@ export async function runModuleWorkflowBindings(
         execution: AiWorkflowExecution;
         inputData: Record<string, unknown>;
         definition: WorkflowDefinition;
+        erased: ErasedSubjects;
       }> => {
         // Before the insert, so a definition the rewrite cannot re-validate skips the binding
         // rather than leaving a PENDING run nothing drains.
@@ -221,7 +226,9 @@ export async function runModuleWorkflowBindings(
           event: {
             moduleSlug,
             eventType,
-            payload: redactErased(payload as Prisma.JsonObject, erased),
+            // As the column will store it, so the same event gives the same input whether or not
+            // anyone was erased (core's rule for a writer that redacts a copy).
+            payload: redactErased(toStoredJson(payload), erased),
           },
         };
         const execution = await tx.aiWorkflowExecution.create({
@@ -236,12 +243,10 @@ export async function runModuleWorkflowBindings(
             ...(budgetLimitUsd !== undefined ? { budgetLimitUsd } : {}),
           },
         });
-        return { execution, inputData, definition };
+        return { execution, inputData, definition, erased };
       };
 
       // Nobody named, nothing to check: one insert, as before §122.
-      const NOBODY: ErasedSubjects = { addresses: [], userIds: [] };
-      let erased = NOBODY;
       const created = !namesAnyone(subjects)
         ? await write(prisma, NOBODY)
         : await prisma.$transaction(async (tx) => {
@@ -250,10 +255,13 @@ export async function runModuleWorkflowBindings(
             // re-entered in the template after an older erasure is theirs, on purpose, and
             // reaches the run. Shared: concurrent dispatches naming the same people do not queue
             // behind each other, and an erasure, which locks exclusively, still waits for them.
-            erased = await findErasedSubjects(tx, subjects, { since: readAt, shared: true });
+            const erased = await findErasedSubjects(tx, subjects, {
+              since: readAt,
+              shared: true,
+            });
             return write(tx, erased);
           }, WRITER_TRANSACTION_OPTIONS);
-      const { execution, inputData, definition } = created;
+      const { execution, inputData, definition, erased } = created;
       if (erased.addresses.length > 0 || erased.userIds.length > 0) {
         // Never the address: it is what was erased.
         logger.warn('Module workflow dispatch: left out people whose data was erased from a run', {
