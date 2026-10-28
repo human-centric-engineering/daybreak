@@ -18,10 +18,7 @@ import { validateRequestBody } from '@/lib/api/validation';
 import { getRouteLogger } from '@/lib/api/context';
 import { getClientIP } from '@/lib/security/ip';
 import { listModuleWorkflowBindings } from '@/lib/framework/modules/workflow-bindings/queries';
-import {
-  bindWorkflow,
-  withTemplateVersion,
-} from '@/lib/framework/modules/workflow-bindings/service';
+import { bindWorkflow } from '@/lib/framework/modules/workflow-bindings/service';
 import {
   parseModuleSlug,
   bindWorkflowBodySchema,
@@ -61,5 +58,5 @@ export const POST = withAdminAuth<{ slug: string }>(async (request, session, { p
     eventType: binding.eventType,
     adminId: session.user.id,
   });
-  return successResponse(withTemplateVersion(binding), undefined, { status: 201 });
+  return successResponse(binding, undefined, { status: 201 });
 });

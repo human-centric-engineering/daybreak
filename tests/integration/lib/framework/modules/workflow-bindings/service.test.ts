@@ -123,15 +123,19 @@ const { prismaFake, store, resetStore } = vi.hoisted(() => {
 vi.mock('@/lib/db/client', () => ({ prisma: prismaFake }));
 vi.mock('@/lib/orchestration/audit/admin-audit-logger', () => ({ logAdminAction: vi.fn() }));
 
+import { bindingTemplateVersion } from '@/lib/framework/modules/workflow-bindings/versions';
 import {
-  bindingTemplateVersion,
   bindWorkflow,
   updateWorkflowBinding,
   unbindWorkflow,
 } from '@/lib/framework/modules/workflow-bindings/service';
-import { StaleRecordError } from '@/lib/api/errors';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
-import { NotFoundError, ValidationError } from '@/lib/api/errors';
+import {
+  NotFoundError,
+  PreconditionRequiredError,
+  StaleRecordError,
+  ValidationError,
+} from '@/lib/api/errors';
 
 const USER = 'admin-1';
 
@@ -324,17 +328,33 @@ describe('updateWorkflowBinding', () => {
       expect(logAdminAction).toHaveBeenCalledTimes(1); // the bind only
     });
 
-    it('refuses a save with no loaded version at all', async () => {
+    it('answers a save with no loaded version as a missing precondition (428), not a stale one', async () => {
       const b = await bound({ a: 1 });
-      await expect(
-        updateWorkflowBinding({
-          moduleSlug: 'reading',
-          bindingId: b.id,
-          inputTemplate: { a: 2 },
-          userId: USER,
-        })
-      ).rejects.toBeInstanceOf(StaleRecordError);
+      for (const loadedAt of [undefined, []]) {
+        await expect(
+          updateWorkflowBinding({
+            moduleSlug: 'reading',
+            bindingId: b.id,
+            inputTemplate: { a: 2 },
+            loadedAt,
+            userId: USER,
+          })
+        ).rejects.toBeInstanceOf(PreconditionRequiredError);
+      }
       expect(store.bindings.get(b.id).inputTemplate).toEqual({ a: 1 });
+    });
+
+    it('returns the saved binding with its new version', async () => {
+      const b = await bound({ a: 1 });
+      expect(b.version).toBe(bindingTemplateVersion({ a: 1 }));
+      const saved = await updateWorkflowBinding({
+        moduleSlug: 'reading',
+        bindingId: b.id,
+        inputTemplate: { a: 2 },
+        loadedAt: [b.version],
+        userId: USER,
+      });
+      expect(saved.version).toBe(bindingTemplateVersion({ a: 2 }));
     });
 
     it('saves at the current version, checked under the row lock, whatever the key order', async () => {
@@ -371,7 +391,9 @@ describe('updateWorkflowBinding', () => {
       const b = await bound({ a: 1 });
       // The belongs-to guard finds it; a concurrent unbind removes it before the locked read.
       const realFindFirst = prismaFake.moduleWorkflowBinding.findFirst;
-      prismaFake.moduleWorkflowBinding.findFirst = async (args: any) => {
+      prismaFake.moduleWorkflowBinding.findFirst = async (args: {
+        where: { id: string; moduleId?: string };
+      }) => {
         prismaFake.moduleWorkflowBinding.findFirst = realFindFirst;
         const found = await realFindFirst(args);
         store.bindings.delete(b.id);

@@ -33,8 +33,6 @@ vi.mock('@/lib/framework/modules/workflow-bindings/service', () => ({
   bindWorkflow: svc.bindWorkflow,
   updateWorkflowBinding: svc.updateWorkflowBinding,
   unbindWorkflow: svc.unbindWorkflow,
-  // The real one hashes the template; the routes only pass the row through it.
-  withTemplateVersion: (b: Record<string, unknown>) => ({ ...b, version: '"v-test"' }),
 }));
 vi.mock('@/lib/framework/modules/workflow-bindings/queries', () => ({
   listModuleWorkflowBindings: svc.listModuleWorkflowBindings,
@@ -72,7 +70,9 @@ async function parse<T>(res: Response): Promise<T> {
   return JSON.parse(await res.text()) as T;
 }
 const validBind = { workflowId: WORKFLOW_ID, eventType: 'module.completed' };
+// As the service returns it: versioned (`withTemplateVersion`).
 const bindingRow = {
+  version: '"v-test"',
   id: BINDING_ID,
   moduleId: 'm1',
   workflowId: WORKFLOW_ID,

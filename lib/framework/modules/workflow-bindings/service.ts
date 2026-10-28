@@ -17,38 +17,26 @@
  * (`lib/framework/privacy/erasure.ts`), so a client holding a copy read before the erasure would
  * put the address back by saving it. Every read returns the template's {@link bindingTemplateVersion};
  * an update that writes the template sends it back as `If-Match`, and is refused (412) once the
- * template has moved on, an erasure included, under the row lock erasure's scrub takes. A save of
+ * template has moved on, an erasure included, under the row lock erasure's scrub takes (the
+ * version is `./versions`). A save of
  * `enabled` alone writes nothing erasure scrubs and is not checked; a create is new intent.
  */
 
 import { Prisma } from '@prisma/client';
 import type { ModuleWorkflowBinding } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
-import { NotFoundError, ValidationError } from '@/lib/api/errors';
-import { assertCurrentVersion, recordVersion } from '@/lib/api/record-version';
+import { NotFoundError, PreconditionRequiredError, ValidationError } from '@/lib/api/errors';
+import { assertCurrentVersion } from '@/lib/api/record-version';
+import {
+  bindingTemplateVersion,
+  withTemplateVersion,
+  type VersionedWorkflowBinding,
+} from '@/lib/framework/modules/workflow-bindings/versions';
 import { WRITER_TRANSACTION_OPTIONS } from '@/lib/privacy/erased-subjects';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { mapPrismaWriteError } from '@/lib/framework/shared/prisma-errors';
 
 const ENTITY_TYPE = 'module_workflow_binding';
-
-// ─── Versions ────────────────────────────────────────────────────────────────
-
-/**
- * The version of a binding's `inputTemplate`: the one field a versioned save writes. Its own
- * prefix, so it never equals a core record's version.
- */
-export function bindingTemplateVersion(inputTemplate: Prisma.JsonValue): string {
-  return recordVersion(['module-workflow-binding-template', inputTemplate ?? null]);
-}
-
-/** A binding as every read returns it: the row, with its template's version. */
-export type VersionedWorkflowBinding = ModuleWorkflowBinding & { version: string };
-
-/** `binding` with its template's version. */
-export function withTemplateVersion(binding: ModuleWorkflowBinding): VersionedWorkflowBinding {
-  return { ...binding, version: bindingTemplateVersion(binding.inputTemplate) };
-}
 
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
@@ -131,7 +119,7 @@ export interface BindWorkflowArgs {
  * Prisma constraint error. The binding records its author in `createdBy` (retained on
  * erasure) — that id becomes the triggered execution's `userId` at dispatch.
  */
-export async function bindWorkflow(args: BindWorkflowArgs): Promise<ModuleWorkflowBinding> {
+export async function bindWorkflow(args: BindWorkflowArgs): Promise<VersionedWorkflowBinding> {
   const {
     moduleSlug,
     workflowId,
@@ -173,7 +161,7 @@ export async function bindWorkflow(args: BindWorkflowArgs): Promise<ModuleWorkfl
     clientIp: clientIp ?? null,
   });
 
-  return binding;
+  return withTemplateVersion(binding);
 }
 
 export interface UpdateWorkflowBindingArgs {
@@ -199,8 +187,13 @@ export interface UpdateWorkflowBindingArgs {
  */
 export async function updateWorkflowBinding(
   args: UpdateWorkflowBindingArgs
-): Promise<ModuleWorkflowBinding> {
+): Promise<VersionedWorkflowBinding> {
   const { moduleSlug, bindingId, enabled, inputTemplate, loadedAt, userId, clientIp } = args;
+  // A template save with no version is answered as the missing precondition it is (428), not as
+  // a stale one (412): reloading would never fix it.
+  if (inputTemplate !== undefined && (loadedAt === undefined || loadedAt.length === 0)) {
+    throw new PreconditionRequiredError();
+  }
 
   const moduleId = await loadModuleId(moduleSlug);
   await loadBindingInModule(moduleId, bindingId);
@@ -250,7 +243,7 @@ export async function updateWorkflowBinding(
     clientIp: clientIp ?? null,
   });
 
-  return binding;
+  return withTemplateVersion(binding);
 }
 
 export interface UnbindWorkflowArgs {

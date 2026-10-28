@@ -13,7 +13,7 @@
 import type { ModuleWorkflowBinding } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { NotFoundError } from '@/lib/api/errors';
-import { bindingTemplateVersion } from '@/lib/framework/modules/workflow-bindings/service';
+import { bindingTemplateVersion } from '@/lib/framework/modules/workflow-bindings/versions';
 
 /** A binding enriched with the bound workflow's display fields (or `null` if gone). */
 export interface ModuleWorkflowBindingView extends ModuleWorkflowBinding {

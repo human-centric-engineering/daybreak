@@ -23,7 +23,6 @@ import { getClientIP } from '@/lib/security/ip';
 import {
   updateWorkflowBinding,
   unbindWorkflow,
-  withTemplateVersion,
 } from '@/lib/framework/modules/workflow-bindings/service';
 import {
   parseModuleSlug,
@@ -58,7 +57,7 @@ export const PATCH = withAdminAuth<{ slug: string; bindingId: string }>(
       bindingId,
       adminId: session.user.id,
     });
-    return successResponse(withTemplateVersion(binding));
+    return successResponse(binding);
   }
 );
 

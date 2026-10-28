@@ -51,7 +51,7 @@ const { prismaFake, store, resetStore } = vi.hoisted(() => {
 vi.mock('@/lib/db/client', () => ({ prisma: prismaFake }));
 
 import { listModuleWorkflowBindings } from '@/lib/framework/modules/workflow-bindings/queries';
-import { bindingTemplateVersion } from '@/lib/framework/modules/workflow-bindings/service';
+import { bindingTemplateVersion } from '@/lib/framework/modules/workflow-bindings/versions';
 import { NotFoundError } from '@/lib/api/errors';
 
 function seedModule(slug: string): void {
