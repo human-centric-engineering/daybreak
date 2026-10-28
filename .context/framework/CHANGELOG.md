@@ -71,7 +71,7 @@ process.
   the workflow, from the run's input and from the definition it runs, under
   erasure's locks, as core's scheduler does. An address an operator re-enters
   after the erasure is kept. **Not yet covered:** a binding edit saved from a
-  form opened before an erasure writes the address back.
+  form opened before an erasure writes the address back (Hub t-151).
 
 ## [0.8.0] — 2026-10-22
 

@@ -24,7 +24,7 @@
  * request (`updateModuleWorkflowBinding`), so a form opened before an erasure and saved after it
  * puts the address back, the hole core closed for its own configuration with versioned saves
  * (t-899). Daybreak's binding is not one of core's scrubbed columns, so no guard asks; the
- * follow-up is on the Hub (f-module-bindings).
+ * follow-up is Hub t-151.
  *
  * Registered from `initAppErasureHooks()`, not from `initFramework()` at boot: core's registry
  * runs that lazily before its first read and re-runs it after a reset, so a boot-time
