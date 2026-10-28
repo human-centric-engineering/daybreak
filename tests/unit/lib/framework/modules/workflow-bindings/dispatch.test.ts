@@ -341,6 +341,59 @@ describe('erasure (Sunrise 0.16.0 §122)', () => {
     // Since the read, not ever: taken before the dispatch's first query.
     expect(options.since.getTime()).toBeGreaterThanOrEqual(before - 1);
     expect(options.since.getTime()).toBeLessThanOrEqual(Date.now());
+    // Shared: concurrent dispatches do not queue behind each other; erasure still waits.
+    expect(options).toMatchObject({ shared: true });
+  });
+
+  it('names the member who triggered the event, and takes them out of the payload if erased', async () => {
+    seedWorkflow('wf-1');
+    seedBinding('wf-1');
+    findErasedMock.mockResolvedValueOnce({ addresses: [], userIds: ['member-9'] });
+
+    await runModuleWorkflowBindings('reading', 'module.completed', {
+      userId: 'member-9',
+      score: 3,
+    });
+
+    const [, subjects] = findErasedMock.mock.calls[0] as unknown as [
+      unknown,
+      { userIds: string[] },
+    ];
+    expect(subjects.userIds).toContain('member-9');
+    const payload = store.createdExecutions[0].inputData.event.payload;
+    expect(payload.score).toBe(3);
+    expect(JSON.stringify(payload)).not.toContain('member-9');
+  });
+
+  it('writes a run that names nobody without a transaction or a check', async () => {
+    seedWorkflow('wf-1');
+    seedBinding('wf-1', { inputTemplate: { locale: 'en' } });
+
+    const result = await runModuleWorkflowBindings('reading', 'module.completed', { score: 1 });
+
+    expect(result.dispatched).toBe(1);
+    expect(prismaFake.$transaction).not.toHaveBeenCalled();
+    expect(findErasedMock).not.toHaveBeenCalled();
+  });
+
+  it('skips the binding, writing no run, when the stripped definition does not re-validate', async () => {
+    seedWorkflow('wf-1', { snapshot: NOTIFY_DEFINITION });
+    seedBinding('wf-1');
+    findErasedMock.mockResolvedValueOnce({ addresses: ['erased@example.com'], userIds: [] });
+    const versionService = await import('@/lib/orchestration/workflows/version-service');
+    const spy = vi.spyOn(versionService, 'withoutErasedRecipients').mockImplementationOnce(() => {
+      throw new Error('invalid definition after rewrite');
+    });
+
+    const result = await runModuleWorkflowBindings('reading', 'module.completed');
+
+    expect(result.dispatched).toBe(0);
+    expect(result.skipped).toEqual([
+      expect.objectContaining({ reason: 'execution_create_failed' }),
+    ]);
+    expect(store.createdExecutions).toHaveLength(0);
+    expect(drainEngineMock).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 
   it('blanks an erased address in the run input and takes it out of the definition it runs', async () => {
@@ -373,8 +426,8 @@ describe('erasure (Sunrise 0.16.0 §122)', () => {
   it('a lock wait that runs out skips that binding but still runs the others', async () => {
     seedWorkflow('wf-1');
     seedWorkflow('wf-2');
-    seedBinding('wf-1');
-    seedBinding('wf-2');
+    seedBinding('wf-1', { inputTemplate: { to: 'ops@example.com' } });
+    seedBinding('wf-2', { inputTemplate: { to: 'ops@example.com' } });
     findErasedMock.mockRejectedValueOnce(new Error('canceling statement due to lock timeout'));
 
     const result = await runModuleWorkflowBindings('reading', 'module.completed');

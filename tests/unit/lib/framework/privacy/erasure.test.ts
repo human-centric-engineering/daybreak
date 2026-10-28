@@ -13,6 +13,7 @@ import type { ErasureTxContext } from '@/lib/privacy/erasure-hooks';
 import {
   BINDING_PAGE_SIZE,
   BINDING_TEMPLATES_HOOK,
+  BINDING_WRITE_ATTEMPTS,
   DISPATCH_FILE,
   eraseFromBindingTemplates,
   initFrameworkErasureHooks,
@@ -32,9 +33,14 @@ interface BindingRow {
   inputTemplate: unknown;
 }
 
-function fakeTx(rows: BindingRow[]) {
+/**
+ * `beforeWrite` runs before each conditional write: a concurrent operator save, landing between
+ * the hook's read and its write.
+ */
+function fakeTx(rows: BindingRow[], beforeWrite?: (row: BindingRow) => void) {
   const audits: Array<Record<string, unknown>> = [];
   const pages: number[] = [];
+  const writes: number[] = [];
   const tx = {
     moduleWorkflowBinding: {
       findMany: async (args: { where?: { id: { gt: string } }; take: number }) => {
@@ -47,17 +53,27 @@ function fakeTx(rows: BindingRow[]) {
         pages.push(page.length);
         return page;
       },
-      update: async ({
+      // Prisma's Json `equals`: a deep match on the stored value.
+      updateMany: async ({
         where,
         data,
       }: {
-        where: { id: string };
+        where: { id: string; inputTemplate: { equals: unknown } };
         data: { inputTemplate: unknown };
       }) => {
         const row = rows.find((r) => r.id === where.id);
-        if (!row) throw new Error(`no binding ${where.id}`);
+        if (!row) return { count: 0 };
+        beforeWrite?.(row);
+        writes.push(1);
+        if (JSON.stringify(row.inputTemplate) !== JSON.stringify(where.inputTemplate.equals)) {
+          return { count: 0 };
+        }
         row.inputTemplate = data.inputTemplate;
-        return row;
+        return { count: 1 };
+      },
+      findUnique: async ({ where }: { where: { id: string } }) => {
+        const row = rows.find((r) => r.id === where.id);
+        return row ? { inputTemplate: row.inputTemplate } : null;
       },
     },
     aiAdminAuditLog: {
@@ -67,7 +83,7 @@ function fakeTx(rows: BindingRow[]) {
       },
     },
   };
-  return { tx, audits, pages };
+  return { tx, audits, pages, writes };
 }
 
 function binding(id: string, inputTemplate: unknown): BindingRow {
@@ -142,6 +158,49 @@ describe('eraseFromBindingTemplates', () => {
     expect(pages).toEqual([BINDING_PAGE_SIZE, 1]);
     expect(changed).toBe(1);
     expect(rows[BINDING_PAGE_SIZE].inputTemplate).toEqual({ to: '' });
+  });
+});
+
+describe('eraseFromBindingTemplates — an operator save between the read and the write', () => {
+  it('keeps the operator’s edit and blanks the address in it', async () => {
+    const rows = [binding('b1', { to: 'erased@example.com', cc: 'a@example.com' })];
+    let saved = false;
+    const { tx, audits } = fakeTx(rows, (row) => {
+      if (saved) return;
+      saved = true;
+      row.inputTemplate = { to: 'erased@example.com', cc: 'b@example.com', subject: 'new' };
+    });
+
+    const changed = await eraseFromBindingTemplates(ctx(tx));
+
+    expect(changed).toBe(1);
+    // Not the stale read with the address taken out ({ to: '', cc: 'a@…' }): the edit survives.
+    expect(rows[0].inputTemplate).toEqual({ to: '', cc: 'b@example.com', subject: 'new' });
+    expect(audits).toHaveLength(1);
+  });
+
+  it('leaves a binding alone when the save removed the address itself', async () => {
+    const rows = [binding('b1', { to: 'erased@example.com' })];
+    const { tx, audits } = fakeTx(rows, (row) => {
+      row.inputTemplate = { to: 'someone-else@example.com' };
+    });
+
+    expect(await eraseFromBindingTemplates(ctx(tx))).toBe(0);
+    expect(rows[0].inputTemplate).toEqual({ to: 'someone-else@example.com' });
+    expect(audits).toEqual([]);
+  });
+
+  it('fails the erasure, rather than writing a stale copy, when the binding never settles', async () => {
+    const rows = [binding('b1', { to: 'erased@example.com', n: 0 })];
+    let n = 0;
+    const { tx, writes } = fakeTx(rows, (row) => {
+      n += 1;
+      row.inputTemplate = { to: 'erased@example.com', n };
+    });
+
+    await expect(eraseFromBindingTemplates(ctx(tx))).rejects.toThrow(/kept changing/);
+    expect(writes).toHaveLength(BINDING_WRITE_ATTEMPTS);
+    expect(rows[0].inputTemplate).toMatchObject({ to: 'erased@example.com' });
   });
 });
 

@@ -23,27 +23,29 @@
  * read before the run is written. An erasure committing in between has blanked the person in
  * both (`lib/framework/privacy/erasure.ts` for the template, core for the version), so the run is
  * written the way core's scheduler writes one: under the locks erasure takes for everyone the two
- * name, leaving out anyone erased since they were read. An erasure that has not committed waits
- * for the run's transaction, then redacts the new run with the other unfinished ones. Declared as
- * a stale writer (`taken-at`) by `initFrameworkErasureHooks()`. The event payload is the request's
- * own and is not checked (core's `intent`, as the inbound triggers).
+ * name, and the member the event names, leaving out anyone erased since they were read. An erasure
+ * that has not committed waits for the run's transaction, then redacts the new run with the other
+ * unfinished ones. A run that names nobody is a plain insert. Declared as a stale writer
+ * (`taken-at`) by `initFrameworkErasureHooks()`. The rest of the event payload is the request's own
+ * and is not checked (core's `intent`, as the inbound triggers).
  */
 
 import type { AiWorkflowExecution, Prisma } from '@prisma/client';
 import { prisma } from '@/lib/db/client';
 import { logger } from '@/lib/logging';
 import { isRecord } from '@/lib/utils';
-import { WorkflowStatus } from '@/types/orchestration';
+import { WorkflowStatus, type WorkflowDefinition } from '@/types/orchestration';
 import { workflowDefinitionSchema } from '@/lib/validations/orchestration';
 import { drainEngine } from '@/lib/orchestration/scheduling/scheduler';
 import { runAcrossOwners } from '@/lib/auth/subject-context';
 import { resolveMaxCostPerExecution } from '@/lib/orchestration/llm/cost-caps';
 import { withoutErasedRecipients } from '@/lib/orchestration/workflows/version-service';
 import { definitionRecipients } from '@/lib/privacy/config-recipients';
-import { blankAddressInTemplate } from '@/lib/privacy/run-recipients';
+import { blankAddressInTemplate, redactErased } from '@/lib/privacy/run-recipients';
 import {
   boundLockWaits,
   findErasedSubjects,
+  namesAnyone,
   stringsIn,
   WRITER_TRANSACTION_OPTIONS,
   type ErasedSubjects,
@@ -53,13 +55,19 @@ import {
 const TRIGGER_SOURCE = 'module-event';
 
 /**
- * How long a run's transaction waits for erasure's locks: inside `WRITER_TRANSACTION_OPTIONS`,
- * past an erasure's 60 s. Only a person the binding names being erased right now makes it wait.
- * A wait that runs out skips the binding (`execution_create_failed`), as any failed insert does.
+ * How long a run's transaction waits for the subject locks of the people it names. They are held
+ * exclusively by an erasure of one of them (up to 60 s) and by a backup import naming one (up to
+ * 130 s); other dispatches share them. The dispatch runs inside a member's request
+ * (`recordModuleEngagement`), so it does not wait that out: past this bound the binding is skipped
+ * (`execution_create_failed`) and its run is not made. A run naming someone being erased right
+ * now would have them taken out of it anyway.
  */
-const SUBJECT_LOCK_WAIT_MS = WRITER_TRANSACTION_OPTIONS.timeout - 5_000;
+const DISPATCH_LOCK_TIMEOUT_MS = 10_000;
 
-/** `template` with every erased address blanked, by the rule erasure applies to it. */
+/**
+ * `template` with every erased address blanked, by the rule erasure applies to it. A copy of the
+ * scheduler's private helper of the same name (`lib/orchestration/scheduling/scheduler.ts`).
+ */
 function withoutErasedAddresses(
   template: Prisma.JsonValue,
   erased: ErasedSubjects
@@ -187,28 +195,34 @@ export async function runModuleWorkflowBindings(
 
     const { publishedVersion } = workflow;
     const named = definitionRecipients(publishedVersion.snapshot);
+    // The member who triggered the event is named too (`recordModuleEngagement` puts their id in
+    // the payload): an erasure of them that commits while this runs must not find the new run
+    // past its scan, owned by the binding's author, still naming them.
     const subjects = {
       addresses: [...stringsIn(binding.inputTemplate), ...named.addresses],
-      userIds: named.userIds,
+      userIds: [...named.userIds, ...(typeof payload.userId === 'string' ? [payload.userId] : [])],
     };
 
     try {
-      const created: {
+      const write = async (
+        tx: Prisma.TransactionClient,
+        erased: ErasedSubjects
+      ): Promise<{
         execution: AiWorkflowExecution;
         inputData: Record<string, unknown>;
-        erased: ErasedSubjects;
-      } = await prisma.$transaction(async (tx) => {
-        await boundLockWaits(tx, SUBJECT_LOCK_WAIT_MS);
-        // Erased since the read, not ever (core's §122 rule): an address an operator re-entered
-        // in the template after an older erasure is theirs, on purpose, and reaches the run.
-        const erased = await findErasedSubjects(tx, subjects, { since: readAt });
-        const template =
-          binding.inputTemplate === null
-            ? null
-            : withoutErasedAddresses(binding.inputTemplate, erased);
+        definition: WorkflowDefinition;
+      }> => {
+        // Before the insert, so a definition the rewrite cannot re-validate skips the binding
+        // rather than leaving a PENDING run nothing drains.
+        const definition = withoutErasedRecipients(defParsed.data, erased);
+        const template = withoutErasedAddresses(binding.inputTemplate, erased);
         const inputData: Record<string, unknown> = {
           ...(isRecord(template) ? template : {}),
-          event: { moduleSlug, eventType, payload },
+          event: {
+            moduleSlug,
+            eventType,
+            payload: redactErased(payload as Prisma.JsonObject, erased),
+          },
         };
         const execution = await tx.aiWorkflowExecution.create({
           data: {
@@ -222,9 +236,24 @@ export async function runModuleWorkflowBindings(
             ...(budgetLimitUsd !== undefined ? { budgetLimitUsd } : {}),
           },
         });
-        return { execution, inputData, erased };
-      }, WRITER_TRANSACTION_OPTIONS);
-      const { execution, inputData, erased } = created;
+        return { execution, inputData, definition };
+      };
+
+      // Nobody named, nothing to check: one insert, as before §122.
+      const NOBODY: ErasedSubjects = { addresses: [], userIds: [] };
+      let erased = NOBODY;
+      const created = !namesAnyone(subjects)
+        ? await write(prisma, NOBODY)
+        : await prisma.$transaction(async (tx) => {
+            await boundLockWaits(tx, DISPATCH_LOCK_TIMEOUT_MS);
+            // Erased since the read, not ever (core's §122 rule): an address an operator
+            // re-entered in the template after an older erasure is theirs, on purpose, and
+            // reaches the run. Shared: concurrent dispatches naming the same people do not queue
+            // behind each other, and an erasure, which locks exclusively, still waits for them.
+            erased = await findErasedSubjects(tx, subjects, { since: readAt, shared: true });
+            return write(tx, erased);
+          }, WRITER_TRANSACTION_OPTIONS);
+      const { execution, inputData, definition } = created;
       if (erased.addresses.length > 0 || erased.userIds.length > 0) {
         // Never the address: it is what was erased.
         logger.warn('Module workflow dispatch: left out people whose data was erased from a run', {
@@ -251,7 +280,7 @@ export async function runModuleWorkflowBindings(
           drainEngine(
             execution.id,
             { id: workflow.id, slug: workflow.slug },
-            withoutErasedRecipients(defParsed.data, erased),
+            definition,
             inputData,
             binding.createdBy,
             publishedVersion.id

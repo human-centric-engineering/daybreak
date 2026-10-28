@@ -34,6 +34,7 @@
  * @see lib/privacy/run-recipients.ts — `eraseFromSchedules`, which this mirrors
  */
 
+import type { Prisma } from '@prisma/client';
 import { blankAddressInTemplate } from '@/lib/privacy/run-recipients';
 import {
   registerErasureCleanupHook,
@@ -49,6 +50,13 @@ const ERASURE_REASON = 'A person this binding named was erased.';
 
 /** Bindings read per page. A binding is configuration, so there are few; paged all the same. */
 export const BINDING_PAGE_SIZE = 200;
+
+/**
+ * How many times one binding's blanking is retried when its template changed between the read and
+ * the write. An operator saving the same binding again and again during one erasure is the only
+ * way past it, and the erasure attempt then fails whole, as any throw inside its transaction does.
+ */
+export const BINDING_WRITE_ATTEMPTS = 5;
 
 /** The hook's `name`: the registry is keyed by it, so a re-run replaces rather than duplicates. */
 export const BINDING_TEMPLATES_HOOK = 'framework:module-workflow-binding-templates';
@@ -89,13 +97,8 @@ export async function eraseFromBindingTemplates({
       },
     });
     for (const row of rows) {
-      if (row.inputTemplate === null) continue;
-      const change = blankAddressInTemplate(row.inputTemplate, address);
-      if (!change) continue;
-      await tx.moduleWorkflowBinding.update({
-        where: { id: row.id },
-        data: { inputTemplate: change.value ?? {} },
-      });
+      const removed = await blankInBinding(tx, row.id, row.inputTemplate, address);
+      if (removed === 0) continue;
       // Unattributed: a cleanup hook is not told who asked for the erasure. The erasure's own
       // receipt and audit row name them.
       await tx.aiAdminAuditLog.create({
@@ -105,7 +108,7 @@ export async function eraseFromBindingTemplates({
           entityType: ENTITY_TYPE,
           entityId: row.id,
           entityName: `${row.eventType} → ${row.workflowId}`,
-          changes: { inputTemplateValuesCleared: { from: change.removed, to: 0 } },
+          changes: { inputTemplateValuesCleared: { from: removed, to: 0 } },
           metadata: {
             reason: ERASURE_REASON,
             moduleId: row.moduleId,
@@ -120,6 +123,38 @@ export async function eraseFromBindingTemplates({
     after = rows[rows.length - 1].id;
   }
   return changed;
+}
+
+/**
+ * Blank `address` in one binding's template, written only if the template is still the one it was
+ * read as: an operator's edit committed in between is not overwritten, but read again and blanked
+ * in turn. Core's schedule pass gets the same guarantee from a row lock (`FOR NO KEY UPDATE`); this
+ * compares instead, which needs no raw SQL. Returns how many values it removed.
+ */
+async function blankInBinding(
+  tx: ErasureTxContext['tx'],
+  id: string,
+  read: Prisma.JsonValue,
+  address: string
+): Promise<number> {
+  let current = read;
+  for (let attempt = 0; attempt < BINDING_WRITE_ATTEMPTS; attempt++) {
+    if (current === null) return 0;
+    const change = blankAddressInTemplate(current, address);
+    if (!change) return 0;
+    const { count } = await tx.moduleWorkflowBinding.updateMany({
+      where: { id, inputTemplate: { equals: current } },
+      data: { inputTemplate: change.value ?? {} },
+    });
+    if (count === 1) return change.removed;
+    const again = await tx.moduleWorkflowBinding.findUnique({
+      where: { id },
+      select: { inputTemplate: true },
+    });
+    if (!again) return 0; // deleted in between: nothing left to blank
+    current = again.inputTemplate;
+  }
+  throw new Error(`Module workflow binding ${id} kept changing while erasure blanked it`);
 }
 
 /**
@@ -140,6 +175,7 @@ export function initFrameworkErasureHooks(): void {
     how:
       "Creates a run from a binding's template and the workflow's published definition, with " +
       "anyone erased since it read them blanked and taken out, under erasure's locks: the " +
-      "scheduler's rule. The event payload is the request's own (intent).",
+      "scheduler's rule; the member the event names is checked the same way. The rest of the " +
+      "event payload is the request's own (intent).",
   });
 }

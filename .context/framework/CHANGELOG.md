@@ -62,16 +62,7 @@ process.
 
 ### Fixed
 
-- **Erasure now reaches module workflow binding templates** (Hub t-150). A
-  binding's `inputTemplate` is the operator's static input to a bound
-  workflow, as a schedule's is, but erasure blanked only schedules, so an
-  erased person's address stayed in a binding and went into every run it
-  started. Erasure now blanks a verified address there, audited per binding,
-  and the dispatcher leaves out anyone erased since it read the binding and
-  the workflow, from the run's input and from the definition it runs, under
-  erasure's locks, as core's scheduler does. An address an operator re-enters
-  after the erasure is kept. **Not yet covered:** a binding edit saved from a
-  form opened before an erasure writes the address back (Hub t-151).
+- **Erasure now reaches module workflow binding templates** (Hub t-150). A binding's `inputTemplate` is the operator's static input to a bound workflow, as a schedule's is, but erasure blanked only schedules, so an erased person's address stayed in a binding and went into every run it started. Erasure now blanks a verified address there, audited per binding, and the dispatcher leaves out anyone erased since it read the binding and the workflow, and the member who triggered the event if they were, from the run's input and from the definition it runs, under erasure's locks, as core's scheduler does. Erasure writes a binding only if its template is unchanged since it read it, so an operator's concurrent edit is not lost. An address an operator re-enters after the erasure is kept. **Not yet covered:** a binding edit saved from a form opened before an erasure writes the address back (Hub t-151).
 
 ## [0.8.0] — 2026-10-22
 
