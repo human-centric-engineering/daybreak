@@ -56,7 +56,7 @@
 > - The `lib/app/*` **leaf** scaffolds (`env.ts`, `capabilities.ts`, `context-contributors.ts`,
 >   `leaf-bootstrap.ts`, `leaf-admin-nav.ts`, …) — Sunrise ships them empty; Daybreak keeps them
 >   empty for the app. Filling one collides with a leaf's registrations on a Daybreak upgrade.
->   **Exception — the ten `lib/app/*` _bridges_ Daybreak DOES fill. This list is the
+>   **Exception — the eleven `lib/app/*` _bridges_ Daybreak DOES fill. This list is the
 >   roster; count bridges here, not from an ordinal in a docblock:** `bootstrap.ts` (server boot →
 >   `initFramework()`), `admin-nav.ts` (client sidebar → the framework nav section),
 >   `data-export.ts` (GDPR Art. 15 subject access → the framework's own manifest at
@@ -69,13 +69,16 @@
 >   and `ALWAYS_RUN_TESTS`; Sunrise #759/#762), `platform-agents.ts` (agents every org gets
 >   its own instance of → `lib/framework/platform-agents.ts`, the rubric judge; Sunrise §116),
 >   `owner-classification.ts` (the framework's user-linked models → the owner layer,
->   `lib/framework/privacy/owner-classification.ts`; Sunrise §115) and `capability-seed-pairs.ts`
->   (the framework boot seed's seed-parity exemption, test-only; Sunrise #1013). A framework registration that must run in a realm
+>   `lib/framework/privacy/owner-classification.ts`; Sunrise §115), `capability-seed-pairs.ts`
+>   (the framework boot seed's seed-parity exemption, test-only; Sunrise #1013) and `erasure.ts`
+>   (account erasure → the framework's hook that blanks erased addresses in module binding templates,
+>   and its stale-writer declaration for the module dispatcher, `lib/framework/privacy/erasure.ts`;
+>   Sunrise §122). A framework registration that must run in a realm
 >   `initFramework()` can't reach — server-boot, the client sidebar, a lazy seam core owns the
 >   init of, or a static function core imports directly — has nowhere else to go; each bridge
 >   delegates to a reserved leaf hook (`leaf-bootstrap.ts` / `leaf-admin-nav.ts` /
 >   `leaf-data-export.ts` / `leaf-org-export.ts` / `leaf-brand.ts` / `leaf-platform-agents.ts` /
->   `leaf-owner-classification.ts` / `leaf-capability-seed-pairs.ts`) so the leaf's own registrations never collide.
+>   `leaf-owner-classification.ts` / `leaf-capability-seed-pairs.ts` / `leaf-erasure.ts`) so the leaf's own registrations never collide.
 >   `brand.ts` is the one bridge where the leaf hook **overrides** rather than appends — brand
 >   identity is single-valued, so a leaf replaces Daybreak's name, it does not compose with it.
 > - `prisma/schema/app.prisma` + `app_…` migrations, `app/brand-theme.css`, and **`.context/app/`**
@@ -165,7 +168,7 @@ Instructions for Claude Code when working in this repository.
 - **Server components by default** — add `'use client'` only when needed
 - **No N+1 client-side fetches** — list/table pages get all data from a single enriched list endpoint; never fire per-row API calls in `useEffect`
 - **Contextual help on form fields** — every non-trivial form field gets a `<FieldHelp>` ⓘ popover; see `.context/ui/contextual-help.md`
-- **New `User` relations need an `onDelete` policy _and_ an export disposition** — any new model with a `userId`/`createdBy` FK must (1) declare `onDelete: Cascade` (personal data) or `onDelete: SetNull` (retained config/audit, FK nullable) — omitting it defaults to `Restrict` and silently breaks GDPR erasure; and (2) be added to `SUBJECT_DATA_SOURCES` in `lib/privacy/export-sources.ts`, which decides what a data subject receives from it. The second is enforced — `tests/unit/lib/privacy/export-sources.test.ts` parses the schema and fails until the model is listed. **Never delete a row from that manifest to make the test pass**; that ships a silently short answer to a data subject. Never call `prisma.user.delete()` directly — route account deletion through `requestUserErasure()` (which records it, then runs `eraseUser()`), and subject access through `exportUserData()`. See `.context/privacy/data-erasure.md` and `.context/privacy/data-export.md`.
+- **New `User` relations need an `onDelete` policy _and_ an export disposition** — any new model with a `userId`/`createdBy` FK must (1) declare `onDelete: Cascade` (personal data) or `onDelete: SetNull` (retained config/audit, FK nullable) — omitting it defaults to `Restrict` and silently breaks GDPR erasure; and (2) be added to `SUBJECT_DATA_SOURCES` in `lib/privacy/export-sources.ts`, which decides what a data subject receives from it. The second is enforced — `tests/unit/lib/privacy/export-sources.test.ts` parses the schema and fails until the model is listed. **Never delete a row from that manifest to make the test pass**; that ships a silently short answer to a data subject. A file that writes a column erasure scrubs in place must declare how it knows its copy is stale in `STALE_WRITERS` (`lib/privacy/stale-writers.ts`; forks use `registerStaleWriter()`), enforced the same way by `tests/unit/lib/privacy/stale-writers.test.ts` — and the same never-delete rule applies. Never call `prisma.user.delete()` directly — route account deletion through `requestUserErasure()` (which records it, then runs `eraseUser()`), and subject access through `exportUserData()`. See `.context/privacy/data-erasure.md` and `.context/privacy/data-export.md`.
 - **`CHANGELOG.md` follows the public surface** — when a PR adds, removes, or changes a named seam, a documented public API, or a published Prisma model interface (see [`VERSIONING.md`](./VERSIONING.md#public-surface-contract-tight-definition)), append a bullet to `CHANGELOG.md`'s `## [Unreleased]` section as part of the same PR using [Keep-a-Changelog](https://keepachangelog.com/en/1.1.0/) categories (Added / Changed / Deprecated / Removed / Fixed / Security). PRs that don't touch the public surface (internal refactors, tests, docs, chores) deliberately do **not** belong in the CHANGELOG — adding noise dilutes the signal forks rely on. `/pre-pr` step 5d flags public-surface diffs that omit a CHANGELOG entry.
 
 ## MCP Integration

@@ -230,7 +230,13 @@ describe('superviseConversation', () => {
     it('calls the provider, bills cost against the conversation, and returns the shaped result', async () => {
       const chat = vi.fn().mockResolvedValue({
         content: 'the verdict',
-        usage: { inputTokens: 100, outputTokens: 40 },
+        usage: {
+          inputTokens: 100,
+          outputTokens: 40,
+          cacheReadTokens: 60,
+          cacheWriteTokens: 10,
+          serviceTier: 'flex',
+        },
       });
       vi.mocked(getProvider).mockResolvedValue({ chat } as never);
 
@@ -243,9 +249,21 @@ describe('superviseConversation', () => {
         model: 'judge-x',
         temperature: 0.2,
       });
-      expect(calculateCost).toHaveBeenCalledWith('judge-x', 100, 40);
+      // The usage is passed on so cached input is priced at the cache rate (Sunrise 0.16.0 t-909).
+      expect(calculateCost).toHaveBeenCalledWith(
+        'judge-x',
+        100,
+        40,
+        expect.objectContaining({ cacheReadTokens: 60, cacheWriteTokens: 10, serviceTier: 'flex' })
+      );
       expect(logCost).toHaveBeenCalledWith(
-        expect.objectContaining({ conversationId: 'c1', operation: 'evaluation' })
+        expect.objectContaining({
+          conversationId: 'c1',
+          operation: 'evaluation',
+          cacheReadTokens: 60,
+          cacheWriteTokens: 10,
+          serviceTier: 'flex',
+        })
       );
       expect(out).toEqual({ content: 'the verdict', tokensUsed: 140, costUsd: 0.03 });
     });

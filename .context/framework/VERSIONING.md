@@ -82,7 +82,7 @@ on:
   **and the reserved `leaf-*` seams they delegate to** (`leaf-bootstrap.ts`,
   `leaf-admin-nav.ts`, `leaf-data-export.ts`, `leaf-org-export.ts`,
   `leaf-brand.ts`, `leaf-db-drift.ts`, `leaf-ci.ts`, `leaf-platform-agents.ts`,
-  `leaf-owner-classification.ts`, `leaf-capability-seed-pairs.ts`).
+  `leaf-owner-classification.ts`, `leaf-capability-seed-pairs.ts`, `leaf-erasure.ts`).
   Which files are Daybreak's and which are the leaf's **is itself public
   surface**: a file changing hands is a breaking change for any leaf that filled
   it. Every one of these seams **appends** to Daybreak's own entries except

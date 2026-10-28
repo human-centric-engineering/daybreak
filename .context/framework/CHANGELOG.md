@@ -25,6 +25,45 @@ process.
 
 ## [Unreleased]
 
+### Added
+
+- **Erasure: your hooks and stale writers go in the new reserved
+  `lib/app/leaf-erasure.ts`** (`initLeafErasureHooks()`; Hub t-150). Sunrise
+  0.16.0's stale-writer guard (§122) fails on any file that writes a column
+  erasure scrubs in place until it says how it knows its copy is stale, and it
+  reads only what `initAppErasureHooks()` registers. Daybreak now fills
+  `lib/app/erasure.ts` as a bridge, its eleventh, and calls your hook after the
+  framework's. **Breaking for a leaf that filled `lib/app/erasure.ts`:** move
+  its registrations to `leaf-erasure.ts`, or keeping yours on the merge drops
+  the framework's hook from every erasure. Prefix your hook names (`leaf:`); a
+  name the framework uses (`framework:`) replaces its hook. A throwing leaf
+  init rolls the framework's registrations back with its own.
+- **Four new Sunrise scaffolds are yours to fill directly** — Daybreak keeps
+  them empty: `lib/app/credential-paths.ts` (route segments that are
+  credentials, collapsed in every log), `lib/app/admin-tier-routes.ts` (your
+  org-tier admin API routes, for core's roster test), `lib/app/admin-landing.ts`
+  (where `/admin` sends an org admin) and `lib/app/own-modules.ts`. **A leaf
+  that keeps modules of its own under `lib/app/` should list them in
+  `own-modules.ts`** and delete the rows it carried for them in `VERSIONING.md`,
+  the `CUSTOMIZATION.md` §4 table and `SEAM_DEFAULTS`; Daybreak declares none,
+  since its `lib/app/` files are a leaf's public surface.
+
+### Changed
+
+- **Sunrise 0.16.0 merged** (Hub t-150). Read its "What a fork has to do"
+  before deploying: three migrations adding nullable columns, then
+  `npm run db:seed`; API clients of the versioned workflow, settings, webhook
+  and schedule saves must send `If-Match`. The framework judge's cost rows now
+  carry Claude's cache split and price cached input at the cache rate.
+- **Owner classification sees more of your columns** (Sunrise #1067, #1069). The
+  guard now reads a user-id column whose comment mentions `@relation`, and a
+  `String` named `…UserId`. An unclassified model it newly sees fails it until
+  you classify it in `lib/app/leaf-owner-classification.ts`.
+
+### Fixed
+
+- **Erasure now reaches module workflow binding templates** (Hub t-150). A binding's `inputTemplate` is the operator's static input to a bound workflow, as a schedule's is, but erasure blanked only schedules, so an erased person's address stayed in a binding and went into every run it started. Erasure now blanks a verified address there, audited per binding, and the dispatcher leaves out anyone erased since it read the binding and the workflow, and the member who triggered the event if they were, from the run's input and from the definition it runs, under erasure's locks, as core's scheduler does. Erasure locks the bindings it rewrites as it reads them, as core does schedules, so an operator's save made meanwhile waits for it rather than being lost. An address an operator re-enters after the erasure is kept. **Not yet covered:** a binding edit saved from a form opened before an erasure writes the address back (Hub t-151).
+
 ## [0.8.0] — 2026-10-22
 
 > **Eighth tagged Daybreak release: Sunrise 0.15.0.** It carries Sunrise

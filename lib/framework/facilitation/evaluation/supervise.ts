@@ -156,7 +156,14 @@ export async function superviseConversation(
         temperature: opts.temperature,
       })
       .catch(rethrowSpendCapRefusal);
-    const cost = calculateCost(modelId, response.usage.inputTokens, response.usage.outputTokens);
+    // The usage rides along so a cached Claude prompt is priced at the cache rate: since Sunrise
+    // 0.16.0 `inputTokens` counts cached input too (t-909).
+    const cost = calculateCost(
+      modelId,
+      response.usage.inputTokens,
+      response.usage.outputTokens,
+      response.usage
+    );
     void logCost({
       conversationId,
       userId: actorUserId,
@@ -164,6 +171,9 @@ export async function superviseConversation(
       provider: modelInfo.provider,
       inputTokens: response.usage.inputTokens,
       outputTokens: response.usage.outputTokens,
+      cacheReadTokens: response.usage.cacheReadTokens,
+      cacheWriteTokens: response.usage.cacheWriteTokens,
+      serviceTier: response.usage.serviceTier,
       operation: CostOperation.EVALUATION,
       isLocal: cost.isLocal,
       metadata: { phase: 'framework_conversation_supervisor' },

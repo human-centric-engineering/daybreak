@@ -127,6 +127,11 @@ const {
   };
 });
 
+// DAYBREAK — keep mine (Sunrise 0.16.0 sync): this test assumes `lib/app/erasure.ts` registers
+// nothing, and Daybreak fills it (the framework's binding-template hook and stale writer). Held at
+// the empty seam here; see the upstream-asks ledger.
+vi.mock('@/lib/app/erasure', () => ({ initAppErasureHooks: () => undefined }));
+
 vi.mock('@/lib/logging', () => ({
   logger: mockLogger,
 }));
@@ -1874,6 +1879,25 @@ describe('eraseUser', () => {
         expect(mockPreRedact).not.toHaveBeenCalled();
         expect(mockPrisma.$transaction).not.toHaveBeenCalled();
       });
+
+      it('stops before reading the account for the hooks, once the avatars used the time', async () => {
+        mockIsStorageEnabled.mockReturnValue(true);
+        mockDeleteByPrefix.mockImplementationOnce(async () => {
+          advance(9_000);
+        });
+        const hook = vi.fn();
+        registerErasureCleanupHook({ name: 'late-hook', cleanupExternal: hook });
+
+        const error = await eraseUser({
+          ...BASE_PARAMS,
+          deadline: new Date(Date.now() + 8_000),
+        }).catch((e: unknown) => e);
+
+        expect((error as ErasureDeferredError).stage).toBe('the cleanup hooks');
+        expect(mockUserFind).not.toHaveBeenCalled();
+        expect(hook).not.toHaveBeenCalled();
+        expect(mockPrisma.$transaction).not.toHaveBeenCalled();
+      });
     });
 
     describe('a transaction that fails', () => {
@@ -2616,6 +2640,68 @@ describe('eraseUser', () => {
 
     // Assert: 3) scrubInTransaction ran BEFORE tx.user.delete (ordering contract)
     expect(callOrder.indexOf('scrubInTransaction')).toBeLessThan(callOrder.indexOf('user.delete'));
+  });
+
+  // -------------------------------------------------------------------------
+  // Hook Case 3b (t-944): both phases are told the stored address and whether
+  // it is verified, so a by-address app table can apply the verified rule
+  // -------------------------------------------------------------------------
+
+  describe('the subject fields each hook phase is given', () => {
+    const registerBoth = () => {
+      const cleanupExternal = vi.fn().mockResolvedValue(undefined);
+      const scrubInTransaction = vi.fn().mockResolvedValue(undefined);
+      registerErasureCleanupHook({ name: 'by-address', cleanupExternal, scrubInTransaction });
+      return { cleanupExternal, scrubInTransaction };
+    };
+
+    it('gives both phases the stored email and emailVerified: true for a verified account', async () => {
+      const { cleanupExternal, scrubInTransaction } = registerBoth();
+
+      await eraseUser(BASE_PARAMS);
+
+      expect(cleanupExternal).toHaveBeenCalledWith({
+        userId: BASE_PARAMS.userId,
+        email: 'foo@bar.com',
+        emailVerified: true,
+      });
+      expect(scrubInTransaction).toHaveBeenCalledWith({
+        tx: mockPrisma,
+        userId: BASE_PARAMS.userId,
+        email: 'foo@bar.com',
+        emailVerified: true,
+      });
+    });
+
+    it('tells both phases emailVerified: false for an unverified account', async () => {
+      mockUserFind.mockResolvedValue({ email: 'squatter@bar.com', emailVerified: false });
+      const { cleanupExternal, scrubInTransaction } = registerBoth();
+
+      await eraseUser(BASE_PARAMS);
+
+      expect(cleanupExternal).toHaveBeenCalledWith(
+        expect.objectContaining({ email: 'squatter@bar.com', emailVerified: false })
+      );
+      expect(scrubInTransaction).toHaveBeenCalledWith(
+        expect.objectContaining({ email: 'squatter@bar.com', emailVerified: false })
+      );
+    });
+
+    it('reads the user row for the external phase only when a hook has one', async () => {
+      await eraseUser(BASE_PARAMS);
+      const readsWithoutHooks = mockUserFind.mock.calls.length;
+      expect(readsWithoutHooks).toBeGreaterThan(0);
+
+      mockUserFind.mockClear();
+      registerErasureCleanupHook({ name: 'tx-only', scrubInTransaction: vi.fn() });
+      await eraseUser(BASE_PARAMS);
+      expect(mockUserFind).toHaveBeenCalledTimes(readsWithoutHooks);
+
+      mockUserFind.mockClear();
+      registerErasureCleanupHook({ name: 'external', cleanupExternal: vi.fn() });
+      await eraseUser(BASE_PARAMS);
+      expect(mockUserFind).toHaveBeenCalledTimes(readsWithoutHooks + 1);
+    });
   });
 
   // -------------------------------------------------------------------------

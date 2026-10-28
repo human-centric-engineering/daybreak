@@ -94,8 +94,10 @@ covered by the version contract.
   Fork-owned scaffolds in `lib/app/` — a fork edits these, upstream ships them
   empty (or, for `surface.ts`, as a default it may replace):
   - `lib/app/account-sections.ts` → `initAppAccountSections()` — account-page section registry
+  - `lib/app/admin-landing.ts` → `appOrgAdminLandingRoute` — where an org admin lands at `/admin` (checked by `orgAdminLandingProblem()` in `lib/auth/admin-landing.ts`)
   - `lib/app/admin-nav.ts` → `initAppNav()` — admin nav registry (`registerNavSection()`)
-  - `lib/app/admin-tier.ts` → `initAppOrgTierAdminPages()` — the fork's org-tier admin pages (primitive: `registerOrgTierAdminPage()` in `lib/auth/admin-tier.ts`)
+  - `lib/app/admin-tier.ts` → `initAppOrgTierAdminPages()` — the fork's org-tier admin pages, and the core sections it keeps platform-only (primitives: `registerOrgTierAdminPage()` and `closeCoreOrgTierSection()` in `lib/auth/admin-tier.ts`)
+  - `lib/app/admin-tier-routes.ts` → `APP_ORG_TIER_ADMIN_ROUTES` — the fork's org-tier admin API routes and wrappers, as `path#NAME`, read by the roster test
   - `lib/app/agent-fields.ts` → `appAgentFields` — extra `AiAgent` config fields
   - `lib/app/api-key-scopes.ts` → `APP_API_KEY_SCOPES` — extra mintable API-key scopes
   - `lib/app/auth-landing.ts` → `appAuthLandingRoute` / `appAuthLandingLabel` — where sign-in lands
@@ -106,12 +108,13 @@ covered by the version contract.
   - `lib/app/capability-seed-pairs.ts` → `APP_CAPABILITY_PAIRS` / `APP_UNCHECKED_SEEDS` — which class goes with each slug the fork's capability seeds write, and which of its seeds the parity test cannot run, read by that test
   - `lib/app/ci.ts` → `appCoverageExclusions` / `appAlwaysRunTests` / `appOwnerlessSurfaceExceptions` — the fork's own coverage exclusions, whole-tree always-run tests, and files allowed to read an ownerless-capable model outside the access helpers
   - `lib/app/context-contributors.ts` → `initAppContextContributors()` — chat context contributors (primitive: `registerContextContributor()` in `lib/orchestration/chat/context-builder.ts`)
+  - `lib/app/credential-paths.ts` → `appCredentialPaths` — route patterns whose dynamic segments are credentials, collapsed to `[param]` in every logged, reported and analytics path (read by `collapseDynamicSegments()` in `lib/logging/redact-path.ts`)
   - `lib/app/csp.ts` → `appFrameSrc` — extra CSP `frame-src` origins
   - `lib/app/data-export.ts` → `initAppSubjectSources()` / `collectAppSubjectData()` — Art. 15 export sources
   - `lib/app/db-drift.ts` → `registerAppDriftProbes()` — drift-probe registry (primitives in `lib/db/drift-probes.ts`)
   - `lib/app/emails.ts` → `emailOverrides` — transactional-email template overrides
   - `lib/app/env.ts` → `appEnvSchema` — app env registry
-  - `lib/app/erasure.ts` → `initAppErasureHooks()` — Art. 17 erasure cleanup hooks (primitive: `registerErasureCleanupHook()` in `lib/privacy/erasure-hooks.ts`)
+  - `lib/app/erasure.ts` → `initAppErasureHooks()` — Art. 17 erasure cleanup hooks and stale-writer declarations (primitives: `registerErasureCleanupHook()` and `registerStaleWriter()` in `lib/privacy/erasure-hooks.ts`)
   - `lib/app/eslint.config.mjs` — the fork's own ESLint tier config, spread into the root config
   - `lib/app/evaluations.ts` → `initAppGraders()` — evaluation grader registry
   - `lib/app/footer.ts` → `footerCopyright` — footer copyright line
@@ -131,13 +134,14 @@ covered by the version contract.
   - `lib/app/rate-limit.ts` → `registerAppRateLimits()` — rate-limit registry (`registerRateLimitTier()` / `registerRateLimitRule()` / `registerRateLimitKeyResolver()`). The per-org request counter (`quotas.requestsPerMinute`, `lib/security/org-request-cap.ts`) runs outside this registry, and `'org'` stays free as a custom key name
   - `lib/app/tenant-resolver.ts` → `registerAppTenantResolver()` — the proxy's tenant resolver (primitive: `registerTenantResolver()` in `lib/tenancy/resolver.ts`; Web-standard only)
   - `lib/app/reserved-tiers.ts` → `occupiedTiers` — which reserved namespace tiers this fork occupies
+  - `lib/app/own-modules.ts` → `appOwnModules` — a leaf fork's own `lib/app/` modules, which the seam-coverage guards then skip
   - `lib/app/surface.ts` → `classifySurface()` / `DEFAULT_SURFACE` — per-surface theming classifier
   - `lib/app/user-created.ts` → `initAppUserCreatedHooks()` — post-signup hook registry
 
   **Daybreak's reserved leaf seams** — the bridges above that Daybreak fills
   (`bootstrap.ts`, `admin-nav.ts`, `data-export.ts`, `brand.ts`, `db-drift.ts`,
   `ci.ts`, `platform-agents.ts`, `org-export.ts`, `owner-classification.ts`,
-  `capability-seed-pairs.ts`) each delegate to one of these, which Daybreak ships empty for the
+  `capability-seed-pairs.ts`, `erasure.ts`) each delegate to one of these, which Daybreak ships empty for the
   leaf. Their contract is Daybreak's, documented in
   [`.context/framework/VERSIONING.md`](./.context/framework/VERSIONING.md); they
   are named here because this list is what the coverage guard reads:
@@ -148,6 +152,7 @@ covered by the version contract.
   - `lib/app/leaf-brand.ts` → `leafBrandName` / `leafBrandLegalName` / `leafBrandDescription` — brand overrides (override, not append), via `brand.ts`
   - `lib/app/leaf-ci.ts` → `leafCoverageExclusions` / `leafAlwaysRunTests` / `leafOwnerlessSurfaceExceptions` — the leaf's CI declarations, via `ci.ts`
   - `lib/app/leaf-data-export.ts` → `initLeafSubjectSources()` / `collectLeafSubjectData()` — the leaf's Art. 15 sources, via `data-export.ts`
+  - `lib/app/leaf-erasure.ts` → `initLeafErasureHooks()` — the leaf's erasure cleanup hooks and stale writers, via `erasure.ts`
   - `lib/app/leaf-db-drift.ts` → `registerLeafDriftProbes()` — the leaf's drift probes, via `db-drift.ts`
   - `lib/app/leaf-org-export.ts` → `initLeafOrgSources()` — the leaf's `orgId` tables in the org export, via `org-export.ts`
   - `lib/app/leaf-owner-classification.ts` → `initLeafOwnerClassification()` — the leaf's user-linked models for the owner layer, via `owner-classification.ts`
@@ -192,7 +197,7 @@ covered by the version contract.
   - `successResponse()`, `errorResponse()` from `lib/api/responses.ts`
   - `serverFetch()` from `lib/api/server-fetch.ts`
   - `logger` from `lib/logging/`
-  - org support grants (§121): `GET`/`POST /api/v1/orgs/[id]/support-grants` and `DELETE /api/v1/orgs/[id]/support-grants/[grantId]`; `findOpenSupportGrant()`, `openSupportGrantWhere()`, `grantSupportAccess()`, `revokeSupportGrant()`, `listSupportGrants()` and `SupportGrantError` from `lib/tenancy/support-grants.ts`; `SUPPORT_GRANT_LEVELS` / `DEFAULT_SUPPORT_GRANT_LEVEL` from `lib/tenancy/roles.ts`; `SUPPORT_GRANT_DEFAULT_HOURS` / `SUPPORT_GRANT_MAX_HOURS` and `createSupportGrantSchema` from `lib/validations/tenancy.ts`; entry under a grant (t-824): `verifiedSupportGrant()` and the `'support'` `OrgEntry` source from `lib/tenancy/entry.ts`, the support principal's shape (the default user role in place of the platform role, on the principal and on the handler's session; `presentedRole()` / `presentedSession()` / `isRefusedReadOnlyWrite()` from `lib/auth/support-principal.ts`), `requestSupportSession()` from `lib/auth/admin-page-viewer.ts`, and `support` on the `POST /api/v1/orgs/switch` response; the support stamp on audit rows (t-825): `logAdminAction()` filling `supportGrantId` / `supportOrgId` from the tenant context, `AdminAuditEntry.support` for a caller acting on a session from outside it, `listSupportActivity()`, `GET /api/v1/orgs/[id]/support-grants/activity`, and the `support` / `supportGrantId` filters and `supportGrant` field on `GET /api/v1/admin/orchestration/audit-log` (see [`.context/tenancy/support-access.md`](./.context/tenancy/support-access.md))
+  - org support grants (§121): `GET`/`POST /api/v1/orgs/[id]/support-grants` and `DELETE /api/v1/orgs/[id]/support-grants/[grantId]`; `findOpenSupportGrant()`, `openSupportGrantWhere()`, `grantSupportAccess()`, `revokeSupportGrant()`, `listSupportGrants()` and `SupportGrantError` from `lib/tenancy/support-grants.ts`; `SUPPORT_GRANT_LEVELS` / `DEFAULT_SUPPORT_GRANT_LEVEL` from `lib/tenancy/roles.ts`; `SUPPORT_GRANT_DEFAULT_HOURS` / `SUPPORT_GRANT_MAX_HOURS` and `createSupportGrantSchema` from `lib/validations/tenancy.ts`; entry under a grant (t-824): `verifiedSupportGrant()` and the `'support'` `OrgEntry` source from `lib/tenancy/entry.ts`, the support principal's shape (the default user role in place of the platform role, on the principal and on the handler's session; `presentedRole()` / `presentedSession()` / `isRefusedReadOnlyWrite()` / `presentSessionEntry()` / `refuseReadOnlySupportWrite()` and `READ_ONLY_SUPPORT_MESSAGE` from `lib/auth/support-principal.ts`), `requestSupportSession()` from `lib/auth/admin-page-viewer.ts`, and `support` on the `POST /api/v1/orgs/switch` response; the support stamp on audit rows (t-825): `logAdminAction()` filling `supportGrantId` / `supportOrgId` from the tenant context, `AdminAuditEntry.support` for a caller acting on a session from outside it, `listSupportActivity()`, `GET /api/v1/orgs/[id]/support-grants/activity`, and the `support` / `supportGrantId` filters and `supportGrant` field on `GET /api/v1/admin/orchestration/audit-log` (see [`.context/tenancy/support-access.md`](./.context/tenancy/support-access.md))
   - an org's caps in `Org.settings.quotas` (`monthlyBudgetUsd`, `requestsPerMinute`): `readOrgQuotas()` / `loadOrgQuotas()` / `writeOrgQuotas()` and `ORG_QUOTAS_KEY` from `lib/tenancy/org-settings.ts`, with `orgQuotasSchema` / `OrgQuotas` from `lib/validations/tenancy.ts` — what a fork's billing or plan code calls to set an org's monthly budget and request cap
   - the per-org request counter's cache clear, `forgetOrgRequestCap()` from `lib/security/org-request-cap.ts` — called after a direct `writeOrgQuotas()` so the change applies at once in that process
   - The orchestration admin API surface documented in
