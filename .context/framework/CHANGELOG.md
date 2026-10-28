@@ -25,6 +25,28 @@ process.
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-10-28
+
+> **Ninth tagged Daybreak release: Sunrise 0.16.0.** It carries Sunrise
+> `v0.16.0` (the providers' own web search and code execution on agents, the
+> newer model parameters, prompt caching on Claude, and the end of §122's
+> erasure stale-write work) and the framework work it called for, in two PRs:
+> [#316](https://github.com/human-centric-engineering/daybreak/pull/316) (the
+> merge, and erasure reaching module workflow binding templates) and
+> [#317](https://github.com/human-centric-engineering/daybreak/pull/317) (a
+> versioned save of a binding's template).
+>
+> **Before deploying, read Sunrise's `[0.16.0]` "What a fork has to do":
+> three migrations, each adding nullable columns only**, then
+> `npm run db:seed`.
+>
+> **Two changes are breaking.** For a leaf that filled `lib/app/erasure.ts`:
+> it is Daybreak's bridge now, so move your registrations to the new
+> `lib/app/leaf-erasure.ts`. For any API client: Sunrise's versioned saves,
+> and a module binding's template save, now need `If-Match`. **Still do not
+> switch to `multi`:** the framework's boot syncs (modules, slot definitions)
+> are not yet run per org.
+
 ### Added
 
 - **Erasure: your hooks and stale writers go in the new reserved
@@ -59,7 +81,6 @@ process.
   guard now reads a user-id column whose comment mentions `@relation`, and a
   `String` named `…UserId`. An unclassified model it newly sees fails it until
   you classify it in `lib/app/leaf-owner-classification.ts`.
-
 - **A save of a module workflow binding's `inputTemplate` needs `If-Match`**
   (Hub t-151). **Breaking for an API client:** `PATCH
   /api/v1/admin/framework/modules/:slug/workflows/:bindingId` with
@@ -74,7 +95,19 @@ process.
 
 ### Fixed
 
-- **Erasure now reaches module workflow binding templates** (Hub t-150). A binding's `inputTemplate` is the operator's static input to a bound workflow, as a schedule's is, but erasure blanked only schedules, so an erased person's address stayed in a binding and went into every run it started. Erasure now blanks a verified address there, audited per binding, and the dispatcher leaves out anyone erased since it read the binding and the workflow, and the member who triggered the event if they were, from the run's input and from the definition it runs, under erasure's locks, as core's scheduler does. Erasure locks the bindings it rewrites as it reads them, as core does schedules, so an operator's save made meanwhile waits for it rather than being lost. An address an operator re-enters after the erasure is kept. A binding edit saved from a copy read before the erasure is refused (below).
+- **Erasure now reaches module workflow binding templates** (Hub t-150). A
+  binding's `inputTemplate` is the operator's static input to a bound
+  workflow, as a schedule's is, but erasure blanked only schedules, so an
+  erased person's address stayed in a binding and went into every run it
+  started. Erasure now blanks a verified address there, audited per binding,
+  locking each binding it rewrites as it reads it, as core does schedules, so
+  an operator's save made meanwhile waits rather than being lost. The
+  dispatcher leaves out anyone erased since it read the binding and the
+  workflow, and the member who triggered the event if they were, from the
+  run's input and from the definition it runs, under erasure's locks, as
+  core's scheduler does. An address an operator re-enters after the erasure is
+  kept. A binding edit saved from a copy read before the erasure is refused
+  (the `If-Match` entry under Changed).
 
 ## [0.8.0] — 2026-10-22
 
@@ -1342,7 +1375,12 @@ the bridge row gained a third assertion.
   are documented in [`../../CHANGELOG.md`](../../CHANGELOG.md). Only the
   leaf-contract consequence is repeated above.
 
-[unreleased]: https://github.com/human-centric-engineering/daybreak/compare/daybreak-v0.4.0...HEAD
+[unreleased]: https://github.com/human-centric-engineering/daybreak/compare/daybreak-v0.9.0...HEAD
+[0.9.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.9.0
+[0.8.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.8.0
+[0.7.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.7.0
+[0.6.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.6.0
+[0.5.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.5.0
 [0.4.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.4.0
 [0.3.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.3.0
 [0.2.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.2.0
