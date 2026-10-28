@@ -163,4 +163,15 @@ describe('initFrameworkErasureHooks', () => {
       }),
     ]);
   });
+
+  it('registers a hook that blanks the subject in binding templates when erasure runs it', async () => {
+    initFrameworkErasureHooks();
+    const hook = getErasureCleanupHooks().find((h) => h.name === BINDING_TEMPLATES_HOOK);
+    const rows = [binding('b1', { to: 'erased@example.com' })];
+    const { tx } = fakeTx(rows);
+
+    await hook?.scrubInTransaction?.(ctx(tx));
+
+    expect(rows[0].inputTemplate).toEqual({ to: '' });
+  });
 });
