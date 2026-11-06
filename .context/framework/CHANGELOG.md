@@ -25,6 +25,36 @@ process.
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-11-06
+
+> **Tenth tagged Daybreak release: Sunrise 0.17.1.** It carries Sunrise
+> `v0.17.0` (a waitlist a fork can switch on, one way to show a failed save,
+> eval hooks for agents that act through their tools, new seams for security
+> headers and tenancy classification, and crash-resume that re-runs a step in
+> flight) and `v0.17.1` (a test-harness fix), in one PR:
+> [#321](https://github.com/human-centric-engineering/daybreak/pull/321).
+>
+> **Before deploying, read Sunrise's `[0.17.0]` "What a fork has to do":** six
+> migrations and no seed, `CRON_SECRET` if a cron calls the maintenance tick,
+> hooks that trust `viaInvitation`, the Settings switches that never saved, and
+> email-change links minted before the deploy, which stop working.
+>
+> **Your `validate` will fail on merge if you have your own forms.**
+> `check:save-errors` scans your components too: see
+> [the guide](./building-on-daybreak.md#forms-a-failed-save-goes-through-saveerror-daybreak-0100).
+> A model you added to core's `SYSTEM_MODELS` or `GLOBAL_CONFIG_MODELS` moves to
+> `lib/app/tenancy-classification.ts`.
+> **Still do not switch to `multi`:** the framework's boot syncs (modules, slot
+> definitions) are not yet run per org.
+
+### Added
+
+- **Daybreak's divergence ledger**, `.context/framework/platform-divergences.md`:
+  every edit Daybreak carries to a Sunrise file, and what to do when it
+  conflicts. It reaches your tree with Daybreak, and you don't write to it.
+  Keep your own at `.context/app/platform-divergences.md`, for the edits you
+  carry to Sunrise's files or Daybreak's.
+
 ### Changed
 
 - **Framework admin forms show a failed save the way core does (Sunrise §124).**
@@ -33,6 +63,9 @@ process.
   a save runs. The forms set `noValidate`, so the limits their inputs declared
   are held in their submit handlers: a blank module name or audience, a config
   number outside its `min`, `max` or whole-number rule, and a half-typed date.
+  A map or proposal refusal keeps the service's own message, and a rollback
+  whose answer is lost says it couldn't confirm the outcome rather than that it
+  failed.
 - **`useRowActions()` returns `failure`, not `error`.** Pass it to `<SaveError>`.
   `run()`'s third argument is now context that leads the server's message
   (`Failed to unbind agent: …`), not a fallback that replaced it.
@@ -42,6 +75,20 @@ process.
 ### Removed
 
 - **`apiFieldErrors()`.** `useSaveFailure()` reads the same server messages.
+
+### Security
+
+- **Sunrise 0.17.0's security fixes reach a leaf with this release.** A leaf on
+  Daybreak 0.9.0 or older is exposed to all of them until it takes it. Read
+  Sunrise's `[0.17.0]` Security section; in short:
+  - **Invited addresses.** Under `SIGNUP_MODE=open`, anyone who signed up first
+    with an invited address was reported as invited, so a hook acting on
+    `viaInvitation` acted for them. It now needs a real token. **If your
+    `lib/app/user-created.ts` hook granted anything on it, re-check accounts
+    created that way before this release.**
+  - **better-auth 1.7.18 and Next.js 16.4.5**, including fixes for email
+    verification links working for another account and cross-user `use cache`
+    disclosure.
 
 ## [0.9.0] — 2026-10-28
 
@@ -1393,7 +1440,8 @@ the bridge row gained a third assertion.
   are documented in [`../../CHANGELOG.md`](../../CHANGELOG.md). Only the
   leaf-contract consequence is repeated above.
 
-[unreleased]: https://github.com/human-centric-engineering/daybreak/compare/daybreak-v0.9.0...HEAD
+[unreleased]: https://github.com/human-centric-engineering/daybreak/compare/daybreak-v0.10.0...HEAD
+[0.10.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.10.0
 [0.9.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.9.0
 [0.8.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.8.0
 [0.7.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.7.0
