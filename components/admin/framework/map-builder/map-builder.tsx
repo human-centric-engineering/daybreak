@@ -321,10 +321,7 @@ function MapBuilderInner({
       router.refresh();
     } catch (err) {
       reportSave(headlineOnly(err));
-      logger.error('Map draft save failed', {
-        slug: graph.slug,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      logger.error('Map draft save failed', err, { slug: graph.slug });
     } finally {
       setSaving(false);
     }
@@ -350,10 +347,7 @@ function MapBuilderInner({
       router.refresh();
     } catch (err) {
       reportSave(headlineOnly(err), 'Failed to discard the draft');
-      logger.error('Map draft discard failed', {
-        slug: graph.slug,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      logger.error('Map draft discard failed', err, { slug: graph.slug });
     }
   }, [clearSave, graph, reportSave, router, setEdges, setNodes]);
 
@@ -379,10 +373,7 @@ function MapBuilderInner({
         router.refresh();
       } catch (err) {
         reportPublish(headlineOnly(err));
-        logger.error('Map publish failed', {
-          slug: graph.slug,
-          error: err instanceof Error ? err.message : String(err),
-        });
+        logger.error('Map publish failed', err, { slug: graph.slug });
       } finally {
         setPublishing(false);
       }

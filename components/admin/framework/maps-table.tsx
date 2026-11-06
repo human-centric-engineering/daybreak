@@ -240,10 +240,7 @@ function CreateMapDialog({
       router.push(`/admin/framework/maps/${encodeURIComponent(finalSlug)}`);
     } catch (err) {
       save.report(headlineOnly(err));
-      logger.error('Map create failed', {
-        slug: finalSlug,
-        error: err instanceof Error ? err.message : String(err),
-      });
+      logger.error('Map create failed', err, { slug: finalSlug });
     } finally {
       setSubmitting(false);
     }
