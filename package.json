@@ -158,7 +158,7 @@
     "lru-cache": "^11.5.3",
     "lucide-react": "^1.66.0",
     "mammoth": "^1.13.0",
-    "mermaid": "^12.2.0",
+    "mermaid": "^12.3.0",
     "next": "^16.4.5",
     "openai": "^7.47.0",
     "pdf-parse": "^2.4.5",
