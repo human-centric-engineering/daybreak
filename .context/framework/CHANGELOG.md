@@ -31,8 +31,8 @@ process.
   The module tabs, map editor, policy dialog and proposal review now report
   through `<SaveError>`, beside the button pressed, and their dialogs lock while
   a save runs. The forms set `noValidate`, so the limits their inputs declared
-  are held in their submit handlers: a blank module name or audience, and a
-  config number outside its `min`, `max` or whole-number rule.
+  are held in their submit handlers: a blank module name or audience, a config
+  number outside its `min`, `max` or whole-number rule, and a half-typed date.
 - **`useRowActions()` returns `failure`, not `error`.** Pass it to `<SaveError>`.
   `run()`'s third argument is now context that leads the server's message
   (`Failed to unbind agent: …`), not a fallback that replaced it.

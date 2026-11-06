@@ -137,7 +137,7 @@ export function ConfigTab({ slug, form }: ConfigTabProps) {
         try {
           config[d.key] = JSON.parse(s);
         } catch {
-          problems.push({ field: `cfg-${d.key}`, message: `${d.label}: invalid JSON` });
+          problems.push({ field: `cfg-${d.key}`, message: `${d.label}: invalid JSON.` });
         }
       } else {
         config[d.key] = s; // string | enum
@@ -205,10 +205,10 @@ export function ConfigTab({ slug, form }: ConfigTabProps) {
  * browser no longer checks `min`, `max` or a whole-number `step`. The server re-checks them.
  */
 function numberProblem(d: FieldDescriptor & { type: 'number' }, n: number): string | null {
-  if (Number.isNaN(n)) return `${d.label}: must be a number`;
-  if (d.integer && !Number.isInteger(n)) return `${d.label}: must be a whole number`;
-  if (d.min !== undefined && n < d.min) return `${d.label}: must be at least ${d.min}`;
-  if (d.max !== undefined && n > d.max) return `${d.label}: must be at most ${d.max}`;
+  if (Number.isNaN(n)) return `${d.label}: must be a number.`;
+  if (d.integer && !Number.isInteger(n)) return `${d.label}: must be a whole number.`;
+  if (d.min !== undefined && n < d.min) return `${d.label}: must be at least ${d.min}.`;
+  if (d.max !== undefined && n > d.max) return `${d.label}: must be at most ${d.max}.`;
   return null;
 }
 

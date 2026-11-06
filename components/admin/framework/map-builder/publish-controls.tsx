@@ -45,7 +45,6 @@ export interface PublishControlsProps {
   onOpenChange: (open: boolean) => void;
   /** True while the publish request is in flight. */
   publishing: boolean;
-  /** Publish error (e.g. the validation 400), rendered in the dialog. */
   /** The refused publish; shown inside the dialog, which stays open. */
   failure: SaveFailure<never> | null;
   /** Clears `failure`; called as the dialog opens and closes. */

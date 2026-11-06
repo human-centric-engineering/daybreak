@@ -178,6 +178,19 @@ describe('SettingsTab', () => {
     expect(apiClient.patch).not.toHaveBeenCalled();
   });
 
+  it('blocks a half-typed date, which would otherwise read as cleared', async () => {
+    const user = userEvent.setup();
+    render(<SettingsTab settings={settings()} />);
+
+    const from = screen.getByLabelText(/available from/i);
+    Object.defineProperty(from, 'validity', { value: { badInput: true }, configurable: true });
+    await user.click(screen.getByRole('button', { name: /save settings/i }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Enter a complete date and time.');
+    expect(from).toHaveFocus();
+    expect(apiClient.patch).not.toHaveBeenCalled();
+  });
+
   it('blocks a blank audience without saving', async () => {
     const user = userEvent.setup();
     render(<SettingsTab settings={settings()} />);

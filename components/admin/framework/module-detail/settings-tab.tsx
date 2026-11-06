@@ -18,7 +18,7 @@
  * keeping the control deterministic (no server/client timezone skew, no hydration drift).
  */
 
-import { useState, type BaseSyntheticEvent } from 'react';
+import { useState, type BaseSyntheticEvent, type FormEvent } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { Badge } from '@/components/ui/badge';
@@ -157,9 +157,29 @@ export function SettingsTab({ settings }: SettingsTabProps) {
     }
   }
 
+  const submitSave = save.submit(handleSubmit);
+
+  /**
+   * A half-typed date reads as `''`, which would clear the bound, so `noValidate` must not let it
+   * through. `save.submit` does block it, but as "1 field needs a number": core's check reads any
+   * unreadable input as a number. Say what is wrong here first.
+   */
+  function submit(e: FormEvent<HTMLFormElement>) {
+    const partial = ['module-from', 'module-until'].filter((id) => {
+      const input = e.currentTarget.elements.namedItem(id);
+      return input instanceof HTMLInputElement && input.validity.badInput;
+    });
+    if (partial.length > 0) {
+      e.preventDefault();
+      save.block(partial.map((field) => ({ field, message: 'Enter a complete date and time.' })));
+      return;
+    }
+    submitSave(e);
+  }
+
   return (
     <div className="max-w-2xl space-y-8">
-      <form noValidate onSubmit={save.submit(handleSubmit)} className="space-y-5">
+      <form noValidate onSubmit={submit} className="space-y-5">
         <div className="space-y-1.5">
           <Label htmlFor="module-name">Name</Label>
           <Input

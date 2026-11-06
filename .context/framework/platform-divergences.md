@@ -31,8 +31,10 @@ Next row: 11
 
 Three kinds of Daybreak edit are deliberately not rows:
 
-- **The `lib/app/*` bridges** (roster in the [`CLAUDE.md`](../../CLAUDE.md) banner).
-  Sunrise ships them empty to be filled.
+- **The `lib/app/*` bridges** (roster in the [`CLAUDE.md`](../../CLAUDE.md) banner)
+  and `lib/app/reserved-tiers.ts`, where `CUSTOMIZATION.md` tells a fork to add its
+  tier. Sunrise ships them to be filled. On a conflict in `reserved-tiers.ts`, keep
+  the `DAYBREAK` block.
 - **Daybreak's identity:** `package.json`, `README.md`, `.env*` and the
   `CLAUDE.md` banner and Hub bootstrap block.
 - **`CUSTOMIZATION.md`**, which the banner also lists as Daybreak's. It conflicts

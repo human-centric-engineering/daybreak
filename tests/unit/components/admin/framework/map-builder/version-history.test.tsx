@@ -102,6 +102,21 @@ describe('VersionHistory', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('target invalid');
   });
 
+  it('does not claim a rollback failed when its answer was lost', async () => {
+    const user = userEvent.setup();
+    renderHistory({
+      onRollback: vi.fn().mockRejectedValue(new APIClientError('Failed to fetch', 'NETWORK_ERROR')),
+    });
+    await screen.findByTestId('map-version-1');
+
+    await user.click(screen.getByTestId('map-rollback-1'));
+    await user.click(screen.getByRole('button', { name: /^confirm$/i }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/couldn.t confirm the rollback/i);
+    expect(alert).not.toHaveTextContent(/failed to roll back/i);
+  });
+
   it('renders the empty state when there are no versions', async () => {
     api.get.mockResolvedValueOnce({ versions: [], publishedVersionId: null, nextCursor: null });
     renderHistory();

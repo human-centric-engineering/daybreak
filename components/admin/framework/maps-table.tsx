@@ -39,6 +39,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
+import { headlineOnly } from '@/components/admin/framework/headline-only';
 import { SaveError } from '@/components/forms/form-error';
 import { apiClient } from '@/lib/api/client';
 import { useCommittedDialog } from '@/lib/hooks/use-committed-dialog';
@@ -194,6 +195,9 @@ function CreateMapDialog({
   const [slugTouched, setSlugTouched] = useState(false);
   const [description, setDescription] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  // Created and on its way to the editor: Create stays off, but the dialog can still close if the
+  // navigation stalls, which `submitting` would forbid.
+  const [created, setCreated] = useState(false);
   const save = useSaveFailure({ fallback: 'Failed to create the map', fields: NO_SERVER_FIELDS });
 
   // Mirror the name into the slug until the author edits the slug directly.
@@ -209,6 +213,7 @@ function CreateMapDialog({
       setSlug('');
       setSlugTouched(false);
       setDescription('');
+      setCreated(false);
       onOpenChange(false);
     },
     clear: save.clear,
@@ -231,10 +236,15 @@ function CreateMapDialog({
           ...(description.trim() ? { description: description.trim() } : {}),
         },
       });
+      setCreated(true);
       router.push(`/admin/framework/maps/${encodeURIComponent(finalSlug)}`);
     } catch (err) {
-      const { message } = save.report(err);
-      logger.error('Map create failed', { slug: finalSlug, error: message });
+      save.report(headlineOnly(err));
+      logger.error('Map create failed', {
+        slug: finalSlug,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
       setSubmitting(false);
     }
   }
@@ -303,8 +313,8 @@ function CreateMapDialog({
             >
               Cancel
             </Button>
-            <Button type="submit" {...dialog.actionProps()}>
-              {submitting ? 'Creating…' : 'Create map'}
+            <Button type="submit" {...dialog.actionProps({ disabled: created })}>
+              {submitting || created ? 'Creating…' : 'Create map'}
             </Button>
           </DialogFooter>
         </form>

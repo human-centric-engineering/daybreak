@@ -35,6 +35,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { FieldHelp } from '@/components/ui/field-help';
+import { headlineOnly } from '@/components/admin/framework/headline-only';
 import { SaveError } from '@/components/forms/form-error';
 import { apiClient } from '@/lib/api/client';
 import { useCommittedDialog } from '@/lib/hooks/use-committed-dialog';
@@ -86,7 +87,7 @@ export function ProposalReview({ proposal }: ProposalReviewProps) {
       setConfirming(null);
       router.refresh();
     } catch (err) {
-      save.report(err);
+      save.report(headlineOnly(err));
     } finally {
       setBusy(false);
     }
@@ -104,7 +105,7 @@ export function ProposalReview({ proposal }: ProposalReviewProps) {
       setReason('');
       router.refresh();
     } catch (err) {
-      save.report(err);
+      save.report(headlineOnly(err));
     } finally {
       setBusy(false);
     }

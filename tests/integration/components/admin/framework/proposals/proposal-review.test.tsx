@@ -182,6 +182,26 @@ describe('ProposalReview', () => {
     expect(nav.refresh).not.toHaveBeenCalled();
   });
 
+  it("keeps the service's instruction when the error carries details", async () => {
+    const user = userEvent.setup();
+    const { APIClientError } = await import('@/lib/api/client');
+    vi.mocked(apiClient.post).mockRejectedValue(
+      new APIClientError(
+        'The map changed since this proposal was made — please re-propose',
+        'VALIDATION_ERROR',
+        400,
+        { baseVersion: ['Proposed against version 3, but it is now at 4'] }
+      )
+    );
+    render(<ProposalReview proposal={makeProposal()} />);
+
+    await user.click(screen.getByRole('button', { name: /approve & publish/i }));
+    const dialog = await screen.findByRole('alertdialog');
+    await user.click(within(dialog).getByRole('button', { name: /approve & publish/i }));
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(/please re-propose/);
+  });
+
   it('locks the dialog while a decision is in flight', async () => {
     const user = userEvent.setup();
     vi.mocked(apiClient.post).mockReturnValue(new Promise(() => {}));

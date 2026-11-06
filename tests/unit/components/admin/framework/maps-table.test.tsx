@@ -163,6 +163,22 @@ describe('MapsTable create', () => {
     expect(screen.getByLabelText('Name')).toHaveValue('');
   });
 
+  it('can still close after a create, if the navigation stalls', async () => {
+    api.post.mockResolvedValueOnce({});
+    const user = userEvent.setup();
+    render(<MapsTable initialMaps={[]} />);
+
+    await user.click(screen.getByRole('button', { name: /New map/ }));
+    await user.type(screen.getByLabelText('Name'), 'Fresh');
+    await user.click(screen.getByRole('button', { name: 'Create map' }));
+
+    await waitFor(() => expect(router.push).toHaveBeenCalled());
+    expect(screen.getByRole('button', { name: 'Creating…' })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  });
+
   it('surfaces a create failure without routing away', async () => {
     api.post.mockRejectedValueOnce(new APIClientError('slug already in use', 'X', 409));
     const user = userEvent.setup();

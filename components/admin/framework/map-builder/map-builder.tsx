@@ -30,6 +30,7 @@ import {
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { headlineOnly } from '@/components/admin/framework/headline-only';
 import { SaveError } from '@/components/forms/form-error';
 import { apiClient } from '@/lib/api/client';
 import { NO_SERVER_FIELDS, useSaveFailure } from '@/lib/hooks/use-save-failure';
@@ -319,8 +320,11 @@ function MapBuilderInner({
       setTimeout(() => setSaved(false), 2500);
       router.refresh();
     } catch (err) {
-      const { message } = reportSave(err);
-      logger.error('Map draft save failed', { slug: graph.slug, error: message });
+      reportSave(headlineOnly(err));
+      logger.error('Map draft save failed', {
+        slug: graph.slug,
+        error: err instanceof Error ? err.message : String(err),
+      });
     } finally {
       setSaving(false);
     }
@@ -345,8 +349,11 @@ function MapBuilderInner({
       setHasDraft(false);
       router.refresh();
     } catch (err) {
-      const { message } = reportSave(err, 'Failed to discard the draft');
-      logger.error('Map draft discard failed', { slug: graph.slug, error: message });
+      reportSave(headlineOnly(err), 'Failed to discard the draft');
+      logger.error('Map draft discard failed', {
+        slug: graph.slug,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }, [clearSave, graph, reportSave, router, setEdges, setNodes]);
 
@@ -371,8 +378,11 @@ function MapBuilderInner({
         setTimeout(() => setPublished(false), 2500);
         router.refresh();
       } catch (err) {
-        const { message } = reportPublish(err);
-        logger.error('Map publish failed', { slug: graph.slug, error: message });
+        reportPublish(headlineOnly(err));
+        logger.error('Map publish failed', {
+          slug: graph.slug,
+          error: err instanceof Error ? err.message : String(err),
+        });
       } finally {
         setPublishing(false);
       }

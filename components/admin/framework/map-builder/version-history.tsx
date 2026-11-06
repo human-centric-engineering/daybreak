@@ -17,6 +17,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
+import { headlineOnly } from '@/components/admin/framework/headline-only';
 import { SaveError } from '@/components/forms/form-error';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -74,7 +75,12 @@ export function VersionHistory({ slug, open, onOpenChange, onRollback }: Version
   const [error, setError] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<number | null>(null);
   const [rolling, setRolling] = useState<number | null>(null);
-  const save = useSaveFailure({ fallback: 'Failed to roll back', fields: NO_SERVER_FIELDS });
+  // The fallback can't say the rollback failed: it covers a lost answer, and a reload that failed
+  // after the rollback committed. Trying again then would mint a second version.
+  const save = useSaveFailure({
+    fallback: "Couldn't confirm the rollback. Reload the page to see the live version.",
+    fields: NO_SERVER_FIELDS,
+  });
   const dialog = useCommittedDialog({
     open,
     pending: rolling !== null,
@@ -119,7 +125,7 @@ export function VersionHistory({ slug, open, onOpenChange, onRollback }: Version
       await load();
     } catch (err) {
       // The parent rethrows the rollback's error, or the canvas reload's after it.
-      save.report(err);
+      save.report(headlineOnly(err));
     } finally {
       setRolling(null);
     }
