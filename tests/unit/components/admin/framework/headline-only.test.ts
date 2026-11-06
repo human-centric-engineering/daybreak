@@ -25,6 +25,13 @@ describe('headlineOnly', () => {
     expect(headlineOnly(refused)).toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
   });
 
+  it("keeps validateRequestBody's list, whose message says nothing", () => {
+    const invalid = new APIClientError('Invalid request body', 'VALIDATION_ERROR', 400, {
+      errors: [{ path: 'name', message: 'Too long' }],
+    });
+    expect(headlineOnly(invalid)).toBe(invalid);
+  });
+
   it('leaves anything else alone', () => {
     const bug = new Error('a bug');
     expect(headlineOnly(bug)).toBe(bug);

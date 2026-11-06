@@ -672,6 +672,25 @@ describe('MapBuilder version controls', () => {
     // canvas — so it shows 2 nodes and the pill reflects v3.
     await waitFor(() => expect(screen.getByTestId('rf')).toHaveAttribute('data-node-count', '2'));
   });
+
+  it('does not report a committed rollback as refused when the reload fails', async () => {
+    api.get
+      .mockResolvedValueOnce(VERSION_LIST)
+      .mockRejectedValueOnce(new APIClientError('Internal server error', 'INTERNAL_ERROR', 500))
+      .mockResolvedValueOnce(VERSION_LIST);
+    api.post.mockResolvedValueOnce({});
+    const user = userEvent.setup();
+    render(<MapBuilder graph={graph()} />);
+
+    await user.click(screen.getByTestId('map-history-open'));
+    await screen.findByTestId('map-version-1');
+    await user.click(screen.getByTestId('map-rollback-1'));
+    await user.click(screen.getByRole('button', { name: /^confirm$/i }));
+
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(/couldn.t confirm the rollback/i);
+    expect(alert).not.toHaveTextContent(/internal server error/i);
+  });
 });
 
 describe('MapBuilder dry run', () => {

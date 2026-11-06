@@ -60,6 +60,11 @@ function orNull(value: string): string | null {
   return trimmed === '' ? null : trimmed;
 }
 
+const DATE_FIELDS = [
+  { field: 'module-from', label: 'Available from' },
+  { field: 'module-until', label: 'Available until' },
+];
+
 interface SettingsTabProps {
   settings: ModuleSettingsView;
 }
@@ -165,13 +170,19 @@ export function SettingsTab({ settings }: SettingsTabProps) {
    * unreadable input as a number. Say what is wrong here first.
    */
   function submit(e: FormEvent<HTMLFormElement>) {
-    const partial = ['module-from', 'module-until'].filter((id) => {
-      const input = e.currentTarget.elements.namedItem(id);
+    const partial = DATE_FIELDS.filter(({ field }) => {
+      const input = e.currentTarget.elements.namedItem(field);
       return input instanceof HTMLInputElement && input.validity.badInput;
     });
     if (partial.length > 0) {
       e.preventDefault();
-      save.block(partial.map((field) => ({ field, message: 'Enter a complete date and time.' })));
+      setSaved(false);
+      save.block(
+        partial.map(({ field, label }) => ({
+          field,
+          message: `${label}: enter a complete date and time.`,
+        }))
+      );
       return;
     }
     submitSave(e);

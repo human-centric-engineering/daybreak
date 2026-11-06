@@ -186,7 +186,9 @@ describe('SettingsTab', () => {
     Object.defineProperty(from, 'validity', { value: { badInput: true }, configurable: true });
     await user.click(screen.getByRole('button', { name: /save settings/i }));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Enter a complete date and time.');
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Available from: enter a complete date and time.'
+    );
     expect(from).toHaveFocus();
     expect(apiClient.patch).not.toHaveBeenCalled();
   });

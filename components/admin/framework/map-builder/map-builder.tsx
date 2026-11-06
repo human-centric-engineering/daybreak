@@ -398,7 +398,11 @@ function MapBuilderInner({
   const handleRollback = useCallback(
     async (targetVersion: number) => {
       await apiClient.post(`${mapPath(graph.slug)}/rollback`, { body: { targetVersion } });
-      const fresh = await apiClient.get<MapEditorGraph>(mapPath(graph.slug));
+      // The rollback has committed from here. A failed reload must not read as a refused rollback,
+      // whatever the server said, so it reaches the dialog as an error with no words of its own.
+      const fresh = await apiClient.get<MapEditorGraph>(mapPath(graph.slug)).catch(() => {
+        throw new Error('Rolled back, but the canvas could not be reloaded');
+      });
       const flow = toFlow(pickEditableDefinition(fresh));
       setNodes(flow.nodes);
       setEdges(flow.edges);

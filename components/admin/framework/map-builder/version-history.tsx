@@ -126,6 +126,9 @@ export function VersionHistory({ slug, open, onOpenChange, onRollback }: Version
     } catch (err) {
       // The parent rethrows the rollback's error, or the canvas reload's after it.
       save.report(headlineOnly(err));
+      // The outcome may be unknown, so show what is live and leave nothing armed to click again.
+      setConfirming(null);
+      void load();
     } finally {
       setRolling(null);
     }

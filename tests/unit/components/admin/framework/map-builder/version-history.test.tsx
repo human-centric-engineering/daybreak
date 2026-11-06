@@ -115,6 +115,9 @@ describe('VersionHistory', () => {
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(/couldn.t confirm the rollback/i);
     expect(alert).not.toHaveTextContent(/failed to roll back/i);
+    // Nothing is left armed to click again, and the list is re-read to show what is live.
+    expect(screen.queryByRole('button', { name: /^confirm$/i })).not.toBeInTheDocument();
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
   });
 
   it('renders the empty state when there are no versions', async () => {
