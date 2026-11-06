@@ -19,13 +19,15 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+import { APIClientError } from '@/lib/api/client';
+
 const router = vi.hoisted(() => ({ refresh: vi.fn(), push: vi.fn() }));
 vi.mock('next/navigation', () => ({ useRouter: () => router }));
 
 const api = vi.hoisted(() => ({ patch: vi.fn(), get: vi.fn(), post: vi.fn() }));
-vi.mock('@/lib/api/client', () => ({
+vi.mock('@/lib/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/api/client')>()),
   apiClient: api,
-  APIClientError: class APIClientError extends Error {},
 }));
 
 // Controls what `getIntersectingNodes` returns for the drag-to-group tests.
@@ -269,7 +271,7 @@ describe('MapBuilder save', () => {
   });
 
   it('surfaces a save failure as an inline alert', async () => {
-    api.patch.mockRejectedValueOnce(new Error('boom'));
+    api.patch.mockRejectedValueOnce(new APIClientError('boom', 'X', 500));
     const user = userEvent.setup();
     render(<MapBuilder graph={graph()} />);
 
@@ -318,7 +320,7 @@ describe('MapBuilder discard', () => {
     render(<MapBuilder graph={graph({ draftDefinition: PUBLISHED_DEF })} />);
 
     await user.click(screen.getByRole('button', { name: 'Discard draft' }));
-    // A non-APIClientError maps to the generic fallback message.
+    // A non-APIClientError has no words of its own, so the context says it all.
     expect(await screen.findByRole('alert')).toHaveTextContent('Failed to discard the draft');
   });
 });

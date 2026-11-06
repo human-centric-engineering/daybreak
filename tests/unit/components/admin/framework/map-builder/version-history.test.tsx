@@ -13,10 +13,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+import { APIClientError } from '@/lib/api/client';
+
 const api = vi.hoisted(() => ({ get: vi.fn() }));
-vi.mock('@/lib/api/client', () => ({
+vi.mock('@/lib/api/client', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/lib/api/client')>()),
   apiClient: api,
-  APIClientError: class APIClientError extends Error {},
 }));
 
 import { VersionHistory } from '@/components/admin/framework/map-builder/version-history';
@@ -89,7 +91,9 @@ describe('VersionHistory', () => {
 
   it('surfaces a rollback failure inline', async () => {
     const user = userEvent.setup();
-    renderHistory({ onRollback: vi.fn().mockRejectedValue(new Error('target invalid')) });
+    renderHistory({
+      onRollback: vi.fn().mockRejectedValue(new APIClientError('target invalid', 'X', 400)),
+    });
     await screen.findByTestId('map-version-1');
 
     await user.click(screen.getByTestId('map-rollback-1'));

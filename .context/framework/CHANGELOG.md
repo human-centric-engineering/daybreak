@@ -25,6 +25,24 @@ process.
 
 ## [Unreleased]
 
+### Changed
+
+- **Framework admin forms show a failed save the way core does (Sunrise §124).**
+  The module tabs, map editor, policy dialog and proposal review now report
+  through `<SaveError>`, beside the button pressed, and their dialogs lock while
+  a save runs. The forms set `noValidate`, so the limits their inputs declared
+  are held in their submit handlers: a blank module name or audience, and a
+  config number outside its `min`, `max` or whole-number rule.
+- **`useRowActions()` returns `failure`, not `error`.** Pass it to `<SaveError>`.
+  `run()`'s third argument is now context that leads the server's message
+  (`Failed to unbind agent: …`), not a fallback that replaced it.
+- **`PublishControls` takes `failure` and `clearFailure`**, replacing
+  `errorMessage`.
+
+### Removed
+
+- **`apiFieldErrors()`.** `useSaveFailure()` reads the same server messages.
+
 ## [0.9.0] — 2026-10-28
 
 > **Ninth tagged Daybreak release: Sunrise 0.16.0.** It carries Sunrise

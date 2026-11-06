@@ -18,7 +18,7 @@
  * keeping the control deterministic (no server/client timezone skew, no hydration drift).
  */
 
-import { useState } from 'react';
+import { useState, type BaseSyntheticEvent } from 'react';
 import { useRouter } from 'next/navigation';
 
 import { Badge } from '@/components/ui/badge';
@@ -33,8 +33,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { FieldHelp } from '@/components/ui/field-help';
-import { apiClient, APIClientError } from '@/lib/api/client';
-import { apiFieldErrors } from '@/components/admin/framework/module-detail/api-field-errors';
+import { SaveError } from '@/components/forms/form-error';
+import { apiClient } from '@/lib/api/client';
+import { NO_SERVER_FIELDS, useSaveFailure } from '@/lib/hooks/use-save-failure';
 import { MODULE_STATUS } from '@/lib/framework/modules/status';
 import type { ModuleSettingsView } from '@/lib/framework/modules/view';
 
@@ -76,11 +77,14 @@ export function SettingsTab({ settings }: SettingsTabProps) {
 
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [errors, setErrors] = useState<string[]>([]);
+  const save = useSaveFailure({ fallback: 'Failed to save settings', fields: NO_SERVER_FIELDS });
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteSave = useSaveFailure({
+    fallback: 'Failed to delete module',
+    fields: NO_SERVER_FIELDS,
+  });
 
   // A fork may carry a status outside the code vocabulary — keep the current value
   // selectable rather than dropping it silently.
@@ -90,8 +94,8 @@ export function SettingsTab({ settings }: SettingsTabProps) {
     setSaved(false);
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function handleSubmit(e?: BaseSyntheticEvent) {
+    e?.preventDefault();
 
     // Send the ORIGINAL ISO for a window bound the operator didn't touch — the
     // `datetime-local` control is minute-precision, so round-tripping an untouched bound
@@ -106,13 +110,21 @@ export function SettingsTab({ settings }: SettingsTabProps) {
       availableUntil === isoToLocal(settings.availableUntil)
         ? settings.availableUntil
         : localToIso(availableUntil);
-    if (from && until && new Date(from) > new Date(until)) {
-      setErrors(['Availability window: the end must be on or after the start.']);
-      return;
+    // The form sets `noValidate`, so the inputs' `required` no longer blocks Save: it is held here.
+    const problems: Array<{ field: string; message: string }> = [];
+    if (!name.trim()) problems.push({ field: 'module-name', message: 'Name is required.' });
+    if (!audience.trim()) {
+      problems.push({ field: 'module-audience', message: 'Audience is required.' });
     }
+    if (from && until && new Date(from) > new Date(until)) {
+      problems.push({
+        field: 'module-until',
+        message: 'Availability window: the end must be on or after the start.',
+      });
+    }
+    if (save.block(problems)) return;
 
     setSaving(true);
-    setErrors([]);
     try {
       await apiClient.patch(`/api/v1/admin/framework/modules/${encodeURIComponent(slug)}`, {
         body: {
@@ -127,7 +139,7 @@ export function SettingsTab({ settings }: SettingsTabProps) {
       setSaved(true);
       router.refresh();
     } catch (err) {
-      setErrors(apiFieldErrors(err, 'Failed to save settings'));
+      save.report(err);
     } finally {
       setSaving(false);
     }
@@ -135,19 +147,19 @@ export function SettingsTab({ settings }: SettingsTabProps) {
 
   async function handleDelete() {
     setDeleting(true);
-    setDeleteError(null);
+    deleteSave.clear();
     try {
       await apiClient.delete(`/api/v1/admin/framework/modules/${encodeURIComponent(slug)}`);
       router.push('/admin/framework/modules');
     } catch (err) {
-      setDeleteError(err instanceof APIClientError ? err.message : 'Failed to delete module');
+      deleteSave.report(err);
       setDeleting(false);
     }
   }
 
   return (
     <div className="max-w-2xl space-y-8">
-      <form onSubmit={(e) => void handleSubmit(e)} className="space-y-5">
+      <form noValidate onSubmit={save.submit(handleSubmit)} className="space-y-5">
         <div className="space-y-1.5">
           <Label htmlFor="module-name">Name</Label>
           <Input
@@ -278,13 +290,7 @@ export function SettingsTab({ settings }: SettingsTabProps) {
           </div>
         </div>
 
-        {errors.length > 0 && (
-          <ul className="text-destructive space-y-1 text-sm" role="alert">
-            {errors.map((msg, i) => (
-              <li key={i}>{msg}</li>
-            ))}
-          </ul>
-        )}
+        <SaveError failure={save.failure} />
 
         <div className="flex items-center gap-3">
           <Button type="submit" disabled={saving}>
@@ -314,11 +320,7 @@ export function SettingsTab({ settings }: SettingsTabProps) {
               row and its config history, agent bindings, and knowledge scope. This cannot be
               undone.
             </p>
-            {deleteError && (
-              <p className="text-destructive text-sm" role="alert">
-                {deleteError}
-              </p>
-            )}
+            <SaveError failure={deleteSave.failure} />
             {confirmingDelete ? (
               <div className="flex items-center gap-2">
                 <Button
@@ -343,7 +345,7 @@ export function SettingsTab({ settings }: SettingsTabProps) {
                 variant="destructive"
                 size="sm"
                 onClick={() => {
-                  setDeleteError(null);
+                  deleteSave.clear();
                   setConfirmingDelete(true);
                 }}
               >
