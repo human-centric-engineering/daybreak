@@ -25,6 +25,16 @@ process.
 
 ## [Unreleased]
 
+### Security
+
+- **The framework's admin forms put their fields in the URL when submitted
+  before the page had loaded (t-156).** Sunrise 0.18.0 fixed this in core's
+  forms (its t-998); the same defect sat in seven of Daybreak's — the map, policy
+  and module-detail agent, config, knowledge, settings and workflow forms. Each
+  now sets `method="post"`, and Sunrise's `check:save-errors`, part of
+  `validate`, fails any framework form that drops it. **Leaves:** the same check
+  runs on your forms; see Sunrise's 0.18.0 notes.
+
 ## [0.10.0] — 2026-11-06
 
 > **Tenth tagged Daybreak release: Sunrise 0.17.1.** It carries Sunrise

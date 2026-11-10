@@ -249,7 +249,7 @@ function CreateMapDialog({
   return (
     <Dialog open={open} onOpenChange={dialog.onOpenChange}>
       <DialogContent>
-        <form noValidate onSubmit={save.submit(handleSubmit)}>
+        <form method="post" noValidate onSubmit={save.submit(handleSubmit)}>
           <DialogHeader>
             <DialogTitle>New facilitation map</DialogTitle>
             <DialogDescription>

@@ -163,7 +163,12 @@ export function ConfigTab({ slug, form }: ConfigTabProps) {
   }
 
   return (
-    <form noValidate onSubmit={save.submit(handleSubmit)} className="max-w-2xl space-y-5">
+    <form
+      method="post"
+      noValidate
+      onSubmit={save.submit(handleSubmit)}
+      className="max-w-2xl space-y-5"
+    >
       {form.descriptors.map((d) => (
         <div key={d.key} className="space-y-1.5">
           <div className="flex items-center gap-1.5">
