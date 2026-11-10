@@ -112,7 +112,7 @@ export function PolicyFormDialog({ open, onOpenChange, policy, onSaved }: Policy
   return (
     <Dialog open={open} onOpenChange={dialog.onOpenChange}>
       <DialogContent className="max-h-[90vh] overflow-y-auto">
-        <form noValidate onSubmit={save.submit(handleSubmit)}>
+        <form method="post" noValidate onSubmit={save.submit(handleSubmit)}>
           <DialogHeader>
             <DialogTitle>{editing ? 'Edit policy' : 'New policy'}</DialogTitle>
             <DialogDescription>

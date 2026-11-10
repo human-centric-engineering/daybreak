@@ -214,6 +214,7 @@ function GrantSection<T>({
 
       {adding && (
         <form
+          method="post"
           noValidate
           onSubmit={save.submit(grant)}
           className="bg-muted/40 space-y-4 rounded-md border p-4"

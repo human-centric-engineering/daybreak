@@ -190,7 +190,7 @@ export function SettingsTab({ settings }: SettingsTabProps) {
 
   return (
     <div className="max-w-2xl space-y-8">
-      <form noValidate onSubmit={submit} className="space-y-5">
+      <form method="post" noValidate onSubmit={submit} className="space-y-5">
         <div className="space-y-1.5">
           <Label htmlFor="module-name">Name</Label>
           <Input
