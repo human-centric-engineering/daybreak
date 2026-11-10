@@ -408,6 +408,10 @@ components as well as core's. It fails until:
 - **a hand-drawn save-error box moves onto `<SaveError>`**, fed by `useSaveFailure()`,
   beside the button that was pressed
 - **every `<form>` has `noValidate`**
+- **every `<form>` has `method="post"`** (Sunrise 0.18.0, Daybreak 0.11.0+). Without
+  it, a form submitted before the page has loaded is a GET with every named field in
+  the URL. A form whose fields belong in the URL, such as a search box, takes
+  `{/* form-method-ignore: <why> */}` on the line above it
 
 Before adding `noValidate`, check the form's schema or submit handler holds every limit
 its inputs declare, or that check quietly moves to the server. Daybreak's forms hit two
