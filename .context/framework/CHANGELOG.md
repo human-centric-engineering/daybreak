@@ -36,8 +36,10 @@ process.
   describe. `lib/app/db-drift.ts` changed only in its header comment: on a
   conflict, keep Daybreak's registrations and take the new comment.
   **Framework admin pages show title-cased segments** in the breadcrumb
-  (`Framework › Modules`), and record ids as typed. Daybreak registers no
-  segment names, since that would mean filling the leaf's scaffold.
+  (`Framework › Modules`, and a module slug as its words), except a segment
+  with a digit, which is usually a record id and is shown as typed. Daybreak
+  registers no segment names, since that would mean filling the leaf's
+  scaffold.
 
 ### Changed
 
