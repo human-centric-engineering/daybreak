@@ -44,8 +44,9 @@ model Org {
   mcpApiKeys   McpApiKey[]
 
   // Every tenant-owned row (§107 t-705): the relation is what lets `eraseOrg()`
-  // cascade without enumerating tables. A fork's own tenant-owned model adds
-  // its line here the same way.
+  // cascade without enumerating tables. Core's own lines go in this list, by
+  // hand: `prisma format` appends a missing back-relation at the END of the
+  // model, which is the app zone below. A fork's lines go in its zone.
   aiAgents                          AiAgent[]
   aiAgentVersions                   AiAgentVersion[]
   aiAgentCapabilitys                AiAgentCapability[]
@@ -88,12 +89,13 @@ model Org {
   waitlistListStates                WaitlistListState[]
   waitlistConfirmTokens             WaitlistConfirmToken[]
 
-  // DAYBREAK "keep mine" (§34 f-framework-tenancy, Hub t-134): back-relations for
-  // the 19 tenant-owned framework_* models. Prisma relations are two-sided and
-  // Sunrise's model-classification test requires every tenant-owned model to carry
-  // the `org` relation, so a fork cannot add them without editing this block.
-  // On a Sunrise sync that conflicts here: keep upstream's lines AND this block.
-  // Ledgered in .context/framework/upstream-asks.md.
+  // Fork zones (sunrise#859). Prisma relations are two-sided, so a fork model
+  // with an `org` relation needs its back-relation line here. Each tier writes
+  // below its own marker and Sunrise never edits below the first one, so a
+  // sync merges without a conflict and filling a zone is not a divergence.
+  // tests/unit/prisma/back-relation-zones.test.ts holds the layout.
+  // ── Framework zone: back-relations to framework-tier models. Sunrise never edits below here. ──
+  // Daybreak (§34 f-framework-tenancy, Hub t-134): the 19 tenant-owned framework_* models.
   frameworkSlotDefinitions           SlotDefinition[]
   frameworkSlotValues                SlotValue[]
   frameworkFacilitationGraphs        FacilitationGraph[]
@@ -113,6 +115,8 @@ model Org {
   frameworkModuleKnowledgeTags       ModuleKnowledgeTag[]
   frameworkModuleWorkflowBindings    ModuleWorkflowBinding[]
   frameworkModuleAgentBindings       ModuleAgentBinding[]
+
+  // ── App zone: back-relations to app-tier models. Sunrise never edits below here. ──
 
   @@map("org")
 }

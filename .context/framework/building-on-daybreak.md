@@ -366,9 +366,13 @@ yours. For each model of your own:
 1. **Add the column and the relation**, exactly as the framework models do:
    `orgId String?`, `org Org? @relation(fields: [orgId], references: [id],
 onDelete: Cascade)`, `@@index([orgId])`. Prisma needs a back-relation line on
-   Sunrise's `Org` model (`prisma/schema/tenancy.prisma`). Add yours **below
-   Daybreak's marked `DAYBREAK` block**, in a block of your own, and keep all of
-   them on every sync.
+   Sunrise's `Org` model (`prisma/schema/tenancy.prisma`). Since Sunrise 0.19.0
+   `Org` ends with two marked zones: Daybreak's lines sit below
+   the framework marker, and yours go **below the app marker**, which
+   `prisma format` does for you. Filling the app zone is not a divergence, and
+   `back-relation-zones.test.ts` fails on a line outside it. If you carried a
+   block of your own after Daybreak's, move it below the app
+   marker on the sync that brings the zones and retire your ledger row for it.
 2. **Make any global unique per-org.** A `slug @unique` fails
    `org-scoped-slugs.test.ts`; use `@@unique([orgId, slug])`. Do the same for any
    unique that two orgs could legitimately share.

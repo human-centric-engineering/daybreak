@@ -25,6 +25,55 @@ process.
 
 ## [Unreleased]
 
+### Added
+
+- **Three new `lib/app/*` scaffolds from Sunrise 0.19.0 are the leaf's
+  (t-159):** `lib/app/privacy-adapters.ts` (the LLM privacy layer's detectors,
+  token strategy, policy resolvers and observers), `lib/app/config-health.ts`
+  (settings your app needs that the env schema leaves optional) and
+  `lib/app/admin-breadcrumbs.ts` (names for your admin URL segments). Daybreak
+  fills none of them and they arrive empty, so fill them as Sunrise's notes
+  describe. `lib/app/db-drift.ts` changed only in its header comment: on a
+  conflict, keep Daybreak's registrations and take the new comment.
+  **Framework admin pages show title-cased segments** in the breadcrumb
+  (`Framework › Modules`, and a module slug as its words), except a segment
+  with a digit, which is usually a record id and is shown as typed. Daybreak
+  registers no segment names, since that would mean filling the leaf's
+  scaffold.
+
+### Changed
+
+- **The framework's 19 back-relations on `Org` moved into Sunrise's framework
+  zone (t-159).** Sunrise 0.19.0 ends `Org` and `User` with a framework zone
+  and an app zone (sunrise#859), so Daybreak's lines no longer sit in a
+  keep-mine `DAYBREAK` block and the divergence row for them is retired.
+  **Leaves:** a back-relation of your own goes below the app marker, where
+  `prisma format` puts it. If you carried a block after Daybreak's, move it
+  there on this sync and retire your ledger row. See
+  [the guide](./building-on-daybreak.md).
+
+### Fixed
+
+- **The framework's conversation scorer and supervisor no longer send a turn
+  the LLM privacy layer refused to the judge (t-159).** Both read a
+  conversation's messages from the database and send them to a model, so under
+  Sunrise 0.19.0's privacy layer they would have resent the personal details it
+  kept from the vendor. Under `block` the judge call would itself have been
+  refused. `listScorableTurns()` now skips every row core leaves out of history
+  (`isLeftOutOfHistory()`): a refused turn's rows, and error markers, which it
+  used to score as replies.
+
+### Security
+
+- **Sunrise 0.19.0's dependency fixes reach a leaf with this release.** It
+  clears all six open Dependabot alerts: zod memory exhaustion
+  (GHSA-mrhx-c7xc-m3w5, high), postcss-selector-parser, deepmerge, minimatch,
+  glob and fast-xml-parser. Four of them are cleared by new `overrides` entries.
+  Daybreak's own code calls none of these libraries except zod, which it gets
+  from the app's own copy and not the vulnerable one. **Leaves:** keep the four
+  `overrides` entries and their `overrideReasons` when you merge
+  `package.json`; see Sunrise's 0.19.0 notes.
+
 ## [0.11.0] — 2026-11-10
 
 > **Eleventh tagged Daybreak release: Sunrise 0.18.0.** It carries Sunrise

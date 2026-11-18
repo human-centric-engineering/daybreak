@@ -16,6 +16,7 @@
 
 import type { Citation } from '@/types/orchestration';
 import { prisma } from '@/lib/db/client';
+import { isLeftOutOfHistory } from '@/lib/orchestration/chat/message-builder';
 
 /** One scorable Q/A turn: the assistant message + the user question that prompted it + citations. */
 export interface ScorableTurn {
@@ -30,18 +31,24 @@ export interface ScorableTurn {
  * List the scorable turns of a conversation, oldest first. Each `assistant` message is paired with
  * the most recent preceding `user` message (across any `tool`/`system` turns); an assistant with no
  * preceding user is skipped. Citations come from the assistant message's `provenance.citations`.
+ *
+ * Rows core leaves out of a conversation's history (`isLeftOutOfHistory`: error markers, and every
+ * row of a turn the LLM privacy layer refused, Sunrise 0.19.0) are skipped before pairing. Both
+ * callers send these turns to a judge model, so a refused turn would resend the personal details the
+ * privacy layer kept from the vendor, and under `block` the judge call would be refused in turn.
  */
 export async function listScorableTurns(conversationId: string): Promise<ScorableTurn[]> {
   const messages = await prisma.aiMessage.findMany({
     where: { conversationId },
     orderBy: { createdAt: 'asc' },
-    select: { id: true, role: true, content: true, provenance: true },
+    select: { id: true, role: true, content: true, provenance: true, metadata: true },
   });
 
   const turns: ScorableTurn[] = [];
   let lastUserQuestion: string | null = null;
 
   for (const message of messages) {
+    if (isLeftOutOfHistory(message.metadata)) continue; // never shown to a model again
     if (message.role === 'user') {
       lastUserQuestion = message.content;
       continue;
