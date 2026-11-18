@@ -25,6 +25,29 @@ process.
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-11-18
+
+> **Twelfth tagged Daybreak release: Sunrise 0.19.0.** It carries Sunrise
+> `v0.19.0` (the LLM privacy layer, which can mask or refuse personal details
+> before a call reaches a model vendor; back-relation zones on `Org` and
+> `User`; an org's own audit log; invitations for people who already have an
+> account), in one PR:
+> [#334](https://github.com/human-centric-engineering/daybreak/pull/334).
+>
+> **Before deploying, read Sunrise's `[0.19.0]` "What a fork has to do":**
+> seven migrations (`npm run db:migrate:deploy`), then `npm run db:seed`, then
+> `npm install`. When you merge `package.json`, keep the four new `overrides`
+> entries and the `lockfileMetadataReasons` block. An existing install's LLM
+> calls go out as before until an operator turns privacy on, except that a
+> failed `initAppPrivacyAdapters()` or a policy resolver that fails refuses the
+> call.
+>
+> **Move your own `Org` back-relations below the app marker on this merge**, or
+> `back-relation-zones.test.ts` fails: see Changed. The three new `lib/app/*`
+> scaffolds are yours and arrive empty: see Added. **Still do not switch to
+> `multi`:** the framework's boot syncs (modules, slot definitions) are not yet
+> run per org.
+
 ### Added
 
 - **Three new `lib/app/*` scaffolds from Sunrise 0.19.0 are the leaf's
@@ -1519,7 +1542,8 @@ the bridge row gained a third assertion.
   are documented in [`../../CHANGELOG.md`](../../CHANGELOG.md). Only the
   leaf-contract consequence is repeated above.
 
-[unreleased]: https://github.com/human-centric-engineering/daybreak/compare/daybreak-v0.11.0...HEAD
+[unreleased]: https://github.com/human-centric-engineering/daybreak/compare/daybreak-v0.12.0...HEAD
+[0.12.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.12.0
 [0.11.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.11.0
 [0.10.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.10.0
 [0.9.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.9.0
