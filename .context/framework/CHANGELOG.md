@@ -38,9 +38,10 @@ process.
 > seven migrations (`npm run db:migrate:deploy`), then `npm run db:seed`, then
 > `npm install`. When you merge `package.json`, keep the four new `overrides`
 > entries and the `lockfileMetadataReasons` block. An existing install's LLM
-> calls go out as before until an operator turns privacy on, except that a
-> failed `initAppPrivacyAdapters()` or a policy resolver that fails refuses the
-> call.
+> calls go out as before until an operator turns privacy on, with two
+> exceptions that hold in every mode: if `initAppPrivacyAdapters()` throws,
+> every LLM call is refused until it is fixed, and a call whose policy resolver
+> fails is refused.
 >
 > **Move your own `Org` back-relations below the app marker on this merge**, or
 > `back-relation-zones.test.ts` fails: see Changed. The three new `lib/app/*`
