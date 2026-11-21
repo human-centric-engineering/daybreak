@@ -50,7 +50,7 @@ process.
   as core's retroactive review does. A bare model id resolves as before.
 - **The proactive-guidance nudge email moved to
   `emails/framework/proactive-nudge.tsx` (t-161).** Sunrise 0.20.0's
-  `pseudo-locale.test.ts` reads every template at the top of `emails/` and
+  `pseudo-locale.test.tsx` reads every template at the top of `emails/` and
   fails on one it has no case for. Under a `framework` segment the nudge is
   out of its sight, and no Sunrise file is edited. The email is still English
   only. Import it from the new path. Put an email of your own under
