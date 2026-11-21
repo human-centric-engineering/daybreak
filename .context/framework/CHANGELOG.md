@@ -25,6 +25,47 @@ process.
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-11-21
+
+> **Thirteenth tagged Daybreak release: Sunrise 0.20.0.** It carries Sunrise
+> `v0.20.0` (the commercial platform for multi-tenant apps: entitlements and
+> meters, self-serve signup into an org of one's own, orgs' own AI keys under
+> sealed secrets, model lifecycle, confidential-content routing, and interface
+> languages), in one PR:
+> [#339](https://github.com/human-centric-engineering/daybreak/pull/339).
+>
+> **Before deploying, read Sunrise's `[0.20.0]` "What a fork has to do":**
+> seven migrations (`npm run db:migrate:deploy`), then `npm run db:seed`, then
+> `npm install`. The seed retires three models their vendors no longer serve;
+> afterwards, open each retired model the config-health card names and use
+> **Move uses**. When you merge `package.json`, keep the new `effect` override
+> and its reason, the `@better-auth/core` pin at 1.7.27, and the new
+> `secrets:reseal` and `smoke:model-move` scripts.
+>
+> **Your own code, before you merge:**
+>
+> - A key of your own under `Org.settings.entitlements`, `quotas.meters`,
+>   `locale`, `orgCreated`, `awaitingOnboarding` or `awaitingFounder` must move
+>   first. Sunrise now owns those keys.
+> - A page of yours under `/admin/provider-keys` or `/admin/org-options` is
+>   refused at init. Move it.
+> - Sunrise's text moved into a catalogue. If you edited a screen under
+>   `app/(auth)`, `app/(public)` or `app/(protected)`, or a template in
+>   `emails/`, take Sunrise's version and change wording with
+>   `overridePlatformMessages()` from `lib/app/messages.ts`. ESLint now refuses
+>   English written into JSX on those paths.
+> - An email of your own at the top of `emails/` fails Sunrise's pseudo-locale
+>   test. Put it under `emails/app/`, as Daybreak's moved to
+>   `emails/framework/`: see Changed.
+> - Your own `logCost` calls should pass `ownKey: usesOrgOwnKey(provider)`.
+>   Sunrise's guard test skips `lib/app/**`, so nothing will fail if you
+>   don't.
+>
+> The seven new `lib/app/*` scaffolds are yours and arrive empty: see Added.
+> **Still do not switch to `multi`:** the framework's boot syncs (modules,
+> slot definitions) are not yet run per org, and at `multi` a self-serve
+> signup now founds an org of its own.
+
 ### Added
 
 - **Seven new `lib/app/*` scaffolds from Sunrise 0.20.0 are the leaf's
@@ -1590,7 +1631,8 @@ the bridge row gained a third assertion.
   are documented in [`../../CHANGELOG.md`](../../CHANGELOG.md). Only the
   leaf-contract consequence is repeated above.
 
-[unreleased]: https://github.com/human-centric-engineering/daybreak/compare/daybreak-v0.12.0...HEAD
+[unreleased]: https://github.com/human-centric-engineering/daybreak/compare/daybreak-v0.13.0...HEAD
+[0.13.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.13.0
 [0.12.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.12.0
 [0.11.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.11.0
 [0.10.0]: https://github.com/human-centric-engineering/daybreak/releases/tag/daybreak-v0.10.0
