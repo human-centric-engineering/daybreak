@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import { headers } from 'next/headers';
+import { getTranslations } from 'next-intl/server';
 import { getServerSession } from '@/lib/auth/utils';
 import { AdminSidebar } from '@/components/admin/admin-sidebar';
 import { AdminHeader } from '@/components/admin/admin-header';
@@ -12,14 +13,22 @@ import { AUTH_LANDING_ROUTE } from '@/lib/auth-landing/route';
 import {
   requestActingOrg,
   requestAdminReach,
+  requestLockedSwitches,
   requestSupportSession,
 } from '@/lib/auth/admin-page-viewer';
 import { SupportBanner } from '@/components/admin/support-banner';
 import { isWaitlistEnabled } from '@/lib/waitlist/config';
 import { isMultiTenant } from '@/lib/tenancy/context';
 import { logger } from '@/lib/logging';
-import { ADMIN_PATHNAME_HEADER, adminPageTierOf, reachesAdminPage } from '@/lib/auth/admin-tier';
 import {
+  ADMIN_PATHNAME_HEADER,
+  adminPageRequirementOf,
+  adminPageTierOf,
+  lockedAdminPageOf,
+  reachesAdminPage,
+} from '@/lib/auth/admin-tier';
+import {
+  adminPageRequirements,
   namedTierAdminPages,
   orgScopedAdminPages,
   orgTierAdminPages,
@@ -28,13 +37,16 @@ import { AdminTierGate } from '@/components/admin/admin-tier-gate';
 import { getSharedSettingsAccess } from '@/lib/tenancy/shared-settings-access';
 import { SharedSettingsAccessProvider } from '@/components/admin/shared-settings-access';
 
-export const metadata: Metadata = {
-  title: {
-    template: `%s - Admin - ${BRAND.name}`,
-    default: `Admin - ${BRAND.name}`,
-  },
-  description: `Admin dashboard for ${BRAND.name}`,
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const t = await getTranslations('admin.shell');
+  return {
+    title: {
+      template: `%s - ${t('admin')} - ${BRAND.name}`,
+      default: t('metaTitle', { brand: BRAND.name }),
+    },
+    description: t('metaDescription', { brand: BRAND.name }),
+  };
+}
 
 /**
  * Admin Layout (Phase 4.4)
@@ -83,7 +95,12 @@ export default async function AdminLayout({
   // routes for every admitted caller. One difference is deliberate: where a
   // guard refuses a session whose org entry is refused, this asks with no org
   // facts, so a platform admin still reaches the console to switch org — see
-  // `lib/auth/session-principal.ts`.
+  // `lib/auth/session-principal.ts`. A page registered with `requires`
+  // (§135 t-1034) opens only where the reach records the policy admitting
+  // the viewer to that tier with that switch as `scope.requires`. One whose
+  // switch the app shows locked (`whenLacking: 'lock'`, t-1053), and which the
+  // viewer's org lacks, is not redirected: `AdminTierGate` renders why it is
+  // closed in its place, never the page.
   //
   // This runs on a full load only — Next.js does not re-render a layout on
   // in-app navigation — so `AdminTierGate` below re-checks each navigation
@@ -94,8 +111,15 @@ export default async function AdminLayout({
   const pathname = requestHeaders.get(ADMIN_PATHNAME_HEADER);
   const orgTierPages = orgTierAdminPages();
   const namedTierPages = namedTierAdminPages();
+  const pageRequirements = adminPageRequirements();
   const reach = await requestAdminReach();
-  if (!reachesAdminPage(reach, pathname, adminPageTierOf(pathname, orgTierPages, namedTierPages))) {
+  const lockedSwitches = await requestLockedSwitches();
+  const pageTier = adminPageTierOf(pathname, orgTierPages, namedTierPages);
+  const pageRequires = adminPageRequirementOf(pathname, orgTierPages, pageRequirements);
+  if (
+    !reachesAdminPage(reach, pathname, pageTier, pageRequires) &&
+    !lockedAdminPageOf(reach, pathname, pageTier, pageRequires, lockedSwitches)
+  ) {
     redirect(AUTH_LANDING_ROUTE);
   }
 
@@ -135,6 +159,8 @@ export default async function AdminLayout({
           multiTenant={multiTenant}
           orgTierPages={orgTierPages}
           namedTierPages={namedTierPages}
+          pageRequirements={pageRequirements}
+          lockedSwitches={lockedSwitches}
           waitlistEnabled={isWaitlistEnabled()}
         />
         <div className="flex flex-1 flex-col overflow-hidden">
@@ -159,6 +185,8 @@ export default async function AdminLayout({
                   reach={reach}
                   orgTierPages={orgTierPages}
                   namedTierPages={namedTierPages}
+                  pageRequirements={pageRequirements}
+                  lockedSwitches={lockedSwitches}
                 >
                   {children}
                 </AdminTierGate>

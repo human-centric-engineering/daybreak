@@ -16,6 +16,1055 @@ release process.
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-11-21
+
+> **Alpha release.** Twenty-seventh tagged Sunrise release. **MINOR bump**:
+> seven new fork seams, new public API and seven migrations. The headline is
+> the **commercial platform** for multi-tenant apps:
+>
+> - **Entitlements and meters** (§135): what an org has bought, and limits on
+>   what it counts, with a platform seats limit.
+> - **Self-serve signup** (§134): at `multi`, a stranger who signs up gets an
+>   org of their own, an app's own setup runs for every new org, and a welcome
+>   step can wait for onboarding.
+> - **Orgs' own AI keys** (§137): an org can send its calls on its own vendor
+>   key, under a new sealed-secrets helper whose master key can rotate.
+> - **Model lifecycle** (§136): a catalogue model records its retirement, shows
+>   what uses it, and moves every use to its replacement in one action.
+> - **Sensitive-content routing** (§130): confidential messages are spotted,
+>   and an agent's policy warns about them, blocks them or sends them to a
+>   model it trusts.
+> - **Interface languages** (§138): the screens an org's users and visitors
+>   see, the org-settings pages and every email can be shown in another
+>   language, which an app supplies.
+>
+> Measured against `v0.19.0`: 37 PRs merged, no direct commits, 5 issues
+> closed as fixed; the suite is 1,666 files and 35,535 tests.
+>
+> ## What a fork has to do
+>
+> **Run the seven migrations** (`npm run db:migrate:deploy`), then
+> **`npm run db:seed`**:
+>
+> - `20261117120000_confidential_content_policy` and
+>   `20261117200000_confidential_model` add the confidential-content policy
+>   columns, `AiProviderConfig.trustedForConfidential` and the confidential
+>   model setting.
+> - `20261118120000_org_provider_keys` adds the `AiOrgProviderKey` table (with
+>   RLS enabled if you have run `db:tenancy:enable`) and the
+>   `orgProviderKeysEnabled` setting; `20261118200000_cost_log_own_key` adds
+>   `AiCostLog.ownKey`.
+> - `20261119120000_provider_model_lifecycle` adds
+>   `AiProviderModel.retiresAt` and `replacementId`.
+> - `20261120090000_user_locale` adds `User.locale`, and
+>   `20261121090000_webhook_delivery_email_locale` adds
+>   `AiWebhookDelivery.emailLocale`.
+> - The seed corrects Claude Haiku 4.5's id and **retires the seeded models
+>   their vendors no longer serve** (Claude Opus 4, Claude Sonnet 4, o3-mini).
+>   It leaves alone any row an admin has edited. It also refreshes the
+>   Provider Model Audit template. Afterwards, open each retired model that
+>   the config-health card names and use **Move uses**.
+>
+> **Run `npm install`.** It brings minor and patch bumps, next-intl 4 (new) and
+> next 16.4.6. **Keep, when you merge `package.json`:**
+>
+> - the new `@prisma/config` → `effect` override and its `overrideReasons`, or
+>   the effect alert comes back;
+> - `@better-auth/core` pinned to the version `better-auth` resolves to
+>   (1.7.27). If they differ, a second core is installed, and signup's
+>   request state reads the wrong one;
+> - the new scripts `secrets:reseal` (the key-rotation steps run it) and
+>   `smoke:model-move`;
+> - your own `version`, in `package.json` and the lockfile, if you set one.
+>
+> **Three new optional env vars**, `SEALED_SECRET_KEYS`,
+> `SEALED_SECRET_ACTIVE_KEY` and `SEALED_SECRET_LEGACY_KEY`, hold the master
+> keys for sealed secrets. Without them nothing changes, but orgs' own AI keys
+> can't be switched on. See `.context/security/sealed-secrets.md`.
+>
+> **Seven new fork-owned scaffolds** ship empty:
+>
+> - `lib/app/entitlements.ts` and `lib/app/sealed-stores.ts`;
+> - `lib/app/signup-org.ts`, `lib/app/org-created.ts` and `lib/app/welcome.ts`
+>   (which ships `null`);
+> - `lib/app/model-pins.ts` and `lib/app/messages.ts`.
+>
+> Take them as they are. A fork that already keeps what an org bought, sets
+> up new orgs, or stores sealed credentials its own way can move that code
+> into them.
+>
+> **At `multi`, a self-serve signup now gets an org of their own.** Someone who
+> signs up with no invitation, or from the install org's own waitlist, lands
+> as `OWNER` of a new org, where before they joined the install org as a
+> `MEMBER`. To keep the old behaviour, register a resolver in
+> `lib/app/signup-org.ts` that answers `{ kind: 'install' }`. `single` installs
+> and invited signups are unchanged.
+>
+> **Conflicts to expect,** each resolved by taking Sunrise's version unless
+> said otherwise:
+>
+> - **Text on screens and emails:**
+>   - A fork that edited a screen under `app/(auth)`, `app/(public)` or
+>     `app/(protected)`, an org-settings admin page (Members, Options, AI
+>     keys, Support access, Waitlist), or a template in `emails/` conflicts on
+>     its text. The text moved to `lib/i18n/messages/en.json`.
+>   - Change wording with `overridePlatformMessages('en', …)` from
+>     `lib/app/messages.ts`, not in the component.
+> - **`lib/app/user-created.ts`:** Sunrise rewrote its header comment to point
+>   org setup at the new seams. Keep your registrations and take the new
+>   comment.
+> - **A fork page under `/admin/provider-keys` or `/admin/org-options`:** both
+>   are now core admin sections, so a fork page there is refused at init.
+>   Move it.
+>
+> **Org settings keys Sunrise now owns.** A fork storing its own value under
+> one of these keys must move it before taking this release. Otherwise the
+> value reads as unreadable, and the first save overwrites it.
+>
+> - `Org.settings.entitlements`
+> - `Org.settings.quotas.meters`
+> - `Org.settings.locale`
+> - `Org.settings.orgCreated`
+> - `Org.settings.awaitingOnboarding`
+> - `Org.settings.awaitingFounder`
+>
+> **Your type-check will flag:**
+>
+> - code that read the English the catalogue now holds: `ORG_ROLE_LABELS`,
+>   `SETTINGS_TAB_TITLES`, `COOKIE_CATEGORIES`' `name` and `description`, and
+>   `getStatusConfig()`'s words;
+> - a fixture that builds a whole `PrivacyPolicy`: it needs
+>   `confidentialPersonal` and `confidentialCommercial`;
+> - fixtures typed with the cost types, which need the new own-key fields:
+>   `CostSummary`, `UsageTotals`, `CostSummaryTrendPoint`,
+>   `CostSummaryModelRow`, `CostBreakdownRow` and `CostBreakdownTotals`;
+> - a full `ProviderModelUsage` or `AiProviderModel` built in a test;
+> - a test double passed to `writeNewUserMemberships()`,
+>   `healSignupRecord()` or `syncInstallMembershipRole()` without
+>   `$executeRaw`.
+>
+> **Your tests will flag:**
+>
+> - `defaults.test.ts`: it gains the seven new scaffolds' rows. Pin them;
+>   don't delete them.
+> - **Mocks:**
+>   - a mock of `corePrivacyAdapters()` without `classifiers: []`;
+>   - a `@/lib/db/client` mock that fetches a provider for an org at `multi`:
+>     it needs `aiOrgProviderKey: { findUnique: async () => null }`;
+>   - a mock of `settings-resolver` or `judge-model` missing their new
+>     exports;
+>   - a test that mocks `isLocalProvider` with `mockResolvedValueOnce`:
+>     confidential routing now asks it first.
+> - **Rendering and assertions:**
+>   - a fork test rendering a catalogue screen needs `next-intl` mocked, as
+>     `tests/setup.ts` now does;
+>   - an exact English date asserted in an email: dates use the shared named
+>     formats;
+>   - an exact `org.create` `data`: a new org's `settings` holds
+>     `awaitingOnboarding`.
+> - **A guard:** a `logCost` call outside your fork tiers without `ownKey`,
+>   caught by `cost-log-own-key.test.ts`.
+>
+> **Changes a build will not catch:**
+>
+> - **Model pins** (task defaults, a workflow step's `modelOverride`) are now
+>   stored as `provider::model`. Code that reads one as a model id takes
+>   `pinModelId()` first. A bare id stored earlier still resolves.
+> - **Credential resolvers:**
+>   - a resolver in `lib/app/provider-credentials.ts` is no longer asked for
+>     an org that has saved its own key while that key is in use;
+>   - at `multi`, each provider fetch now also reads whether the org holds a
+>     key, cached for 60 seconds.
+> - **Caps and spend:**
+>   - own-key spend counts towards the agent's budget only, so pass
+>     `ownKey: usesOrgOwnKey(provider)` on your own `logCost` calls;
+>   - `/costs/orgs`' `utilisation` is the platform's spend over the cap.
+> - **Seats:** with a seats limit set, an org's own admin is refused a new
+>   invitation or member past it, and `addMember()` now checks the limit
+>   itself, so a fork route calling it gets the limit too.
+> - **A surface that `requires` a switch:** a fork's own `canAdminister` must
+>   read `scope.requires`, or every org the tier admits gets in.
+> - **New orgs:** staff-created orgs start unfinished too, so once you set
+>   `appWelcomeRoute`, their owner sees the welcome step once. A new org's
+>   `settings` column is no longer `NULL`.
+> - **The embed widget** now calls `BETTER_AUTH_URL`, whatever host served it.
+> - **Text and formats:**
+>   - email dates read "Nov 20, 2026, 10:00 AM UTC";
+>   - an event email's subject names the brand, not "Sunrise";
+>   - a schema-mode guard's failure `reason` lists every issue;
+>   - the admin audit log keeps prices, token limits and dates as values.
+> - **The cleanup agent's platform-owned binding** now passes over a retiring
+>   model, so marking one retiring moves the binding at the next maintenance
+>   pass.
+>
+> Each is explained under its entry below.
+>
+> **No feature in this release was checked on a deployed build:**
+>
+> - §134's and §137's ship records say that check was not run; §134's
+>   done-when asked for it against a deployed `multi` build.
+> - §130 and §136 were checked on a local dev server.
+> - §135's and §138's records don't say.
+>
+> Check self-serve signup, entitlements and orgs' own keys on your own `multi`
+> deployment before relying on them for real customers.
+>
+> **Known gap:** sunrise#1232, the issue behind §134's self-serve signup, is
+> still open on GitHub although t-1062 shipped it. The orchestration admin
+> pages that org admins can open stay in English.
+>
+> **Dependency alerts:** none open at the cut. The `effect` alert opened since
+> 0.19.0 is cleared; see Security below.
+
+### Added
+
+- **Every email goes out in its recipient's language (§138 t-1075).** The
+  templates in `emails/` and their subjects read from the catalogue's new
+  `emails` namespace. Each send site works out the language from who
+  receives it, in the new `lib/email/locale.ts`: `emailLocaleForUser(userId)`
+  (the user's own choice, then their org's default, then `en`, in their time
+  zone), `emailLocaleForOrg(orgId, { locale })` (a tag the site holds, such as
+  a waitlist entry's, then the org's default) and
+  `emailLocaleForAddress(email, orgId)` (an invitee's account, if they have
+  one). `deliverInvitation()` takes an optional `locale` (a language the
+  invitee chose before, such as a waitlist entry's), and an empty
+  `inviterName` now gets the catalogue's `fallbackInviter`. `lib/email/translate.ts` has `emailTranslator(where, namespace)`,
+  `emailDateTime()`, `emailDate()`, `EmailLocale` and `DEFAULT_EMAIL_LOCALE`.
+  `resolveEmailTemplate(kind, props, where?)` takes the locale as an optional
+  third argument and passes `locale` and `timeZone` to the template
+  (`EmailLocaleProps`); `EmailTemplate<K>` takes `EmailPropsMap[K] &
+  EmailLocaleProps`. `sessionOrgOf()` (`lib/tenancy/membership.ts`) is the org
+  a sign-in starts a user in, without the self-heal. `sendEmail()` is
+  unchanged. Dates in emails now use the shared named formats, so an English
+  expiry reads "Nov 20, 2026, 10:00 AM UTC" rather than "November 20, 2026 at
+  10:00 AM UTC", and the escalation subject names the priority as "High"
+  rather than "high". An event email's subject names the brand instead of a
+  literal "Sunrise". An event email's language is fixed on its delivery row
+  when the row is created, in the new nullable `AiWebhookDelivery.emailLocale`
+  (migration `20261121090000_webhook_delivery_email_locale`), and read again
+  by a manual retry or DLQ replay, so an automatic retry sends the same email
+  under the same idempotency key; a row from before it goes in English.
+  **Fork impact:** an email override keeps working and type-checking; it gets
+  `locale` and `timeZone` too, and renders in English unless it translates
+  with `emailTranslator()`. A fork that edited a template in `emails/`
+  conflicts on its text, which moved to `lib/i18n/messages/en.json`: change
+  wording, including a subject, with `overridePlatformMessages('en', { emails:
+  … })`. A fork test asserting an email's exact English date needs updating.
+
+- **The user and public screens read their text from the catalogue (§138
+  t-1073).** Every page under `app/(auth)`, `app/(public)` and
+  `app/(protected)`, and the components they render, now shows the viewer's
+  language. A user picks theirs in settings; a visitor who is not signed in
+  gets a language switch in the public footer. `localeOptions()` and
+  `nativeLocaleName()` (`lib/i18n/locale-options.ts`, server-only) list the
+  languages a person may pick, each named in itself. Each validation schema a
+  form shows gains a `create…Schema(t)` factory (`createPasswordSchema`,
+  `createEmailSchema`, `createSignUpSchema`, `createSignInSchema`,
+  `createChangePasswordSchema`, `createResetPasswordRequestSchema`,
+  `createResetPasswordSchema`, `createUpdateUserSchema`,
+  `createAcceptInvitationSchema`, `createContactSchema`,
+  `createContactClientSchema`), and `buildWaitlistDetailsSchema()` takes an
+  optional translator. `ValidationT` and `englishValidation` are in
+  `lib/validations/messages.ts`. A form passes `useTranslations('validation')`.
+  The exported schemas are unchanged: built from the source English, so an
+  API route returns the same error text as before. ESLint now rejects English
+  written into the JSX of those paths (`react/jsx-no-literals`).
+  **Fork impact:** a fork that edited one of these screens conflicts on the
+  text, which moved to `lib/i18n/messages/en.json`; to change wording, use
+  `overridePlatformMessages('en', …)` rather than editing the component (for
+  `validation.*` that changes the forms, not the text an API route returns). A
+  fork test rendering one of these components needs `next-intl` mocked, as
+  `tests/setup.ts` now does with the real catalogue. `authLandingLabel(default)`
+  (`lib/auth-landing/route.ts`) gives `AUTH_LANDING_LABEL` in the viewer's
+  language: a fork's own label as given, otherwise the translated default.
+  `useSaveFailure()` shows its summary by Save ("2 fields need fixing.") in
+  the viewer's language, from the new `forms.saveError` keys, and
+  `invalidSave()`, `unreadableNumbers()` and `fieldCount()` take an optional
+  `SaveErrorText` (default `englishSaveErrorText`, in `lib/errors/save-error.ts`).
+
+- **A new fork seam, `lib/app/model-pins.ts` (ships empty), for the models an
+  app names itself (§136, t-1067).** Fill `initAppModelPins()` with
+  `registerModelPinReporter()`, asked once per org inside that org's scope for
+  the app's uses of a model (`{ label, where }[]`), and/or
+  `registerModelMoveCheck()`, asked with both models, every org's pins and a
+  `phase` (`'preview'` on each replacement an admin picks, `'move'` just
+  before the move writes), answering `{ allow: true }` or
+  `{ allow: false, reason }` (both in
+  `lib/orchestration/model-lifecycle/app-pins.ts`). Reported pins appear in
+  `GET /provider-models/:id`'s `uses` (`appPins`, `otherOrgAppPins`,
+  `appPinsUnavailable`), block the model's delete (`409 MODEL_IN_USE`, or
+  `409 MODEL_USES_UNREADABLE` while a report failed), count in config
+  health's retiring-model checks, and are counted per org in the move's
+  preview (`orgs[].appPins`). A refusal shows in the preview (`app.refused`) and stops
+  the move with 409 before any key is tested or anything is written. The check
+  fails closed: one that throws, times out (2 minutes) or answers badly
+  refuses, as does an init that throws. Sunrise never writes an app's pins.
+  **Fork impact:** none until you fill the seam; with it empty the uses, the
+  delete and the move behave as before. The ships-empty test gains a row, and
+  `tests/setup.ts` pins the seam empty for every test file, like the
+  `signup-org` seam.
+
+- **An org admin sets the org's language, and the org-settings admin pages
+  read from the catalogue (§138 t-1074).** Admin → Options gains a language
+  picker over `PUT /api/v1/orgs/[id]/locale`; a member with no language of
+  their own then sees it. Options is now shown on every install, not only one
+  whose app registers an org-set switch. Members, Options, AI keys, Support
+  access and Waitlist, and the parts of the admin shell an org admin sees on
+  them, show the viewer's language. Staff-only pages and the orchestration
+  console stay English by ruling. New schema factories for those forms:
+  `createInviteOrgMemberSchema`, `buildSupportGrantSchema` and
+  `createSaveProviderKeySchema` (`lib/validations/tenancy.ts`); the exported
+  schemas keep the routes' English. See `.context/ui/i18n.md`, "The admin
+  console". **Fork impact:** a fork that edited one of those pages conflicts
+  on the text, which moved to `admin.*` in `lib/i18n/messages/en.json`.
+
+- **An app can register its own strings and languages (§138 t-1072).** New
+  fork-owned scaffold `lib/app/messages.ts` (`initAppMessages()` and the
+  `AppMessages` type, shipped empty) behind the shared init gate, with
+  `registerAppMessages()`, `registerAppLocale()`, `overridePlatformMessages()`,
+  `appLocaleTags()`, `catalogueFor()` and `APP_MESSAGE_NAMESPACES` in
+  `lib/i18n/registry.ts`. An app's strings go under the `app` (or `framework`)
+  namespace, which the platform catalogue now reserves and never ships. A
+  registered locale is returned by `supportedLocales()`, so users, orgs and
+  visitors can choose it; a key it lacks shows in English and is logged once.
+  A registered string must be valid ICU, or the init throws.
+  `Messages` (`lib/i18n/catalogue.ts`) now includes `AppMessages`. A throwing
+  init rolls back every registration and the platform catalogue serves. The
+  registry is server-only. The tag constants and `isLanguageTag()` moved to the
+  import-free `lib/i18n/tags.ts`, and `lib/i18n/locales.ts` still re-exports
+  them. The `locale` field of `updateUserSchema` now checks only a tag's shape,
+  so client forms do not bundle the catalogue. `PATCH /api/v1/users/me` still
+  refuses an unsupported locale.
+  _Fork impact:_ none required. `tests/unit/lib/app/defaults.test.ts` gains a
+  row for the new seam; pin it when you fill the seam.
+
+- **Move every use of a retiring model to its replacement in one audited
+  action (§136, t-1066).** `POST /api/v1/admin/orchestration/provider-models/:id/move-uses/preview`
+  and `POST …/move-uses` (platform admin; the move from the install org only),
+  body `{ replacementId }`, and a **Move uses…** dialog on the model's page.
+  The replacement is re-checked and must be on the same provider. Each active
+  org is moved inside its own scope and transaction: agents bound to the model
+  get the replacement as a new agent version (not those whose model the
+  platform picks, which it moves itself), workflows get the pin in their
+  draft and a new published version, and the install's task defaults, audio
+  default and confidential-message model follow (the embedding pins never
+  move). Every moved pin is written as `provider::model`. An org on its own key
+  for the provider has the key tested against the replacement first, with a
+  short message billed to that key, and is skipped if it fails; the install
+  settings are then left too, since agents with no model of their own follow
+  them. An org that fails rolls back alone. Audit rows: `agent.model_moved`,
+  `workflow.model_moved`, `settings.model_moved` and the summary
+  `provider_model.uses_moved`. New: `moveModelUses()` / `previewModelMove()` /
+  `loadMoveTarget()` (`lib/orchestration/model-lifecycle/move.ts`),
+  `lockRepinSubjects()` and `repinWorkflow()` (`workflows/version-service.ts`),
+  `testProviderKeyOnModel()`
+  (`llm/provider-manager.ts`), `workflowsMayPinWhere()`
+  (`admin/global-config-usage.ts`), and `MODEL_OVERRIDE_STEP_TYPES` now
+  exported from `llm/model-pin.ts`.
+  _Fork impact:_ none required. A fork's own step type that takes a
+  `modelOverride` is neither counted by the uses finder nor moved, as before;
+  pins a fork keeps elsewhere get a seam in t-1067, still to come.
+
+- **The interface can be shown in another language (§138 t-1071).** next-intl 4,
+  without i18n routing (no URL changes), wired in `next.config.js` through
+  `lib/i18n/request.ts`; `<html lang>` now carries the request's locale. The
+  locale resolves from the signed-in user's choice (new nullable column
+  `User.locale`, set through `PATCH /api/v1/users/me`), then the acting org's
+  default (new `Org.settings.locale` key, `ORG_LOCALE_KEY`, read with
+  `readOrgLocale()` and set by an org OWNER/ADMIN through the new
+  `PUT /api/v1/orgs/[id]/locale`, audited as `org.locale.update`; members read
+  it as `settings.locale` on `GET /api/v1/orgs/[id]`), then a visitor cookie
+  (`sunrise_locale`, set through the new public `PUT /api/v1/locale`), then
+  `Accept-Language`, then `en`. Sunrise ships `en` and a generated pseudo-locale
+  `en-XA` for checking screens. Named date and number formats (`I18N_FORMATS`,
+  `formatterFor()`) are in `lib/i18n/format.ts`. Screens are not on the
+  catalogue yet. Guide: `.context/ui/i18n.md`.
+
+- **An app can send a new org's owners and admins to a welcome step until it says
+  onboarding is done (§134 t-1063).** Every org created through
+  `lib/tenancy/lifecycle.ts` (staff, an app's `createOrg()`, a self-serve
+  signup) is now inserted with `Org.settings.awaitingOnboarding: true`
+  (`ORG_AWAITING_ONBOARDING_KEY`); a missing key reads as finished, so the
+  install org and every org that already exists are finished, with no
+  migration. `isOrgOnboarded()` and `markOrgOnboarded()` in the new
+  `lib/tenancy/onboarding.ts` read and clear it (`readOrgOnboarded()` in
+  `lib/tenancy/org-settings.ts` reads it from a settings object). A new fork
+  seam, `lib/app/welcome.ts` (`appWelcomeRoute`, ships `null`), resolved and
+  validated as `AUTH_WELCOME_ROUTE` in `lib/auth-landing/route.ts`: when set,
+  the proxy sends a signed-in OWNER or ADMIN of an unfinished, active org who
+  reaches the landing route there instead (query string kept; a plain MEMBER
+  is not sent). With it `null`, nothing is read or redirected. The route may
+  not be the landing route or sit on an auth route; the auth routes are now
+  exported from `lib/auth-landing/route.ts` as `AUTH_ROUTES` /
+  `isAuthRoutePath()`, which `proxy.ts` uses. Per-user onboarding stays the
+  app's; Sunrise records it per org only.
+  _Fork impact:_ none until you set the route. A new org's `settings` column
+  is no longer `NULL` (it holds the key), so a query that took `NULL` to mean
+  "never configured", or a test that asserts the exact `data` of
+  `org.create`, sees the change. Orgs staff create (a migrating customer
+  included) start unfinished too, so their owner sees the welcome step once.
+
+- **What uses a catalogue model, and a warning when a retiring one is in use
+  (§136, t-1065).** `GET /api/v1/admin/orchestration/provider-models/:id` now
+  returns `lifecycle` (`state`, `replacement`) and `uses`: the agents and
+  workflows using the model (the caller's org's named, other orgs' counted for
+  a platform admin) and `settings`, the install settings that name it (task
+  defaults marked saved or suggested, the confidential-message model, the
+  active embedding model; the embedding pins marked as left to §132).
+  `modelUses()` (`lib/orchestration/model-lifecycle/uses.ts`) and
+  `settingsPinsFor()` (`settings-pins.ts`) compute them. A pin that names a
+  model by id alone (`byIdOnly`) counts on every row with that id, and
+  `uses.sharedWith` names the other providers that offer it.
+  `DELETE /provider-models/:id` now also refuses (409, `details.settings`)
+  while a saved setting names the model, and each list row gains
+  `lifecycleState`. The edit page shows
+  them, the models matrix badges a retiring or retired model, and config
+  health gains `retired_model_in_use` (critical) and `retiring_model_in_use`
+  (warning). `providerModelUsage()` takes an optional `{ acrossOrgs }` scope,
+  marks each agent `followsPlatform`, and counts
+  `otherOrgAgentsFollowingPlatform`.
+  _Fork impact:_ the cleanup agent's platform-owned binding now ranks a
+  retiring model after every model without a retirement date and never picks
+  one past its day, so marking a model retiring moves that binding at the next
+  maintenance pass (a new agent version). `followsPlatform` uses
+  `bindingFollowsPlatform`, so it is true only for a definition that still
+  picks its own binding. A test that builds a full `ProviderModelUsage` needs the new
+  count.
+
+- **Catalogue models record a vendor's retirement (§136, t-1064).**
+  `AiProviderModel` gains two nullable columns: `retiresAt` (the day the vendor
+  stops serving the model) and `replacementId` (a self-relation to its
+  successor, `ON DELETE SET NULL`). Retiring / retired is derived from the date
+  by `modelLifecycleState()` in `lib/orchestration/model-lifecycle/state.ts`,
+  and `checkReplacement()` there is the successor rule: same provider, active,
+  not itself retiring, every capability the model has.
+  `PATCH /api/v1/admin/orchestration/provider-models/:id` accepts `retiresAt`
+  (`YYYY-MM-DD` or `null`) and `replacementId`, and the edit page has a
+  Retirement section. The audit workflow's `deactivate_provider_models`
+  capability takes optional `retiresAt` and `replacedBy` (the successor's
+  vendor model id) per entry: a day still to come leaves the model active, and
+  a day already here deactivates it; its result gains `retiring` / `retired`
+  counts and a per-model `replacementNote`. Every catalogue change now writes
+  an `AiAdminAuditLog` row (entity type `provider_model`): each write the audit
+  applies, and an admin's create, bulk add, edit (with old and new values)
+  and delete. See
+  [`.context/orchestration/llm-providers.md`](./.context/orchestration/llm-providers.md#model-lifecycle).
+  _Fork impact:_ none unless you build `AiProviderModel` rows in full in your
+  own tests (add the two fields) or call `deactivate_provider_models` yourself
+  (entries without `retiresAt` behave as before).
+
+- **An app chooses where a self-serve signup lands at `multi` (§134 t-1062,
+  #1232).** A new fork seam, `lib/app/signup-org.ts`
+  (`initAppSignupOrgResolver()`, ships empty), where an app calls
+  `registerSignupOrgResolver()` from `lib/tenancy/signup-org.ts`. It is asked
+  by `userCreateBeforeHook`, before the membership is written, for a signup
+  with no invitation or one from the install org's own waitlist, told
+  `{ email, emailVerified, name, signupMethod, waitlistEntryId }`
+  (`SignupOrgRequest`), and answers `{ kind: 'own', name? }`,
+  `{ kind: 'join', orgId, role? }` or `{ kind: 'install' }`
+  (`SignupOrgAnswer`). A resolver that throws, runs past
+  `SIGNUP_ORG_RESOLVER_TIMEOUT_MS` (5 s), answers nothing usable or names a
+  missing org falls back to the install org, logged at `error`. Invited
+  signups, platform staff and `single` installs are never asked. An org made
+  this way is created by the new `createSignupOrg()` marked
+  `Org.settings.awaitingFounder` (`ORG_AWAITING_FOUNDER_KEY`), and its
+  org-created hooks (`source: 'signup'`) and platform agents run through
+  `completeSignupOrg()`, after the response, once its founder is a member
+  and can act there: where `REQUIRE_EMAIL_VERIFICATION` holds, when they
+  verify or sign in (`completeFoundedSignupOrgs()`,
+  `releaseFoundedSignupOrgs()`), with
+  the `orgCreatedHooks` job releasing a missed one after
+  `ORG_CREATED_FOUNDER_GRACE_MS` (15 min). `requiresEmailVerification()`
+  (`lib/auth/verification-status.ts`) is the one statement of that rule. A
+  resolver naming a suspended org, one at its seats limit, or another
+  signup's still awaiting its founder, falls back like a missing one. With no
+  app-chosen name the org is "My organisation" (`DEFAULT_SIGNUP_ORG_NAME`) with
+  an `org-<random>` slug: nothing of the person is copied onto it. A new
+  system-scoped `abandonedSignupOrgs` maintenance job (appended to
+  `backgroundTasks`, hourly) deletes a marked org with no member that no
+  user's signup record names, after `SIGNUP_ORG_ABANDONED_AFTER_MS` (1 h).
+  `writeNewUserMemberships()` now answers `{ founded }`,
+  `activeOrgForSession()` adds `founded`, and `writeNewUserMemberships()`,
+  `healSignupRecord()` / `syncInstallMembershipRole()` take a client with
+  `$executeRaw` (a transaction client has it). See
+  [`.context/tenancy/identity.md`](./.context/tenancy/identity.md#self-serve-signup-an-org-of-their-own).
+  _Fork impact:_ a test double passed to those three needs `$executeRaw`; a
+  fork filling the seam pins one new row in
+  `tests/unit/lib/app/defaults.test.ts`.
+
+- **An app's own setup runs for every new organisation (§134 t-1061, #1270).**
+  A new fork seam, `lib/app/org-created.ts` (`initAppOrgCreatedHooks()`, ships
+  empty), where an app calls `registerOrgCreatedHook(key, hook)` from
+  `lib/tenancy/org-created-hooks.ts` to grant a new org a provider, set its
+  starting switches or anything else it needs. Every org passes through
+  `createOrg()`, so the hooks run however it was made, told
+  `{ orgId, slug, name, source, ownerUserId, retry, signal }`
+  (`OrgCreatedContext`, `OrgCreatedSource`). `createOrg()` takes an optional
+  `source` (`'admin' | 'signup' | 'app'`, default `'app'`; `'signup'` is
+  the org a self-serve signup founds, made by `createSignupOrg()`). Hooks run
+  after the create commits, one at a time in registration order, each bounded
+  by `ORG_CREATED_HOOK_TIMEOUT_MS` (10 s) and the run by
+  `ORG_CREATED_RUN_BUDGET_MS` (30 s), in the new org's scope and before
+  its platform agents; one that throws or times out stays owed in
+  `Org.settings.orgCreated` and a new system-scoped `orgCreatedHooks`
+  maintenance job (appended to `backgroundTasks`) retries it every 15 minutes
+  until it succeeds, so **hooks must be idempotent**. A run takes a lease on
+  the org first, so two runs never overlap. Only orgs created after a
+  hook is registered owe it. With nothing registered, creating an org writes
+  what it did before.
+
+- **`runAsLivenessProbe(fn)` in `lib/tenancy/context.ts` (#1262).** A
+  debug-logged null-org system scope for the database liveness probe, beside
+  `runAsCredentialLookup` and `runAsCrossOrgCount`. It is confined to
+  `lib/db/utils.ts` by an always-run site test
+  (`tests/unit/lib/tenancy/liveness-probe-sites.test.ts`); a fork that needs a
+  system scope elsewhere uses `runAsSystem`.
+
+- **Organisations can send their AI calls on their own vendor keys (§137,
+  t-1044).** A new tenant-owned model, `AiOrgProviderKey`, holds one sealed key
+  per org per provider row (sealed with `sealSecret()` for the purpose
+  `org-provider-key:<orgId>:<providerConfigId>`), with a version that rises
+  each time the key is replaced, a hint (its last four characters, for a key
+  of 16 or more), and who saved it and when. It is isolated by
+  `org_isolation`, erased with its org, listed in the org export without the key and in the subject
+  export as an attribution, and registered with `npm run secrets:reseal` as
+  core's first sealed store. A new orchestration setting,
+  `orgProviderKeysEnabled` (off by default; the settings API refuses turning it
+  on while no master key is configured), is the install's switch. At `multi`,
+  `resolveProviderCredential()` now asks for the org's own key **before** the
+  `lib/app/provider-credentials.ts` resolver: an org with a key for the row
+  gets it under the identity `org-key:<orgId>:<keyRowId>:<version>` (so its
+  client, breaker and in-flight count are its own, and a replaced key never
+  reuses the old client), or `credential_unavailable` when the switch is off,
+  the provider is not approved for the org, the key will not open, or the
+  lookup failed. It is never moved to the install's key or handed to your
+  resolver. An org with no key resolves as before, and nothing is read at
+  `single`. The lookup is cached for 60 seconds per org and row; a save or
+  removal clears it in the writing process. A permanent delete of a provider
+  row is refused (409, `details.orgKeyCount`) while orgs hold keys for it.
+  Config Health gains a critical check for the switch on with no master key.
+  An org's admins save them on the page below (t-1045). See
+  [`.context/orchestration/llm-providers.md`](./.context/orchestration/llm-providers.md#organisations-own-keys).
+  _Fork impact:_ if you registered a credential resolver, it is no longer asked
+  for an org that has saved its own key while that key is in use. At `single`
+  nothing changes. At `multi`, even with the switch off and no keys saved,
+  each provider fetch or reachability check for an org now also reads (cached
+  for 60 seconds) whether it holds a key, and a read that fails refuses that
+  org's credential rather than assume it holds none, local rows included. So a
+  unit test that mocks `@/lib/db/client` and fetches a provider for an org at
+  `multi` needs `aiOrgProviderKey: { findUnique: async () => null }` in its
+  mock. The migration adds a table and a column, and enables RLS on the table if your install has already run
+  `db:tenancy:enable`.
+
+- **An org's admins save, test, replace and remove its AI keys themselves
+  (§137, t-1045).** A new org-tier page, **AI keys** (`/admin/provider-keys`,
+  shown at `multi`), over `GET /api/v1/orgs/[id]/provider-keys`,
+  `PUT` / `DELETE …/provider-keys/[providerId]` and `POST …/[providerId]/test`.
+  A key is tested with one cheap vendor call before it is stored, and one that
+  fails is not stored (422 `KEY_TEST_FAILED`); save is refused while the switch
+  is off and for a provider the org is not approved for. Who may is the
+  authorization policy's decision about the new resource kind
+  `org.providerKeys` (by default the org's OWNER and ADMIN acting in it), and
+  on top of any policy the caller must be acting in the org, a support session
+  cannot save or replace a key, and the install org is refused. Every action is
+  audited with the hint, never the key. Saves and tests are capped by a new per-flow
+  limiter, `providerKeyTestLimiter`, in separate buckets of 10 a minute per org
+  (`RATE_LIMIT_PROVIDER_KEY_TEST`). The provider manager gains
+  `testProviderKey(config, apiKey)`, which tests a key on a client it never
+  caches. Every verb answers 409 `single_tenant` at `single`. See
+  [`.context/orchestration/llm-providers.md`](./.context/orchestration/llm-providers.md#the-orgs-page-and-api-137-t-1045).
+  _Fork impact:_ `provider-keys` joins `CORE_ADMIN_SECTIONS`, so a fork page
+  registered under `/admin/provider-keys` is now refused at init. A fork policy
+  that should let another org role manage keys answers `org.providerKeys` in
+  `canRead`'s `unattributed` arm.
+
+- **Spend on an organisation's own AI key is kept out of the platform's caps,
+  and reported apart (§137, t-1046).** `AiCostLog` gains `ownKey` (default
+  `false`), set when the call went out on the org's own key. Such a call counts
+  towards its agent's monthly budget only: the org's cap and the global cap
+  neither count it nor refuse it, at the provider manager's gate, in provider
+  selection and in chat's check at the start of a turn, while any call the same
+  turn makes on the platform's keys still meets both. The agent's budget, which
+  only chat enforces, still stops its turns; outside chat nothing caps an
+  own-key call. `GET /costs/summary`
+  gains `ownKey: { today, week, month }`, the part of `totals` on own keys, and
+  every bucket of `GET /costs/orgs` gains `ownKeyCostUsd`; the costs page, the
+  per-org table and the org page show the platform's spend with own-key spend
+  apart. Also new: `BudgetStatus.agentCapExceeded`, `PaidCallHold.agentCapReached`,
+  an `{ ownKey }` option on `spendCapRefusal()` and `assertWithinSpendCaps()`,
+  and `usesOrgOwnKey()` / `providerUsesOrgOwnKey()` on the provider manager.
+  `LogCostParams` gains `ownKey`: every core `logCost` caller passes
+  `usesOrgOwnKey(provider)` for the provider it called, and a new guard test
+  holds every call site in the tree to that. See
+  [`.context/orchestration/llm-providers.md`](./.context/orchestration/llm-providers.md#what-an-own-key-call-costs-and-which-caps-hold-it-137-t-1046).
+  _Fork impact:_ `/costs/orgs`'s `utilisation` is now the platform's spend over
+  the cap, which differs from `totalCostUsd / cap` once an org has own-key
+  spend; nothing changes before then. `resolveProviderCredential()` now also
+  answers `ownKey`, always `false` for your resolver's credentials. A test
+  fixture typed as `CostSummary` or `UsageTotals` needs the new fields. Your own
+  `logCost` calls should pass `ownKey: usesOrgOwnKey(provider)`; without it an
+  org's own-key spend in them counts against the org's and the global caps. The
+  migration adds one column with a default.
+
+- **The cost trend and the per-model breakdowns split own-key spend too, and
+  chat asks the provider a turn is routed to (§137, t-1057, t-1058).** Each
+  point of `GET /costs/summary`'s `trend` gains `ownKeyCostUsd`, each `byModel`
+  row `ownKeyMonthSpend`, and each row and the totals of `GET /costs` (all three
+  `groupBy`s) `ownKeyCostUsd`: the part of the spend on orgs' own keys. The
+  costs page's trend chart, the dashboard's 7-day chart, the per-model table and
+  the local-vs-cloud panel show the platform's spend, as the cards beside them
+  do: the charts say what they leave out, and the table gains an Own keys
+  column. With the org's or the global cap reached, a chat turn is now answered
+  when the model for confidential messages that routing moves it to is local or
+  on the org's own key, rather than refused because the agent's provider is on
+  the platform's key; the refusal, when there is one, comes after routing and
+  still before anything is saved or sent. A fallback still does not let a capped
+  turn in. `spendCapRefusal()` gains a `quiet` option, for a check made ahead of
+  any call, so it is not logged as a refused one. _Fork impact:_ a test fixture
+  typed as `CostSummaryTrendPoint`, `CostSummaryModelRow`, `CostBreakdownRow` or
+  `CostBreakdownTotals` needs the new field. A test that mocks `isLocalProvider`
+  or `providerUsesOrgOwnKey` for the agent's primary with
+  `mockResolvedValueOnce` should answer by slug instead: confidential routing
+  asks `isLocalProvider` first.
+
+- **An org's AI key is tested with a call the vendor checks (§137, t-1056).**
+  Saving or testing a key on `/api/v1/orgs/[id]/provider-keys` now runs the
+  provider's new `testKey()` instead of its connection check. Each one sends a
+  known-wrong key beside the real one and trusts a call only where the host
+  fails the wrong key there. Anthropic's model list replaces a billed one-token
+  message on a fixed model, so a key whose workspace cannot use that model is no
+  longer refused; where the list proves nothing (a gateway behind
+  `ANTHROPIC_BASE_URL`), the message is still sent. Voyage embeds one word: it
+  has no model list, so until now no Voyage key could be saved, and the
+  platform's own provider test failed every Voyage row (it now makes the same
+  call, a token or two). An OpenAI-compatible host's model list is trusted where
+  it fails the wrong key with any 4xx (Gemini and xAI answer 400); otherwise
+  (OpenRouter's open list, Perplexity's missing one, a key that may only lack
+  the scope to read models) a chat request no host runs is sent with each key,
+  so a mistyped key is refused instead of being saved and failing on the org's
+  first call. Every call is held to 15 seconds. A host that checks keys on
+  neither call fails the test. `LlmProvider` gains the optional `testKey()`,
+  used by `testProviderKey()`, which falls back to `testConnection()` without
+  it; `KEY_TEST_TIMEOUT_MS`, `KNOWN_WRONG_KEY`, `refusesKey()`,
+  `refusedForTheKey()` and `probeCall()` in `lib/orchestration/llm/provider.ts`
+  are what the three use. See
+  [`.context/orchestration/llm-providers.md`](./.context/orchestration/llm-providers.md#the-orgs-page-and-api-137-t-1045).
+  _Fork impact:_ none required. `testKey()` is optional; a fork's own provider
+  class may implement it with the same helpers.
+
+- **Switches an org's own admins may set (§135 t-1054).**
+  `registerEntitlementSwitch()` takes `setBy: 'platform' | 'org'`, defaulting
+  to `'platform'`, so every switch registered today stays platform-only. An
+  `'org'` switch (a beta opt-in, a free add-on) can also be set by the org's
+  own admins for their own org, on a new org-tier page, **Options**
+  (`/admin/org-options`, shown only when such a switch is registered), over
+  new routes `GET` / `PATCH /api/v1/orgs/[id]/entitlements`. Who may is the
+  authorization policy's answer about a new resource kind, `org.switches`
+  (`ORG_SWITCHES_RESOURCE_KIND`): by default the org's OWNER and ADMIN while
+  acting in it, so a fork's policy can narrow it. The route needs a browser
+  session, refuses writes from a support session, refuses any platform-set
+  key with a 403 (`details.reason: 'switch_set_by_platform'`) and writes
+  nothing over a stored slice it cannot read (409, `switches_unreadable`). A
+  write is audited as `org.entitlements.update` with `metadata.setBy: 'org'`.
+  New: `orgSettableSwitches()`, `setOrgSwitches()`'s optional fourth argument
+  `{ refuseUnreadable }` and `OrgSwitchesUnreadableError`, `API.ORGS.entitlements()`,
+  and an `orgOptionsEnabled` prop on `AdminSidebar`. The platform route's
+  switches now carry `setBy`, and `/admin/orgs/[id]` marks the org-set ones.
+  **A new core admin section, `org-options`**, joins `CORE_ADMIN_SECTIONS` and
+  `ORG_TIER_ADMIN_PAGES`: a fork with its own page under `/admin/org-options`
+  must move it.
+- **Show a surface an org lacks locked, with your own words (§135
+  t-1053).** `registerEntitlementSwitch()` takes three new optional fields.
+  `whenLacking: 'lock'` shows a nav item whose switch the org lacks with a
+  lock (opening the app's message and an upgrade link, not the page) and shows
+  its page locked in place of its content, rather than hiding the item and
+  redirecting; nothing opens, and the routes still refuse. `refusalMessage`
+  replaces the platform's sentence on the 403 and on the locked item and page.
+  `upgradeUrl` (a site path or an `https://` address, checked at
+  registration) is carried on the 403 as `details.upgradeUrl`. All three are
+  optional and the defaults are as t-1034 shipped: hidden, the platform's
+  sentence, no link. **`RegisteredEntitlementSwitch` is now its own interface**
+  rather than `Readonly<Required<EntitlementSwitch>>`, with `refusalMessage`
+  and `upgradeUrl` as `string | null`; code reading the four earlier fields
+  is unaffected. New: `switchUpgradeUrl()`, `MAX_SWITCH_REFUSAL_MESSAGE`,
+  `LockedAdminSwitch`, `lockedSwitchFor()`, `lockedAdminPageOf()`,
+  `requestLockedSwitches()`, and a `lockedSwitches` prop on `AdminSidebar` and
+  `AdminTierGate`. A switch is locked only when the org's switches were read
+  and it is off; a failed read keeps it hidden.
+- **Meters and limits: how much an org may have (§135 t-1035).** An app
+  registers a meter in the same `initAppEntitlements()` seam with
+  `registerMeter({ key, label, description, period, count })`
+  (`lib/tenancy/entitlements.ts`): `count({ orgId, from, to })` is the app's
+  own count, and `period` is `'month'` (UTC calendar month), `'standing'`
+  (how many now) or a function `({ orgId, now }) => ({ from, to })` for a
+  window of its own, such as a billing cycle. A failed init rolls back
+  switches and meters together. `checkMeterQuota(orgId, key, { adding, now })`
+  in the new `lib/tenancy/meters.ts` answers `{ allowed, used, limit, label,
+  window }` and changes nothing; it counts nothing when no limit is set, and
+  fails open (a count, window or limit that cannot be read answers allowed,
+  and is logged). `meterLimitMessage()` and `METER_LIMIT_REASON`
+  (`'meter_limit_reached'`) let an app's refusals read alike. **Seats are a
+  platform meter**: members who are not platform staff plus open invitations
+  that do not grant the platform `ADMIN` role, each person once
+  (`countSeats()`, `invitationTakesSeat()`); an app may
+  register `seats` to count them its own way. A meter's count runs as the org
+  counted and across its owners, whoever asks. With a seats limit set, an
+  org's own admin is refused a new invitation
+  (`POST /api/v1/orgs/[id]/invitations`) and adding a member at the limit with
+  a 403 carrying `details.reason: 'meter_limit_reached'`; a platform admin is
+  not (`refuseOverSeatsLimit()`). Accepting an invitation, or adding someone
+  who holds one, takes up the seat it held and is not refused. An app's own
+  `seats` count must keep the two rules these rest on: an open invitation
+  counts as the member it becomes, and platform staff take no seat. **`addMember()` now makes the member check
+  itself**, after its own, so a fork's route calling it gets the limit too;
+  it takes a new optional `options.seatHeld`, which invitation acceptance
+  passes. Limits are stored per org at
+  `Org.settings.quotas.meters` and written one key at a time with
+  `writeOrgMeterLimits()` (`readOrgMeterLimits()`, `loadOrgMeterLimits()` in
+  `lib/tenancy/org-settings.ts`); `writeOrgQuotas()` and the org `PATCH`'s
+  `settings.quotas` now keep them rather than replacing the whole slice.
+  Platform staff set them through the new platform-only
+  `GET`/`PATCH /api/v1/admin/orgs/[id]/meters` (install org only at `multi`,
+  audited as `org.meters.update`) and a new **Limits** section on
+  `/admin/orgs/[id]` showing each meter's usage against its limit.
+  **`quotas.meters` is now platform-owned:** a fork storing its own
+  `settings.quotas.meters` must move it first.
+- **A page, route or menu item can require an entitlement switch (§135,
+  t-1034).** A `requires` option beside `tier` in the three places a surface
+  declares its tier: `registerOrgTierAdminPage(pattern, { tier, requires })`,
+  `withAdminAuth(handler, { tier, requires })` and `NavItem.requires`. The
+  guard and the admin layout pass it to the authorization policy as
+  `scope.requires`, and the default policy refuses an org admin or named-tier
+  holder whose org lacks the switch; a platform admin is not limited by
+  switches. The sidebar hides the item, the layout and `AdminTierGate` refuse
+  the page, and a route refused for the switch answers 403 naming it by its
+  label, with `details.reason: 'entitlement_required'`; one refused because
+  the org's switches could not be read says so instead, with
+  `details.reason: 'entitlement_unverified'`. `orgSwitchState()` reads one
+  switch as `'on'`, `'off'` or `'unknown'`. `AdminReach` gains an
+  optional `switchesMet`, filled only when a page requires a switch, and the
+  sidebar and gate take an optional `pageRequirements`. A landing that
+  requires a switch is used only where the viewer's org has it:
+  `orgAdminLanding()` and `heldTierLanding()` take an optional `SwitchMet`
+  predicate (meeting none when omitted), and `/admin` passes the viewer's
+  reach. The roster test fails
+  on a `requires` that names no registered switch, that sits beside no
+  `tier`, that it cannot read (not a literal, or in a spread), or on a nav
+  item whose `requires` is not its page's. A surface that declares no `requires` answers exactly as before. A
+  fork that registers its own `canAdminister` should read `scope.requires`: a
+  policy that ignores it opens requiring surfaces to every org the tier
+  admits.
+
+- **Sealed secrets: store a credential and read it back, under a master key
+  that can rotate (§137, t-1043).** `sealSecret(plaintext, purpose)` and
+  `openSecret(sealed, purpose)` in `lib/security/sealed-secrets.ts` seal with
+  AES-256-GCM, bound to a purpose, and fail closed: no keyring, an unknown key,
+  the wrong purpose or a changed byte throws `SealedSecretKeyMissingError` or
+  `SealedSecretOpenError` (`reason`: `format`, `unknown_key`, `mismatch`), and
+  nothing returns plaintext instead. Each envelope names its key
+  (`v2.<keyId>.…`). The keys are three new optional env vars, checked together
+  at boot: `SEALED_SECRET_KEYS` (`id:secret,…`), `SEALED_SECRET_ACTIVE_KEY`
+  and `SEALED_SECRET_LEGACY_KEY`. Values in ConQuest's `secret-box.ts` format
+  (`v1.…`) open unchanged under the legacy key, so an app adopting this
+  reseals nothing. To retire a key, `npm run secrets:reseal` moves every
+  registered store onto the active key. A new seam,
+  `lib/app/sealed-stores.ts` → `initAppSealedStores()` with
+  `registerSealedStore()`, is where an app says where its sealed values live.
+  If it throws, every reseal is refused until it is fixed. It ships empty, so
+  nothing changes until a keyring is set. Multi-tenancy design Q5 is amended:
+  Sunrise will hold an org's own vendor key when the operator turns it on
+  (storage arrives in t-1044). See `.context/security/sealed-secrets.md`.
+
+- **Confidential content is spotted and shown on the trace (§130, t-1036).**
+  A new privacy adapter slot, `SensitivityClassifier`, registered with
+  `registerSensitivityClassifier(classifier, { timeoutMs?, replace? })` from
+  `initAppPrivacyAdapters()`, says which kinds of confidential content a call
+  holds, each in one of two groups: **personal** (health, an HR or legal
+  matter, and the other special categories) and **commercial** (unannounced
+  plans, deals, restructuring, a business in trouble, a legal dispute). Core
+  registers `core.sensitivity-phrases`, a phrase list over what users wrote;
+  `replace: 'core.sensitivity-phrases'` swaps it for an app's. The privacy
+  stage runs the classifiers on every call in a chat turn or workflow
+  execution, **in every privacy mode, `off` included**, and records the
+  categories (never text) as `PrivacySummary.sensitivity`, shown on the
+  conversation and execution traces. Recording alone changes nothing sent;
+  the policy that acts on it is the next entry. **A fork that mocks
+  `corePrivacyAdapters()` in its tests needs a `classifiers: []` field**, and
+  a classifier registered in `initAppPrivacyAdapters()` that throws there
+  makes the layer refuse every call, as any adapter does.
+- **A per-agent policy acts on confidential content (§130, t-1037).** Each
+  group has a policy, install-wide on `AiOrchestrationSettings`
+  (`privacyConfidentialPersonal`, `privacyConfidentialCommercial`) with an
+  agent override on `AiAgent` of the same names that only tightens: `allow`
+  (record only), `warn` (send, then tell the user once per conversation),
+  `approved_only` (only to a provider ticked "Trusted with confidential
+  content", new `AiProviderConfig.trustedForConfidential`, or a local one),
+  `local_only`, or `block`. **An upgraded install stays at `allow` for both
+  and nothing it sends changes**; a new install starts at `warn` for
+  Personal. `PrivacyPolicy` gains `confidentialPersonal` and
+  `confidentialCommercial`, which `tightenPolicy()` and
+  `privacyPolicyPatchSchema` carry, so **fork code that builds a whole
+  `PrivacyPolicy` (a test fixture, say) must include them**; a resolver
+  that returns a partial patch is unaffected. The privacy stage refuses a flagged call its group's policy does
+  not permit, in every mode, with the new `PrivacyRefusalReason`s
+  `confidential_blocked` and `confidential_not_permitted` and the code
+  `privacy_confidential`; a classifier failure counts as flagged under the
+  three strict policies and refuses as `confidential_unchecked`. Knowledge
+  being ingested (`embedBatch`) is not classified. New exports: `isConfidentialRefusal()`
+  (`privacy-stage.ts`) and `isTrustedProvider()` (`provider-manager.ts`).
+  Chat leaves a refused turn, or the earlier message that held the content,
+  out of later history; the embed widget now shows the warn note.
+- **A confidential conversation is answered on a model the policy permits
+  (§130, t-1038).** New `AiOrchestrationSettings.confidentialModelProvider`
+  and `confidentialModel` (nullable, no default: **an upgrade moves
+  nothing**), read as `OrchestrationSettings.confidentialModel` and set
+  through the settings API as `confidentialModel: { providerSlug, model } |
+  null`, which refuses a model that is not an active chat model on an active
+  local or trusted provider. A chat turn, `agent_call` step or `chat_turn`
+  step whose agent's provider a group's policy does not permit moves to it at
+  its start: request, summariser, cost and trace use it, and it has no
+  fallbacks. The conversation stays on it (`metadata.confidentialFlagged`),
+  and the user is told once with a new `warning` code, `confidential_moved`.
+  With none set the turn is refused, as before. A `chat_turn` step with a
+  `modelOverride` is not moved. New exports: `routeConfidentialTurn()`,
+  `confidentialModelProblem()` (`lib/orchestration/llm/confidential-route.ts`)
+  and `confidentialRouting()` (`privacy-stage.ts`); `summarizeMessages()`
+  takes an optional `model`. New config-health check `confidential_model`.
+  Backups carry the setting.
+- **Entitlement switches: what an org has (§135 t-1033).** A new fork seam,
+  `lib/app/entitlements.ts` (`initAppEntitlements()`, ships empty), where an
+  app registers the switches an org can have with
+  `registerEntitlementSwitch({ key, label, description, whenNothingSet })`.
+  Platform staff set them per org on `/admin/orgs/[id]` (a new section, shown
+  only when an app registers a switch) or through the new platform-only
+  `GET`/`PATCH`/`DELETE /api/v1/admin/orgs/[id]/entitlements`, audited as
+  `org.entitlements.update`. A `PATCH` sets only the switches it names, so a
+  caller cannot turn off one it did not know about, and the app's own code
+  sets them the same way with `setOrgSwitches()`. A failed app registration
+  is reported (`entitlementSwitchesFailed()`) rather than looking like none.
+  At `multi` the write, like a caps write, comes
+  only from the install org or an unbound admin API key; that rule is now one
+  function, `mayChangeOrgCommercialSettings()` in
+  `lib/tenancy/shared-settings.ts`, for a fork that writes either from a
+  surface of its own. The app reads them with `orgHasSwitch()`,
+  `loadOrgSwitches()` or `resolveOrgSwitches()` (`lib/tenancy/entitlements.ts`).
+  They are stored as an `entitlements` slice in `Org.settings`,
+  `{ on: [...], off: [...] }` (read with `readOrgEntitlements()` in
+  `lib/tenancy/org-settings.ts`). A switch nobody set on an org gets its
+  `whenNothingSet`, which is a different answer from a switch set off, so a
+  switch registered later reaches an org saved before it at its default; an
+  unreadable slice fails closed. Nothing refuses a request on a switch yet.
+  The design's principle 8 now gives the platform the commercial mechanism
+  (entitlements, meters, signup into an org of one's own) and leaves plans,
+  prices and what an app counts with forks. **`entitlements` is now a
+  platform-owned key of `Org.settings`:** a fork already storing its own
+  `settings.entitlements` must move it to another name before taking this
+  release, or its value reads as unreadable and the first save overwrites it.
+  **A fork that keeps "what an org bought" in a key of its own can move it
+  here**, and a fork filling the seam pins one new row in
+  `tests/unit/lib/app/defaults.test.ts`.
+
+### Changed
+
+- **The org-settings admin components no longer export their English (§138
+  t-1074).** `ORG_ROLE_LABELS` (`components/admin/members/org-role-help`) is
+  removed; the words are `admin.members.roles.<role>`. In
+  `components/admin/provider-keys/provider-key-states`, `stateBadge()` returns
+  a catalogue `key` in place of a `label`, `stateSentence()` is replaced by
+  `stateSentenceKey()`, and `SAVE_BLOCKED_SENTENCE`, `READ_ONLY_SENTENCE` and
+  `testFailureSentence()` are removed (`admin.providerKeys.*`).
+  `durationLabel(hours, t)` (`components/admin/support-access/support-grant-form`)
+  takes the translator, and `SUPPORT_GRANT_DURATIONS` is the list of hours.
+  `SUPPORT_GRANT_LEVEL_LABELS` stays, as the English for staff screens.
+  The admin sidebar no longer takes `orgOptionsEnabled` (prop or
+  `sectionsForCapabilities()` option): Options is always listed.
+  **Fork impact:** code that read one of these fails to compile; read the
+  catalogue key instead.
+
+- **Three exports that carried the user screens' English now carry none (§138
+  t-1073).** The words moved to the catalogue, and these no longer held what
+  the screens show. `SETTINGS_TAB_TITLES` (`lib/constants/settings.ts`) is
+  replaced by `settingsTabTitles(t)`, which builds the settings page's browser
+  tab titles from `account.settings.tabTitle`. `CookieCategory` and
+  `COOKIE_CATEGORIES` (`lib/consent`) lose `name` and `description`, which are
+  now `cookies.categories.<id>.name|description`. `getStatusConfig()`
+  (`components/status`) returns only `{ color }`, and a status's words are
+  `status.indicator.<status>.label|description`. **Fork impact:** code that
+  read one of these fails to compile. Read the catalogue key instead, and
+  change the wording with `overridePlatformMessages('en', …)`, not the
+  constant.
+
+- **Every model pin can name its provider (§136, t-1068).** A task default
+  (`AiOrchestrationSettings.defaultModels.routing|chat|reasoning`) and a
+  workflow step's `config.modelOverride` now store `provider::model`, the shape
+  the audio default already used, so a pin to Azure's `gpt-4o` runs on Azure
+  and not on whichever provider the model registry gives `gpt-4o`. The helpers
+  are in the new `lib/orchestration/llm/model-pin.ts` (`parseModelPin`,
+  `formatModelPin`, `pinModelId`, `pinNames`, `pinProvider`); `audio-default.ts`
+  re-exports them under its old names. `settings-resolver.ts` adds
+  `getDefaultModelPinForTask()` / `...OrNull()`, and the runner, the agent
+  resolver (for an agent with neither provider nor model), the `chat_turn`
+  step, keyword enrichment and the retroactive review call the pinned
+  provider. The conversation summariser stays on the conversation's provider:
+  a routing default naming another gives way to the conversation's own model
+  (`summarizeMessages` takes `conversationModel`). The settings PATCH route and
+  the semantic validator check a pair against the model matrix and an active
+  provider; a `chat_turn` pair is checked and counted as a use too. The default-models form, setup wizard,
+  provider-detection banner, the workflow builder (its free-text model field is
+  now a picker) and the built-in templates write pairs. The supervisor step and
+  the retroactive review now honour `EVALUATION_JUDGE_PROVIDER` with
+  `EVALUATION_JUDGE_MODEL`, and the eval defaults' provider with their model
+  (`JUDGE_MODEL_PIN`; never one level's model with the other's provider). `providerModelUsage()` matches
+  a pair exactly, marks each workflow `byIdOnly`, and counts
+  `otherOrgWorkflowsByIdOnly`. The `embeddings` default stays a bare id: its
+  provider is the fallback chain's, and the active embedding model is the
+  provider-exact pin.
+  _Fork impact:_ the stored shape of the defaults and of step config widens.
+  Nothing stored is rewritten, and a bare id keeps resolving as before, so a
+  fork's saved defaults and workflows keep working. Code that reads
+  `defaultModels.<task>` or a step's `modelOverride` as a model id must take
+  `pinModelId()` first; `getDefaultModelForTask()` already returns the model id
+  alone, now for `audio` too. An executor that passes `modelOverride` to
+  `runLlmCall` needs no change. A test that builds a full `ProviderModelUsage`
+  needs the new count, and a mock of `settings-resolver` or `judge-model`
+  needs the new exports where the code under test calls them.
+
+- **At `multi`, a self-serve signup gets an org of their own instead of
+  joining the install org (§134 t-1062, #1232).** Someone who signs up with no
+  invitation, or from the install org's own waitlist, now lands as `OWNER` of
+  a new org and their first session starts there; before, they became a
+  `MEMBER` of the install org, which is the vendor's own and holds the control
+  plane. This is the new default on every multi-tenant install. To keep the
+  old behaviour, register a resolver in `lib/app/signup-org.ts` that answers
+  `{ kind: 'install' }`. Invited signups, an org's own waitlist and the first
+  human on a fresh database are unchanged, and `single` is unchanged.
+
+- **Writing an `Org.settings` slice with the value it already holds no longer
+  writes the row (§135 t-1033).** `writeOrgQuotas()`, the provider policy and
+  privacy writers, the platform-agents marker and the entitlement switches all
+  go through one writer, which now skips an identical write, so `Org.updatedAt`
+  does not move. A fork that
+  treated every call as a write (to bump `updatedAt`, say) sees fewer writes.
+  A column that is not a JSON object is still replaced, as before.
+
+### Fixed
+
+- **A schema-mode guard's failure `reason` names every issue, not just the
+  first (t-1076).** The reason is what a retry back-edge hands the producer as
+  `{{vars.__retryContext.failureReason}}`. A producer with 38 problems was
+  retried being told about one, and failed the same way each time. One issue
+  keeps the old `Schema validation failed at <path>: <message>` line; several
+  give `Schema validation failed with N issues:` and one `- <path>: <message>`
+  line each, up to 50, shared out across the issues' first path segment. A fork whose prompt or parser reads that reason gets
+  the longer form; `output.issues` is unchanged. The Provider Model Audit
+  template now shows each analysis step that list and its own previous output
+  on a retry, tells it to leave out a field it has no new value for, and no
+  longer receives the legacy `costPerMillionTokens` from the Audit Models
+  dialog. The `audit-proposals` schema also refuses a change whose proposed
+  value is its current value, except a price restated as the pair of one that
+  moves, and an empty proposed value on a field with no type check of its
+  own (`description`, `bestRole`, `dimensions`, `schemaCompatible`), which
+  would wipe the row's value if accepted. The dialog now sends
+  `description`, `deploymentProfiles` and `quality` too, so a proposal's
+  current value is read from the row. `validate_proposals` now also reads the
+  web search step's output and refuses a `web_search` source whose URL is not
+  one of its results, or any `web_search` source when the search was skipped:
+  gpt-4o-mini cited an invented `web_search` source for a GPT-5 price change.
+  It also refuses a change whose only sources are `prior_step`, which shows
+  the registry's current value and cannot back changing it. Re-seed (`npm run db:seed`) to pick up the template. A copy of the audit
+  workflow saved earlier keeps the old, unchecked behaviour until
+  `search_provider_info` is added to its `validate_proposals` input steps.
+
+- **The seeded model catalogue names models its vendors serve (t-1041).**
+  `prisma/seeds/009-provider-models.ts` seeded Claude Haiku 4.5 as
+  `claude-haiku-4.5` (Anthropic's id is `claude-haiku-4-5`), and Claude Opus
+  4, Claude Sonnet 4 and OpenAI o3-mini, which their vendors no longer serve,
+  so choosing any of them failed with "model not found". The seed now gives
+  Haiku 4.5 its real id, and seeds Opus 4.6, Sonnet 4.6 and o3 in place of
+  the other three. On an existing install a re-seed retires each
+  seed-managed row for a model not served (`RETIRED_SEED_MODELS`): on
+  2026-11-20, or the day already recorded; with the successor already
+  recorded if it still qualifies, else its replacement here; and turned off.
+  The dotted Haiku row is first moved aside (its slug gains `-not-served`) so
+  the corrected row can take the slug. Anything still pinned to these models
+  then shows on the model's page and in config health and moves with
+  **Move uses** (§136). A row an admin has edited is left alone, and a seeded
+  model whose provider and id another row already holds is skipped with a
+  warning instead of failing the seed. The built-in price for Claude Opus 4.6
+  (`model-registry.ts`, `anthropic.ts`) was $15 / $75 per million tokens; it
+  is $5 / $25, which every Opus 4.6 call is now costed at, and o3-mini leaves
+  the built-in list. **Fork impact:** run `npm run db:seed`; then open each
+  retired model the config-health card names and move its uses.
+- **A provider model with `vision` or `documents` can be saved again
+  (t-1064).** The admin provider-model API's capability list was a copy of
+  `MODEL_CAPABILITIES` that missed both when they were added, so the edit form
+  refused to save any such model (most chat models) with "Invalid option". It
+  now reads `MODEL_CAPABILITIES` itself, and the create, update and bulk
+  routes accept every capability the form offers.
+
+- **The admin audit log kept prices, token limits and dates as values
+  (t-1064).** `logAdminAction()` redacted every field whose name ends in
+  key/token whatever its value, so prices (`inputCostPerMillionTokens`), token
+  limits (`maxTokens`) and rates (`rateLimitPerKey`) were stored as
+  `[REDACTED]`, and stored every `Date` as `{}`. Under the key/token ending a
+  number or `null` is now kept (a credential is always a string), and a `Date`
+  is stored as its ISO string. `password` / `secret` / `credential` still
+  redact whatever the value.
+
+- **`/api/health` no longer reports a database outage at
+  `TENANCY_MODE=multi` (#1262).** `getDatabaseHealth()` ran its `SELECT 1`
+  probe with no tenant context, which the data layer refuses at `multi`, so
+  the route returned 503 on every call. The probe now runs in
+  `runAsLivenessProbe`, and so does `checkDatabaseConnection()`, which
+  had the same fault: with no org entered it answered `false` and logged a
+  failed connection to a healthy database (t-1055).
+
+- **Phone photos are stored upright (#1152, t-1002).** `processImage`
+  (`lib/storage/image.ts`) ignored the EXIF Orientation tag and dropped it on
+  re-encoding, so a photo taken turned (most phone photos) was saved sideways
+  with nothing left to correct it. Avatars, and any fork upload that goes
+  through `processImage`, now apply the tag before the resize, and the output
+  is upright and untagged. An untagged or already-upright input comes out as
+  before, so a caller that pre-rotates is not turned twice. Images already
+  stored stay as they are; a new upload is the fix. See
+  `.context/storage/overview.md`.
+- **The embed widget connects behind a reverse proxy (t-1042).**
+  `GET /api/v1/embed/widget.js` baked the request's own address into the
+  script, which behind nginx, Caddy, a load balancer or a local `*.test`
+  proxy is the internal one the proxy forwarded to, so the widget loaded and
+  never connected. It now uses the install's public URL, `getPublicUrl()`
+  (`BETTER_AUTH_URL`), and reads nothing from the request, so a forged `Host`
+  or `X-Forwarded-Host` cannot point a cached script at another host. A
+  deployment reached on a hostname other than `BETTER_AUTH_URL` (an alias, or
+  a preview that names production) now serves a widget that calls the
+  configured host. See `.context/orchestration/embed.md`.
+- **The agent and capability forms' blocked-save summary now follows the
+  fields (t-1029).** The two tabbed forms built their own summary in
+  `onInvalid` and passed it to `show()`, so after t-1013 they still kept
+  "3 fields need fixing." (the agent form: its per-tab list) by Save after
+  every field was fixed. `useSaveFailure()` takes a new optional `summarise`,
+  a function of the errors that builds a blocked save's failure in place of
+  `invalidSave`. The hook runs it on the press and again as the fields
+  change; the summary goes once no field is blocked. Both forms now use it,
+  with their wording unchanged. `lib/errors/save-error.ts` adds
+  `hasBlockedFields()`. **A fork whose own form builds a blocked-save summary
+  for `show()` gets the fix only once it moves that builder to `summarise`.**
+
+### Security
+
+- **The open Dependabot alert is cleared, and the open Dependabot PRs are
+  taken** (t-1080). **GHSA-7589-6fvf-x4pw** (high, `effect` ReDoS in
+  `Schema.TemplateLiteral`, fixed in 3.22.1) arrives through `prisma` →
+  `@prisma/config` 7.10.1, the last Prisma 7 release, which pins `effect` to
+  exactly 3.20.0. A new `overrides` entry, `@prisma/config` →
+  `effect: "^3.22.1"`, moves it within the same major, and its
+  `overrideReasons` entry says when it can go. Only the Prisma CLI loads
+  `@prisma/config`, so the app's runtime was never exposed. If your fork has
+  its own `overrides` block, keep this entry when you merge. better-auth
+  resolves to 1.7.27, so the exact `@better-auth/core` pin moves to 1.7.27 to
+  match. A fork that pins `@better-auth/core` itself must keep the two equal, or
+  every better-auth adapter's peer range is unmet.
+
 ## [0.19.0] — 2026-11-13
 
 > **Alpha release.** Twenty-sixth tagged Sunrise release. **MINOR bump**:
@@ -11567,7 +12616,8 @@ Sunrise safe to fork and to merge upstream releases into.
 
 ---
 
-[Unreleased]: https://github.com/human-centric-engineering/sunrise/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/human-centric-engineering/sunrise/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/human-centric-engineering/sunrise/compare/v0.17.1...v0.18.0
 [0.17.1]: https://github.com/human-centric-engineering/sunrise/compare/v0.17.0...v0.17.1

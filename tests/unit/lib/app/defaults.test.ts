@@ -70,6 +70,7 @@ import { initLeafApp } from '@/lib/app/leaf-bootstrap';
 import { publicNavItems, footerNavItems, footerLegalItems } from '@/lib/app/public-nav';
 import { protectedNavItems } from '@/lib/app/protected-nav';
 import { appAuthLandingRoute, appAuthLandingLabel } from '@/lib/app/auth-landing';
+import { appWelcomeRoute } from '@/lib/app/welcome';
 import { initApp } from '@/lib/app/bootstrap';
 import { initAppKnowledgeAccessContributors } from '@/lib/app/knowledge-access-contributors';
 import { initAppGuardFloorContributors } from '@/lib/app/guard-floor-contributors';
@@ -106,6 +107,9 @@ import { collectLeafSubjectData, initLeafSubjectSources } from '@/lib/app/leaf-d
 import { initLeafOrgSources } from '@/lib/app/leaf-org-export';
 import { initLeafErasureHooks } from '@/lib/app/leaf-erasure';
 import * as userCreatedHooks from '@/lib/auth/user-created-hooks';
+import * as orgCreatedHooks from '@/lib/tenancy/org-created-hooks';
+import * as signupOrg from '@/lib/tenancy/signup-org';
+import * as appModelPins from '@/lib/orchestration/model-lifecycle/app-pins';
 import {
   getAppSubjectSources,
   getAppExcludedSubjectSources,
@@ -118,6 +122,8 @@ import {
   __resetAppOrgSourceRegistryForTests,
 } from '@/lib/privacy/org-source-registry';
 import { getAppJobs, __resetAppJobsForTests } from '@/lib/orchestration/maintenance/app-jobs';
+import { __resetSealedStoresForTests, getSealedStoreNames } from '@/lib/security/sealed-stores';
+import { CORE_SEALED_STORES } from '@/lib/security/core-sealed-stores';
 import {
   getAppStaleWriters,
   getErasureCleanupHooks,
@@ -153,6 +159,16 @@ import {
   getRegisteredAccountSections,
   __resetAccountSectionRegistryForTests,
 } from '@/lib/account-sections/registry';
+import {
+  registeredEntitlementSwitches,
+  registeredMeters,
+  resolveOrgSwitches,
+  __resetEntitlementRegistryForTests,
+} from '@/lib/tenancy/entitlements';
+import { allMeters } from '@/lib/tenancy/meters';
+import { appLocaleTags, catalogueFor, __resetAppMessagesForTests } from '@/lib/i18n/registry';
+import { supportedLocales } from '@/lib/i18n/locales';
+import enMessages from '@/lib/i18n/messages/en.json';
 import { initAppAuthorizationPolicy } from '@/lib/app/authorization';
 import { ORG_TIER_ADMIN_PAGES, adminPageTier } from '@/lib/auth/admin-tier';
 import { APP_ORG_TIER_ADMIN_ROUTES } from '@/lib/app/admin-tier-routes';
@@ -185,13 +201,16 @@ import {
   __resetAuthorizationPolicyForTests,
 } from '@/lib/auth/authorization';
 
-// tests/setup.ts pins these three seams for every file (#1125, #1139). This
+// tests/setup.ts pins these six seams for every file (#1125, #1139). This
 // file asserts what Sunrise really ships, so it puts the real scaffolds back:
 // their rows below read them through the registries' own lazy wiring, which a
 // per-row `importActual` would bypass.
 vi.mock('@/lib/app/admin-tier', (importOriginal) => importOriginal());
 vi.mock('@/lib/app/user-created', (importOriginal) => importOriginal());
 vi.mock('@/lib/app/erasure', (importOriginal) => importOriginal());
+vi.mock('@/lib/app/org-created', (importOriginal) => importOriginal());
+vi.mock('@/lib/app/signup-org', (importOriginal) => importOriginal());
+vi.mock('@/lib/app/model-pins', (importOriginal) => importOriginal());
 
 /**
  * One row per `lib/app/*` seam.
@@ -345,6 +364,22 @@ const SEAM_DEFAULTS: SeamDefault[] = [
       expect(appAuthLandingRoute).toBeNull();
       expect(appAuthLandingLabel).toBeNull();
     },
+  },
+  {
+    seam: 'lib/app/messages.ts',
+    risk: 'a stray string would replace platform text, and a stray locale would become choosable, on every screen of every install',
+    assert: () => {
+      __resetAppMessagesForTests();
+      // The read triggers the lazy init, so this exercises the REAL seam.
+      expect(appLocaleTags()).toEqual([]);
+      expect(supportedLocales()).toEqual(['en', 'en-XA']);
+      expect(catalogueFor('en')).toEqual(enMessages);
+    },
+  },
+  {
+    seam: 'lib/app/welcome.ts',
+    risk: 'a stray value would send every member of every new org on every install to a welcome page after login',
+    assert: () => expect(appWelcomeRoute).toBeNull(),
   },
   {
     seam: 'lib/app/admin-breadcrumbs.ts',
@@ -674,6 +709,40 @@ const SEAM_DEFAULTS: SeamDefault[] = [
     },
   },
   {
+    seam: 'lib/app/org-created.ts',
+    risk: 'a stray hook would run for every new org on every install, and be recorded on each as owed until it succeeds',
+    assert: () => {
+      orgCreatedHooks.__resetOrgCreatedHooksForTests();
+      // Reading the owed keys runs the lazy init, so this exercises the REAL
+      // seam; an empty list is what makes createOrg() write nothing extra.
+      expect(orgCreatedHooks.orgCreatedHookKeys()).toEqual([]);
+    },
+  },
+  {
+    seam: 'lib/app/signup-org.ts',
+    risk: 'a stray resolver would decide where every self-serve signup lands at multi on every install, instead of an org of their own',
+    assert: () => {
+      signupOrg.__resetSignupOrgResolverForTests();
+      // The read runs the lazy init, so this exercises the REAL seam; no
+      // resolver is what gives each self-serve signup an org of their own.
+      expect(signupOrg.hasSignupOrgResolver()).toBe(false);
+    },
+  },
+  {
+    seam: 'lib/app/model-pins.ts',
+    risk: 'a stray reporter would add uses to every model on every install, and a stray check could refuse every model move',
+    assert: () => {
+      appModelPins.__resetAppModelPinsForTests();
+      // The read runs the lazy init, so this exercises the REAL seam; nothing
+      // registered is what leaves the finder and the move as they were.
+      expect(appModelPins.appModelPinsRegistered()).toEqual({
+        reporter: false,
+        check: false,
+        failed: false,
+      });
+    },
+  },
+  {
     seam: 'lib/app/mcp-resources.ts',
     risk: 'a stray handler would expose app data over MCP to every install\u2019s connected clients',
     assert: () => {
@@ -761,6 +830,16 @@ const SEAM_DEFAULTS: SeamDefault[] = [
     },
   },
   {
+    seam: 'lib/app/sealed-stores.ts',
+    risk: 'a stray store would have every install\u2019s reseal walk read, and rewrite, rows it never asked it to touch',
+    assert: () => {
+      __resetSealedStoresForTests();
+      // getSealedStoreNames() triggers the lazy init, so this exercises the REAL seam.
+      // Core's own stores (§137 t-1044) are registered first; the app adds none.
+      expect(getSealedStoreNames()).toEqual(CORE_SEALED_STORES.map((store) => store.name));
+    },
+  },
+  {
     seam: 'lib/app/provider-credentials.ts',
     risk: 'a stray credential resolver would send every install\u2019s provider calls out on a key that is not the one its rows name',
     assert: async () => {
@@ -778,7 +857,7 @@ const SEAM_DEFAULTS: SeamDefault[] = [
           apiKeyEnvVar: 'SHIPS_EMPTY_TEST_KEY',
           isLocal: false,
         })
-      ).resolves.toEqual({ apiKey: 'from-env', identity: '' });
+      ).resolves.toEqual({ apiKey: 'from-env', identity: '', ownKey: false });
       delete process.env.SHIPS_EMPTY_TEST_KEY;
     },
   },
@@ -806,6 +885,22 @@ const SEAM_DEFAULTS: SeamDefault[] = [
       for (const surface of ACCOUNT_SURFACES) {
         expect(getRegisteredAccountSections(surface)).toEqual([]);
       }
+    },
+  },
+  {
+    seam: 'lib/app/entitlements.ts',
+    risk: 'a stray switch would appear on every org page, and one on by default (whenNothingSet) would be granted to every org nobody had set it on, on every install; a stray `seats` meter would replace the platform’s own seats count, and so who the seats limit refuses',
+    assert: () => {
+      __resetEntitlementRegistryForTests();
+      // The read triggers the lazy init, so this exercises the REAL seam.
+      expect(registeredEntitlementSwitches()).toEqual([]);
+      // …so nothing an org stores, or does not, gives it a switch.
+      expect(resolveOrgSwitches({ on: [], off: [], unreadable: false }).on).toEqual([]);
+      // No meter either (t-1035), so the only one is the platform's own seats.
+      expect(registeredMeters()).toEqual([]);
+      expect(allMeters().map((m) => ({ key: m.key, core: m.core }))).toEqual([
+        { key: 'seats', core: true },
+      ]);
     },
   },
   {
@@ -1036,6 +1131,9 @@ describe('lib/app/ seams ship empty', () => {
     ['llm-providers', 'provider-eligibility', []],
     ['admin-tier', 'org-tier admin', [ROSTER]],
     ['user-created', 'user-created', []],
+    ['org-created', 'org-created', []],
+    ['signup-org', 'signup-org', []],
+    ['model-pins', 'model-pins', []],
     ['erasure', 'erasure', [STALE]],
   ])('nothing but its readers escapes the suite-wide %s-seam pin', (seam, label, readers) => {
     // tests/setup.ts mocks `@/lib/app/brand` to null for EVERY test file, so
