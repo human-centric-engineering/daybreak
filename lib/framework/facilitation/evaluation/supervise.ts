@@ -28,11 +28,12 @@ import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { logger } from '@/lib/logging';
 import { CostOperation, type SupervisorReport } from '@/types/orchestration';
 import { calculateCost, logCost } from '@/lib/orchestration/llm/cost-tracker';
-import { getProvider } from '@/lib/orchestration/llm/provider-manager';
+import { getProvider, usesOrgOwnKey } from '@/lib/orchestration/llm/provider-manager';
 import { rethrowSpendCapRefusal } from '@/lib/framework/shared/spend-caps';
 import { getModel } from '@/lib/orchestration/llm/model-registry';
-import { getDefaultModelForTask } from '@/lib/orchestration/llm/settings-resolver';
-import { JUDGE_MODEL } from '@/lib/orchestration/evaluations/judge-model';
+import { getDefaultModelPinForTask } from '@/lib/orchestration/llm/settings-resolver';
+import { parseModelPin, pinProvider } from '@/lib/orchestration/llm/model-pin';
+import { JUDGE_MODEL_PIN } from '@/lib/orchestration/evaluations/judge-model';
 import { runSupervisorAssessment, type LlmCallShim } from '@/lib/orchestration/supervisor';
 import { loadFrameworkConversation } from '@/lib/framework/facilitation/evaluation/conversation';
 import { listScorableTurns } from '@/lib/framework/facilitation/evaluation/turns';
@@ -66,7 +67,10 @@ export interface SuperviseConversationArgs {
   /** The admin triggering the review — supervisor-call cost attributes here, and the audit actor. */
   actorUserId: string;
   clientIp?: string | null;
-  /** Force a particular judge model; otherwise the configured `JUDGE_MODEL` (then chat default). */
+  /**
+   * Force a particular judge model, as a model pin (`provider::model`, or a bare id); otherwise the
+   * configured `JUDGE_MODEL_PIN` (then the chat default's pin).
+   */
   modelOverride?: string;
 }
 
@@ -128,17 +132,21 @@ export async function superviseConversation(
   // explicit override > EVALUATION_JUDGE_MODEL env > system default chat model.
   // Held separately: the call-time provider gate (Sunrise 0.14.0, §120) turns on WHICH arm
   // answered — an operator's recorded choice is 'explicit', the task default is 'primary'.
-  const operatorChoice = modelOverride ?? JUDGE_MODEL ?? null;
-  const modelId = operatorChoice ?? (await getDefaultModelForTask('chat'));
+  // Each is a model pin (Sunrise 0.20.0, §136 t-1068): `provider::model`, or a bare id.
+  const operatorChoice = parseModelPin(modelOverride ?? JUDGE_MODEL_PIN);
+  const pin = operatorChoice ?? (await getDefaultModelPinForTask('chat'));
+  const modelId = pin.modelId;
   const modelInfo = getModel(modelId);
   if (!modelInfo) {
     throw new ValidationError('Unknown model', {
       modelOverride: [`Model "${modelId}" is not in the model registry`],
     });
   }
+  // The provider the pin names, else the registry's for the id.
+  const providerSlug = pinProvider(pin, modelInfo.provider);
   // A monthly spend cap (Sunrise 0.15.0) can refuse the judge here or at the call below; either
   // way it surfaces as a `SpendCapRefusedError`, so the route answers a budget error, not a 500.
-  const provider = await getProvider(modelInfo.provider, {
+  const provider = await getProvider(providerSlug, {
     task: 'chat',
     source: operatorChoice === null ? 'primary' : 'explicit',
     primarySlug: null,
@@ -168,7 +176,10 @@ export async function superviseConversation(
       conversationId,
       userId: actorUserId,
       model: modelId,
-      provider: modelInfo.provider,
+      provider: providerSlug,
+      // An org's own-key call is billed to the org and kept out of the platform's caps (Sunrise
+      // 0.20.0, §137 t-1046).
+      ownKey: usesOrgOwnKey(provider),
       inputTokens: response.usage.inputTokens,
       outputTokens: response.usage.outputTokens,
       cacheReadTokens: response.usage.cacheReadTokens,

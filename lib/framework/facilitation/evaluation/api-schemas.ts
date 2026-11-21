@@ -14,7 +14,8 @@ export const scoreConversationBodySchema = z.object({
 
 /**
  * POST /evaluations/supervise — run the post-hoc supervisor over a framework conversation (f-eval
- * t-2). `modelOverride` forces a particular judge model; otherwise the configured judge model is used.
+ * t-2). `modelOverride` forces a particular judge model, as a model pin (`provider::model`, or a bare
+ * id); otherwise the configured judge model is used.
  */
 export const superviseConversationBodySchema = z.object({
   conversationId: cuidSchema,

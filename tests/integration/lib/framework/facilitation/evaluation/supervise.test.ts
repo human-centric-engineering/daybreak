@@ -15,12 +15,17 @@ vi.mock('@/lib/framework/facilitation/evaluation/conversation', () => ({
 }));
 vi.mock('@/lib/framework/facilitation/evaluation/turns', () => ({ listScorableTurns: vi.fn() }));
 vi.mock('@/lib/orchestration/supervisor', () => ({ runSupervisorAssessment: vi.fn() }));
-vi.mock('@/lib/orchestration/llm/provider-manager', () => ({ getProvider: vi.fn() }));
+vi.mock('@/lib/orchestration/llm/provider-manager', () => ({
+  getProvider: vi.fn(),
+  usesOrgOwnKey: vi.fn(() => false),
+}));
 vi.mock('@/lib/orchestration/llm/model-registry', () => ({ getModel: vi.fn() }));
-vi.mock('@/lib/orchestration/llm/settings-resolver', () => ({ getDefaultModelForTask: vi.fn() }));
+vi.mock('@/lib/orchestration/llm/settings-resolver', () => ({
+  getDefaultModelPinForTask: vi.fn(),
+}));
 const judgeModel = vi.hoisted((): { value: string | undefined } => ({ value: 'judge-x' }));
 vi.mock('@/lib/orchestration/evaluations/judge-model', () => ({
-  get JUDGE_MODEL() {
+  get JUDGE_MODEL_PIN() {
     return judgeModel.value;
   },
 }));
@@ -36,11 +41,11 @@ import { prisma } from '@/lib/db/client';
 import { loadFrameworkConversation } from '@/lib/framework/facilitation/evaluation/conversation';
 import { listScorableTurns } from '@/lib/framework/facilitation/evaluation/turns';
 import { runSupervisorAssessment } from '@/lib/orchestration/supervisor';
-import { getProvider } from '@/lib/orchestration/llm/provider-manager';
+import { getProvider, usesOrgOwnKey } from '@/lib/orchestration/llm/provider-manager';
 import { SpendCapExceededError } from '@/lib/orchestration/llm/spend-caps';
 import { SpendCapRefusedError } from '@/lib/framework/shared/spend-caps';
 import { getModel } from '@/lib/orchestration/llm/model-registry';
-import { getDefaultModelForTask } from '@/lib/orchestration/llm/settings-resolver';
+import { getDefaultModelPinForTask } from '@/lib/orchestration/llm/settings-resolver';
 import { logAdminAction } from '@/lib/orchestration/audit/admin-audit-logger';
 import { calculateCost, logCost } from '@/lib/orchestration/llm/cost-tracker';
 import { logger } from '@/lib/logging';
@@ -182,8 +187,8 @@ describe('superviseConversation', () => {
 
   it('resolves the configured judge model, with an explicit override taking precedence', async () => {
     await superviseConversation({ conversationId: 'c1', actorUserId: 'a' });
-    expect(getModel).toHaveBeenCalledWith('judge-x'); // JUDGE_MODEL, no default lookup needed
-    expect(getDefaultModelForTask).not.toHaveBeenCalled();
+    expect(getModel).toHaveBeenCalledWith('judge-x'); // JUDGE_MODEL_PIN, no default lookup needed
+    expect(getDefaultModelPinForTask).not.toHaveBeenCalled();
 
     vi.mocked(getModel).mockClear();
     await superviseConversation({
@@ -205,7 +210,10 @@ describe('superviseConversation', () => {
 
   it("tells the call-time provider gate the task default is 'primary'", async () => {
     judgeModel.value = undefined;
-    vi.mocked(getDefaultModelForTask).mockResolvedValue('default-chat');
+    vi.mocked(getDefaultModelPinForTask).mockResolvedValue({
+      providerSlug: null,
+      modelId: 'default-chat',
+    });
     try {
       await superviseConversation({ conversationId: 'c1', actorUserId: 'a' });
     } finally {
@@ -213,6 +221,45 @@ describe('superviseConversation', () => {
     }
     expect(getModel).toHaveBeenCalledWith('default-chat');
     expect(getProvider).toHaveBeenCalledWith('openai', {
+      task: 'chat',
+      source: 'primary',
+      primarySlug: null,
+    });
+  });
+
+  // Sunrise 0.20.0 (§136 t-1068): a pin naming its provider runs there, not on whichever provider
+  // the model registry gives the id (the registry says 'openai' throughout this file).
+  it('runs a judge pin on the provider it names, and bills that provider', async () => {
+    await superviseConversation({
+      conversationId: 'c1',
+      actorUserId: 'a',
+      modelOverride: 'azure::gpt-4o',
+    });
+    expect(getModel).toHaveBeenCalledWith('gpt-4o');
+    expect(getProvider).toHaveBeenCalledWith('azure', {
+      task: 'chat',
+      source: 'explicit',
+      primarySlug: null,
+    });
+    const shim = vi.mocked(runSupervisorAssessment).mock.calls[0][0].llmCall;
+    await shim('p', { temperature: 0 });
+    expect(logCost).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'gpt-4o', provider: 'azure' })
+    );
+  });
+
+  it('runs the task default pin on the provider it names', async () => {
+    judgeModel.value = undefined;
+    vi.mocked(getDefaultModelPinForTask).mockResolvedValue({
+      providerSlug: 'azure',
+      modelId: 'gpt-4o',
+    });
+    try {
+      await superviseConversation({ conversationId: 'c1', actorUserId: 'a' });
+    } finally {
+      judgeModel.value = 'judge-x';
+    }
+    expect(getProvider).toHaveBeenCalledWith('azure', {
       task: 'chat',
       source: 'primary',
       primarySlug: null,
@@ -266,6 +313,26 @@ describe('superviseConversation', () => {
         })
       );
       expect(out).toEqual({ content: 'the verdict', tokensUsed: 140, costUsd: 0.03 });
+    });
+
+    // Sunrise 0.20.0 (§137 t-1046): a call on an org's own key is marked, so it stays out of the
+    // org's and the global caps. The mark comes from the provider the call went out on.
+    it('marks the cost row with whether the call went out on the org’s own key', async () => {
+      const provider = {
+        chat: vi.fn().mockResolvedValue({
+          content: 'v',
+          usage: { inputTokens: 1, outputTokens: 1 },
+        }),
+      };
+      vi.mocked(getProvider).mockResolvedValue(provider as never);
+      vi.mocked(usesOrgOwnKey).mockReturnValueOnce(true);
+
+      await superviseConversation({ conversationId: 'c1', actorUserId: 'a' });
+      const shim = vi.mocked(runSupervisorAssessment).mock.calls[0][0].llmCall;
+      await shim('p', { temperature: 0 });
+
+      expect(usesOrgOwnKey).toHaveBeenCalledWith(provider);
+      expect(logCost).toHaveBeenCalledWith(expect.objectContaining({ ownKey: true }));
     });
 
     it('warns (but does not throw) when cost logging fails — Error and non-Error rejections', async () => {
