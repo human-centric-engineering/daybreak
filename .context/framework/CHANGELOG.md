@@ -25,6 +25,46 @@ process.
 
 ## [Unreleased]
 
+### Added
+
+- **Seven new `lib/app/*` scaffolds from Sunrise 0.20.0 are the leaf's
+  (t-161):** `entitlements.ts` (switches and meters an org has bought),
+  `sealed-stores.ts` (where your sealed credentials live), `signup-org.ts`
+  (where a self-serve signup lands at `multi`), `org-created.ts` (setup that
+  runs for every new org), `welcome.ts` (a welcome step for a new org's owner;
+  ships `null`), `model-pins.ts` (models your app names itself) and
+  `messages.ts` (your strings and languages). Daybreak fills none of them, and
+  they arrive empty. `lib/app/user-created.ts` changed only in its header
+  comment: on a conflict, keep your registrations and take the new comment.
+  Sunrise's catalogue reserves the `framework` namespace for Daybreak, which
+  registers no strings yet, so framework admin pages stay in English. Put your
+  own strings under `app`.
+
+### Changed
+
+- **The framework conversation supervisor reads its judge as a model pin
+  (t-161).** Since Sunrise 0.20.0 a task default and a judge model can name
+  their provider (`provider::model`). `superviseConversation()` now runs a pin
+  on the provider it names, and the supervise route's `modelOverride` accepts
+  one. `EVALUATION_JUDGE_PROVIDER` is honoured beside `EVALUATION_JUDGE_MODEL`,
+  as core's retroactive review does. A bare model id resolves as before.
+
+### Fixed
+
+- **The supervisor's judge calls on an org's own AI key stay out of the
+  platform's spend caps (t-161).** Its cost rows now carry
+  `ownKey: usesOrgOwnKey(provider)`, as Sunrise 0.20.0 asks of every
+  `logCost` call. Without it, an org's own-key spend would have counted
+  against its cap and the global one.
+
+### Security
+
+- **Sunrise 0.20.0's dependency fix is carried (t-161).** A new `overrides`
+  entry moves `effect` to `^3.22.1` under `@prisma/config` (GHSA-7589-6fvf-x4pw,
+  high, ReDoS; only the Prisma CLI loads it), and `@better-auth/core` is pinned
+  to 1.7.27 to match `better-auth`. When you merge `package.json`, keep both
+  and the `overrideReasons` entry.
+
 ## [0.12.0] — 2026-11-18
 
 > **Twelfth tagged Daybreak release: Sunrise 0.19.0.** It carries Sunrise
