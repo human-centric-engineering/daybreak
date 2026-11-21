@@ -537,6 +537,7 @@ All commands default to branch diff mode but accept file/folder paths. The test-
 | LLM Privacy Layer        | `.context/privacy/llm-privacy-layer.md`                   | Masking personal data before external LLM calls: modes, the adapter seam, why a failed app init refuses, embeddings                              |
 | Tenancy: Org Identity    | `.context/tenancy/identity.md`                            | `Org` / `OrgMembership`, the install-org invariant and its role rule, the lifecycle API and its rules, credential `orgId`, what a fork may add   |
 | Tenancy: Support Access  | `.context/tenancy/support-access.md`                      | An org's consent for vendor support to enter it: `OrgSupportGrant`, who may grant and revoke, levels, bounds, privacy                            |
+| Tenancy: Entitlements    | `.context/tenancy/entitlements.md`                        | Switches an app registers and platform staff set per org; nothing set vs set to none, `whenNothingSet`, why the read fails closed                |
 | Tenancy: Context         | `.context/tenancy/context.md`                             | `getTenantContext` / `runAsOrg` / `runAsSystem` / `forEachOrg`, the guards' read rule, the `x-sunrise-org` resolver seam, the data layer         |
 | Tenancy: Row Isolation   | `.context/tenancy/isolation.md`                           | The `org_isolation` policy, `db:tenancy:enable\|disable`, the required role split + `MIGRATE_DATABASE_URL`, the derived T-series drift probes    |
 | Logging                  | `.context/logging/`                                       | Structured logging, request ctx                                                                                                                  |
@@ -619,6 +620,7 @@ All commands default to branch diff mode but accept file/folder paths. The test-
 | Form Save Errors         | `.context/ui/form-errors.md`                              | `<SaveError>` + `useSaveFailure()`: one way every form shows a failed save, beside Save; `check:save-errors` fails a hand-drawn box              |
 | UI Hooks                 | `.context/ui/hooks.md`                                    | `useLocalStorage`, `useWizard`, `useTimeout`                                                                                                     |
 | Per-Surface Theming      | `.context/ui/surface-theming.md`                          | `data-surface` seam: proxy classification, `<SurfaceSync>`, fork-owned `brand-theme.css`, the six design constraints                             |
+| Interface Languages      | `.context/ui/i18n.md`                                     | next-intl without routing; the catalogue, the locale resolution order, `User.locale` / org default / cookie, named formats, the pseudo-locale    |
 
 ## Troubleshooting
 

@@ -18,7 +18,7 @@ import { logger } from '@/lib/logging';
 import { BRAND } from '@/lib/brand';
 import { getBaseUrl } from '@/lib/api/server-fetch';
 import { sendEmail } from '@/lib/email/send';
-import ProactiveNudgeEmail from '@/emails/proactive-nudge';
+import ProactiveNudgeEmail from '@/emails/framework/proactive-nudge';
 import { listRecentlyNudgedJourneyIds } from '@/lib/framework/facilitation/overlays/queries';
 import { resolveNudgeChannelConfig } from '@/lib/framework/facilitation/overlays/nudge-channel';
 import {

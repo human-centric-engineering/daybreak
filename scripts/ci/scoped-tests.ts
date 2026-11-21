@@ -217,6 +217,14 @@ export const ALWAYS_RUN_TESTS: readonly AlwaysRunEntry[] = [
       'usage module. A new caller is a file no import chain connects to this test (§107 t-752).',
   },
   {
+    path: 'tests/unit/lib/tenancy/liveness-probe-sites.test.ts',
+    reason:
+      'scans every non-test source file in the checkout, root files included, with the ' +
+      'TypeScript scanner for code that names `runAsLivenessProbe` (the debug-logged system ' +
+      'bypass for the database health probe) or star-re-exports its module, and fails naming ' +
+      'any but `lib/db/utils.ts`. A new caller is a file no import chain connects to this test (#1262).',
+  },
+  {
     path: 'tests/unit/scripts/ci/shared-settings-writes.test.ts',
     reason:
       'parses every route and module under app/ and lib/ and fails naming any route ' +
@@ -412,6 +420,14 @@ export const ALWAYS_RUN_TESTS: readonly AlwaysRunEntry[] = [
       'allowlist. The change it exists to catch is a NEW call site — three ' +
       'of those have now written a value that is not a row id (#599, #600, ' +
       '#654), and a fourth would be in a file no import chain connects here.',
+  },
+  {
+    path: 'tests/unit/lib/orchestration/llm/cost-log-own-key.test.ts',
+    reason:
+      'walks the tree for every `logCost` call site and compares what each ' +
+      'passes for `ownKey` against a written roster (§137 t-1046). A new call ' +
+      "site that forgets it counts an org's own vendor bill against the " +
+      "platform's caps, and would be in a file no import chain connects here.",
   },
   {
     path: 'tests/unit/lib/validations/trim-order.test.ts',
